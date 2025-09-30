@@ -204,6 +204,15 @@ function Snapshot(texture, paintingWidth, paintingHeight, resolutionScale) {
     this.resolutionScale = resolutionScale;
 }
 
+// Keep Snapshot helpers prototype-based
+Snapshot.prototype.getTextureWidth = function () {
+    return Math.ceil(this.paintingWidth * this.resolutionScale);
+};
+Snapshot.prototype.getTextureHeight = function () {
+    return Math.ceil(this.paintingHeight * this.resolutionScale);
+};
+
+
 function cursorForResizingSide(side) {
     if (side === ResizingSide.LEFT || side === ResizingSide.RIGHT) {
         return 'ew-resize';
