@@ -1,17 +1,18 @@
 <!DOCTYPE html>
 <html>
-    <head>
-        <meta charset="utf-8">
-        <title>Fluid Paint</title>
 
-        <meta name="description" content="Fluid paint simulation">
+<head>
+    <meta charset="utf-8">
+    <title>Fluid Paint</title>
 
-        <link href='http://fonts.googleapis.com/css?family=Open+Sans:400,300,600,700,800' rel='stylesheet' type='text/css'>
-        <link rel="stylesheet" href="paint.css">
-    </head>
+    <meta name="description" content="Fluid paint simulation">
 
-    <body>
-        <script type="text/template" id="main">
+    <link href='https://fonts.googleapis.com/css?family=Open+Sans:400,300,600,700,800' rel='stylesheet' type='text/css'>
+    <link rel="stylesheet" href="paint.css">
+</head>
+
+<body>
+    <script type="text/template" id="main">
             <div id="ui">
                 <div id="clear-button" class="button">Clear</div><div id="save-button" class="button">Save</div>
 
@@ -50,31 +51,31 @@
             </div>
         </script>
 
-        <script type="text/template" id="no-support">
+    <script type="text/template" id="no-support">
             <div id="no-support-container">
                 <div id="error"></div>
                 <div id="backlink"><a href="http://david.li">Back to david.li</a></div>
             </div>
         </script>
 
-        <div id="placeholder"></div>
+    <div id="placeholder"></div>
 
 
-        <script src="wrappedgl.js"></script>
-        <script src="common.js"></script>
-        <script src="utilities.js"></script>
-        <script src="rectangle.js"></script>
-        <script src="brush.js"></script>
-        <script src="simulator.js"></script>
-        <script src="colorpicker.js"></script>
-        <script src="slider.js"></script>
-        <script src="buttons.js"></script>
-        <script src="brushviewer.js"></script>
-        <script src="paint-setup.js"></script>
-        <script src="paint.js"></script>
+    <script src="wrappedgl.js"></script>
+    <script src="common.js"></script>
+    <script src="utilities.js"></script>
+    <script src="rectangle.js"></script>
+    <script src="brush.js"></script>
+    <script src="simulator.js"></script>
+    <script src="colorpicker.js"></script>
+    <script src="slider.js"></script>
+    <script src="buttons.js"></script>
+    <script src="brushviewer.js"></script>
+    <script src="paint-setup.js"></script>
+    <script src="paint.js"></script>
 
-        <script>
-            'use strict';
+    <script>
+        document.addEventListener("DOMContentLoaded", (event) => {
 
             var canvas = document.createElement('canvas');
             var wgl = WrappedGL.create(canvas);
@@ -92,7 +93,9 @@
                     document.getElementById('error').innerHTML = 'Unfortunately, your browser does not support WebGL floating point textures.';
                 }
             }
-        </script>
+        });
+    </script>
 
-    </body>
+</body>
+
 </html>

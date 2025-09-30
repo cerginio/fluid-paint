@@ -1,0 +1,41 @@
+{
+  "name": "fluid-paint",
+  "version": "1.0.0",
+  "description": "Modernized fluid-paint by david.li",
+  "main": "paint.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cerginio/fluid-paint.git"
+  },
+  "keywords": [
+    "fluid",
+    "paint",
+    "gamification"
+  ],
+  "author": "creg (cerginio)",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/cerginio/fluid-paint/issues"
+  },
+  "homepage": "https://github.com/cerginio/fluid-paint#readme",
+  "scripts": {
+    "dev": "NODE_ENV=development gulp serve",
+    "build": "NODE_ENV=production gulp build",
+    "clean": "gulp clean"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.0",
+    "browser-sync": "^2.29.0",
+    "cssnano": "^6.0.0",
+    "gulp": "^4.0.2",
+    "gulp-concat": "^2.6.1",
+    "gulp-htmlmin": "^5.0.1",
+    "gulp-if": "^3.0.0",
+    "gulp-order": "^1.2.0",
+    "gulp-plumber": "^1.2.1",
+    "gulp-postcss": "^9.0.1",
+    "gulp-replace": "^1.1.4",
+    "gulp-sourcemaps": "^3.0.0",
+    "gulp-terser": "^2.1.0"
+  }
+}
