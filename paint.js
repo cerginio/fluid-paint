@@ -971,7 +971,8 @@ var Paint = (function () {
         imageData.data.set(savePixels);
         saveContext.putImageData(imageData, 0, 0);
 
-        window.open(saveCanvas.toDataURL());
+        // window.open(saveCanvas.toDataURL());
+        save(saveCanvas);
     };
 
     Paint.prototype.onMouseMove = function (event) {
