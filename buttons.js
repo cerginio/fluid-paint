@@ -1,59 +1,55 @@
-var Buttons = (function () {
-    'use strict';
+// ES6 class version of Buttons
 
-    var Buttons = function (element, buttonNames, initialActiveIndex, changeCallback) {
-
-        var elements = [];
-        for (var i = 0; i < buttonNames.length; ++i) {
-            var button = document.createElement('div');
-            button.innerHTML = buttonNames[i];
-            element.appendChild(button);
-            elements.push(button);
-        }
-
-        var activeElement = elements[initialActiveIndex];
-
-        var refresh = function () {
-            for (var i = 0; i < elements.length; ++i) {
-                if (elements[i] === activeElement) {
-                    elements[i].className = 'button-selected';
-                } else {
-                    elements[i].className = 'button-unselected';
-                }
-            }
+class Buttons {
+    /**
+     * @param {HTMLElement} element
+     * @param {string[]} buttonNames
+     * @param {number} initialActiveIndex
+     * @param {(index:number)=>void} changeCallback
+     */
+    constructor(element, buttonNames, initialActiveIndex, changeCallback) {
+      this.element = element;
+      this.changeCallback = changeCallback;
+      this.elements = [];
+      this.activeIndex = initialActiveIndex;
+  
+      // Build buttons
+      for (let i = 0; i < buttonNames.length; ++i) {
+        const btn = document.createElement('div');
+        btn.innerHTML = buttonNames[i];
+        element.appendChild(btn);
+        this.elements.push(btn);
+  
+        const onSelect = (event) => {
+          event.preventDefault();
+          if (this.activeIndex !== i) {
+            this.activeIndex = i;
+            this.changeCallback(i);
+            this.refresh();
+          }
         };
-
-        for (var i = 0; i < elements.length; ++i) {
-            (function () { //create closure to store index
-                var index = i;
-                var clickedElement = elements[i];
-
-                var onSelect = function (event) {
-                    event.preventDefault();
-
-                    if (activeElement !== clickedElement) {
-                        activeElement = clickedElement;
-
-                        changeCallback(index);
-
-                        refresh();
-                    }
-
-                };
-
-                elements[i].addEventListener('click', onSelect);
-                elements[i].addEventListener('touchstart', onSelect);
-            }());
-        }
-
-        this.setIndex = function (index) {
-            activeElement = elements[index];
-
-            refresh();
-        };
-
-        refresh();
-    };
-
-    return Buttons;
-}());
+  
+        btn.addEventListener('click', onSelect);
+        btn.addEventListener('touchstart', onSelect);
+      }
+  
+      this.refresh();
+    }
+  
+    refresh() {
+      for (let i = 0; i < this.elements.length; ++i) {
+        this.elements[i].className =
+          i === this.activeIndex ? 'button-selected' : 'button-unselected';
+      }
+    }
+  
+    // Public API (same as original)
+    setIndex(index) {
+      this.activeIndex = index;
+      this.refresh();
+    }
+  }
+  
+  // If using modules:
+  // export default Buttons;
+  

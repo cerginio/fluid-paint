@@ -1,110 +1,120 @@
-var Slider = (function () {
-    'use strict';
+// ES6 class version of Slider
 
-    var SLIDER_THICKNESS = 2;
-    var LEFT_COLOR = 'white';
-    var RIGHT_COLOR = '#666666';
-    var HANDLE_COLOR = 'white';
+const SLIDER_THICKNESS = 2;
+const LEFT_COLOR = 'white';
+const RIGHT_COLOR = '#666666';
+const HANDLE_COLOR = 'white';
 
-    function Slider (element, initialValue, minValue, maxValue, changeCallback) {
-        var div = element;
+class Slider {
+  /**
+   * @param {HTMLElement} element
+   * @param {number} initialValue
+   * @param {number} minValue
+   * @param {number} maxValue
+   * @param {(val:number)=>void} changeCallback
+   */
+  constructor(element, initialValue, minValue, maxValue, changeCallback) {
+    this.div = element;
+    this.minValue = minValue;
+    this.maxValue = maxValue;
+    this.changeCallback = changeCallback;
 
-        var height = element.offsetHeight;
-        var length = element.offsetWidth;
+    const height = element.offsetHeight;
+    const length = element.offsetWidth;
 
-        var sliderLeftDiv = document.createElement('div');
-        sliderLeftDiv.style.position = 'absolute';
-        sliderLeftDiv.style.width = length + 'px';
-        sliderLeftDiv.style.height = SLIDER_THICKNESS.toFixed(0) + 'px';
-        sliderLeftDiv.style.backgroundColor = LEFT_COLOR;
-        sliderLeftDiv.style.top = (height / 2 - 1) + 'px';
-        sliderLeftDiv.style.zIndex = 999;
-        div.appendChild(sliderLeftDiv);
+    // Track value internally
+    this.value = initialValue;
 
-        var sliderRightDiv = document.createElement('div');
-        sliderRightDiv.style.position = 'absolute';
-        sliderRightDiv.style.width = length + 'px';
-        sliderRightDiv.style.height = SLIDER_THICKNESS.toFixed(0) + 'px';
-        sliderRightDiv.style.backgroundColor = RIGHT_COLOR;
-        sliderRightDiv.style.top = (height / 2 - 1) + 'px';
+    // Left (filled) track
+    const sliderLeftDiv = document.createElement('div');
+    sliderLeftDiv.style.position = 'absolute';
+    sliderLeftDiv.style.width = length + 'px';
+    sliderLeftDiv.style.height = SLIDER_THICKNESS.toFixed(0) + 'px';
+    sliderLeftDiv.style.backgroundColor = LEFT_COLOR;
+    sliderLeftDiv.style.top = height / 2 - 1 + 'px';
+    sliderLeftDiv.style.zIndex = 999;
+    element.appendChild(sliderLeftDiv);
 
-        div.appendChild(sliderRightDiv);
+    // Right (unfilled) track
+    const sliderRightDiv = document.createElement('div');
+    sliderRightDiv.style.position = 'absolute';
+    sliderRightDiv.style.width = length + 'px';
+    sliderRightDiv.style.height = SLIDER_THICKNESS.toFixed(0) + 'px';
+    sliderRightDiv.style.backgroundColor = RIGHT_COLOR;
+    sliderRightDiv.style.top = height / 2 - 1 + 'px';
+    element.appendChild(sliderRightDiv);
 
-        var handleDiv = document.createElement('div');
-        handleDiv.style.position = 'absolute';
-        handleDiv.style.width = height + 'px';
-        handleDiv.style.height = height + 'px';
-        handleDiv.style.borderRadius = height * 0.5 + 'px';
-        handleDiv.style.cursor = 'ew-resize';
-        handleDiv.style.background = HANDLE_COLOR;
-        div.appendChild(handleDiv);
+    // Handle
+    const handleDiv = document.createElement('div');
+    handleDiv.style.position = 'absolute';
+    handleDiv.style.width = height + 'px';
+    handleDiv.style.height = height + 'px';
+    handleDiv.style.borderRadius = height * 0.5 + 'px';
+    handleDiv.style.cursor = 'ew-resize';
+    handleDiv.style.background = HANDLE_COLOR;
+    element.appendChild(handleDiv);
 
-        var value = initialValue; 
+    // Redraw UI from current value
+    const redraw = () => {
+      const fraction = (this.value - this.minValue) / (this.maxValue - this.minValue);
+      sliderLeftDiv.style.width = fraction * length + 'px';
+      sliderRightDiv.style.width = (1.0 - fraction) * length + 'px';
+      sliderRightDiv.style.left = Math.floor(fraction * length) + 'px';
+      handleDiv.style.left = Math.floor(fraction * length) - element.offsetHeight / 2 + 'px';
+    };
 
-        var redraw = function () {
-            var fraction = (value - minValue) / (maxValue - minValue);
+    // Apply a pointer change
+    const onChange = (event) => {
+      const mouseX = Utilities.getMousePosition(event, element).x;
+      this.value = Utilities.clamp(
+        (mouseX / length) * (this.maxValue - this.minValue) + this.minValue,
+        this.minValue,
+        this.maxValue
+      );
 
-            sliderLeftDiv.style.width = fraction * length + 'px';
-            sliderRightDiv.style.width = (1.0 - fraction) * length + 'px';
-            sliderRightDiv.style.left = Math.floor(fraction * length) + 'px';
-            handleDiv.style.left = (Math.floor(fraction * length) - div.offsetHeight / 2) + 'px';
-            sliderRightDiv.width = (1.0 - fraction) * length + 'px';
-        };
+      this.changeCallback(this.value);
+      redraw();
+    };
 
-        var onChange = function (event) {
-            var mouseX = Utilities.getMousePosition(event, div).x;
+    // Events
+    let mousePressed = false;
 
-            value = Utilities.clamp((mouseX / length) * (maxValue - minValue) + minValue, minValue, maxValue);
+    element.addEventListener('mousedown', (event) => {
+      mousePressed = true;
+      onChange(event);
+    });
 
-            changeCallback(value);
+    document.addEventListener('mouseup', () => {
+      mousePressed = false;
+    });
 
-            redraw();
-        };
+    document.addEventListener('mousemove', (event) => {
+      if (mousePressed) onChange(event);
+    });
 
-        var mousePressed = false;
+    element.addEventListener('touchstart', (event) => {
+      event.preventDefault();
+      const firstTouch = event.targetTouches[0];
+      onChange(firstTouch);
+    });
 
-        div.addEventListener('mousedown', function (event) {
-            mousePressed = true;
-            onChange(event);
-        });
+    element.addEventListener('touchmove', (event) => {
+      event.preventDefault();
+      const firstTouch = event.targetTouches[0];
+      onChange(firstTouch);
+    });
 
-        document.addEventListener('mouseup', function (event) {
-            mousePressed = false;
-        });
+    // Public API (same as original)
+    this.setValue = (newValue) => {
+      this.value = newValue;
+      redraw();
+    };
 
-        document.addEventListener('mousemove', function (event) {
-            if (mousePressed) {
-                onChange(event);
-            }
-        });
+    this.getValue = () => this.value;
 
-        div.addEventListener('touchstart', function (event) {
-            event.preventDefault();
+    redraw();
+  }
+}
 
-            var firstTouch = event.targetTouches[0];
-            onChange(firstTouch);
-        });
-
-        div.addEventListener('touchmove', function (event) {
-            event.preventDefault();
-
-            var firstTouch = event.targetTouches[0];
-            onChange(firstTouch);
-        });
-
-        this.setValue = function (newValue) {
-            value = newValue;
-
-            redraw();
-        };
-
-        this.getValue = function () {
-            return value;
-        };
-
-        redraw();
-    }
-
-    return Slider;
-
-}());
+// If using modules:
+// export default Slider;
