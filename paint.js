@@ -257,7 +257,7 @@ class Paint {
             0
         );
 
-        // this.brushViewer = new BrushViewer(wgl, this.brushProgram, 0, 800, 200, 300);
+        this.brushViewer = new BrushViewer(wgl, this.brushProgram, 0, 800, 200, 300);
 
         this.mainProjectionMatrix = makeOrthographicMatrix(
             new Float32Array(16),
@@ -285,7 +285,7 @@ class Paint {
             );
 
             this.colorPicker.bottom = this.canvas.height - COLOR_PICKER_TOP;
-            // this.brushViewer.bottom = this.canvas.height - 800;
+            this.brushViewer.bottom = this.canvas.height - 800;
 
             this.mainProjectionMatrix = makeOrthographicMatrix(
                 new Float32Array(16),
@@ -833,7 +833,7 @@ class Paint {
         this.needsRedraw = false;
 
         this.colorPicker.draw(this.colorModel === ColorModel.RGB);
-        // this.brushViewer.draw(this.brushX, this.brushY, this.brush);
+        this.brushViewer.draw(this.brushX, this.brushY, this.brush);
     }
 
     // what interaction mode would be triggered if we clicked with given mouse position
