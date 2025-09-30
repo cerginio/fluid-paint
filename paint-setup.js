@@ -41,7 +41,7 @@ const QUALITIES = [
 const INITIAL_QUALITY = 1;
 
 
-const INITIAL_PADDING = 100;
+const INITIAL_PADDING = 20;
 const MIN_PAINTING_WIDTH = 300;
 const MAX_PAINTING_WIDTH = 4096; //this is further constrained by the maximum texture size
 
@@ -50,7 +50,7 @@ const MAX_BRISTLE_COUNT = 100;
 const MIN_BRISTLE_COUNT = 10;
 const MIN_BRUSH_SCALE = 5;
 const MAX_BRUSH_SCALE = 75;
-const BRUSH_HEIGHT = 2.0; //how high the brush is over the canvas - this is scaled with the brushScale
+const BRUSH_HEIGHT = 3.0; //how high the brush is over the canvas - this is scaled with the brushScale
 const Z_THRESHOLD = 0.13333; //this is scaled with the brushScale
 
 

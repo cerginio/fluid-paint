@@ -93,6 +93,49 @@ class Paint {
             { a_position: 0 }
         );
 
+        // Simple fullscreen pass that draws only the border of a given rectangle.
+        // Uses gl_FragCoord in pixel space, so we can set thickness in pixels.
+        this.rectOutlineProgram = wgl.createProgram(
+            shaderSources['shaders/fullscreen.vert'],
+            `
+    precision mediump float;
+  
+    uniform vec2 u_bottomLeft;    // rectangle bottom-left in screen pixels
+    uniform vec2 u_topRight;      // rectangle top-right  in screen pixels
+    uniform float u_thickness;    // border thickness in pixels
+    uniform vec4 u_color;         // RGBA for the outline
+  
+    void main() {
+      vec2 p = gl_FragCoord.xy;
+      // quick reject if outside the rectangle's bounding box extended by thickness
+      if (p.x < u_bottomLeft.x - u_thickness || p.x > u_topRight.x + u_thickness ||
+          p.y < u_bottomLeft.y - u_thickness || p.y > u_topRight.y + u_thickness) {
+        discard;
+      }
+  
+      // near any of the four edges?
+      bool onLeft   = abs(p.x - u_bottomLeft.x) <= u_thickness && p.y >= u_bottomLeft.y - u_thickness && p.y <= u_topRight.y + u_thickness;
+      bool onRight  = abs(p.x - u_topRight.x)   <= u_thickness && p.y >= u_bottomLeft.y - u_thickness && p.y <= u_topRight.y + u_thickness;
+      bool onBottom = abs(p.y - u_bottomLeft.y) <= u_thickness && p.x >= u_bottomLeft.x - u_thickness && p.x <= u_topRight.x + u_thickness;
+      bool onTop    = abs(p.y - u_topRight.y)   <= u_thickness && p.x >= u_bottomLeft.x - u_thickness && p.x <= u_topRight.x + u_thickness;
+  
+      if (onLeft || onRight || onBottom || onTop) {
+        gl_FragColor = u_color;
+      } else {
+        discard;
+      }
+    }
+    `,
+            { a_position: 0 }
+        );
+
+        // Optional toggles / defaults
+        this.showPaintingRect = true;          // set false if you want to hide
+        this.paintingRectThickness = 2.0;      // pixels
+        // this.paintingRectColor = [1, 1, 1, 0.9]; // [0, 0, 0, 0.9]; // white | black, 90% opacity 
+        this.paintingRectColor = hexToRgba01('#0ea5e9', 1); 
+
+
         this.quadVertexBuffer = wgl.createBuffer();
         wgl.bufferData(
             this.quadVertexBuffer,
@@ -265,7 +308,7 @@ class Paint {
             this.canvas.width,
             0,
             this.canvas.height,
-            -5000.0,
+            -5000.0,// TODO: debug mainProjectionMatrix influence on bristels
             5000.0
         );
 
@@ -486,6 +529,8 @@ class Paint {
         }
     }
 
+
+
     update() {
         const wgl = this.wgl;
 
@@ -698,6 +743,32 @@ class Paint {
         wgl.drawArrays(outputDrawState, wgl.TRIANGLE_STRIP, 0, 4);
 
         this.drawShadow(PAINTING_SHADOW_ALPHA, clippedPaintingRectangle); // draw painting shadow
+        // --- draw the paintingRectangle outline (preview-aware) ---
+        if (this.showPaintingRect) {
+            // While resizing, show the preview rectangle; otherwise the current one
+            const r = (this.interactionState === InteractionMode.RESIZING && this.newPaintingRectangle)
+                ? this.newPaintingRectangle
+                : this.paintingRectangle;
+
+            const outline = wgl
+                .createDrawState()
+                .viewport(0, 0, this.canvas.width, this.canvas.height)
+                .useProgram(this.rectOutlineProgram)
+                .enable(wgl.BLEND)
+                .blendFunc(wgl.ONE, wgl.ONE_MINUS_SRC_ALPHA)
+                .vertexAttribPointer(this.quadVertexBuffer, 0, 2, wgl.FLOAT, wgl.FALSE, 0, 0)
+                .uniform2f('u_bottomLeft', r.left, r.bottom)
+                .uniform2f('u_topRight', r.getRight(), r.getTop())
+                .uniform1f('u_thickness', this.paintingRectThickness)
+                .uniform4f('u_color',
+                    this.paintingRectColor[0],
+                    this.paintingRectColor[1],
+                    this.paintingRectColor[2],
+                    this.paintingRectColor[3]
+                );
+
+            wgl.drawArrays(outline, wgl.TRIANGLE_STRIP, 0, 4);
+        }
 
         // draw brush to screen
         if (
@@ -994,7 +1065,7 @@ class Paint {
             this.brush.initialize(
                 this.brushX,
                 this.brushY,
-                BRUSH_HEIGHT * this.brushScale,
+                BRUSH_HEIGHT * this.brushScale,// TODO: x pen pressure 
                 this.brushScale
             );
             this.brushInitialized = true;
@@ -1008,6 +1079,7 @@ class Paint {
             this.paintingRectangle.left += deltaX;
             this.paintingRectangle.bottom += deltaY;
 
+            // TODO: debug paintingRectangle
             this.paintingRectangle.left = Utilities.clamp(
                 this.paintingRectangle.left,
                 -this.paintingRectangle.width,

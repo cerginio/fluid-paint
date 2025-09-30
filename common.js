@@ -46,6 +46,13 @@ function makeBlurShader(width) {
 
   return shader;
 }
+const hexToRgba01 = (hex, a=1) => {
+  const n = hex.replace('#','');
+  const r = parseInt(n.slice(0,2),16)/255;
+  const g = parseInt(n.slice(2,4),16)/255;
+  const b = parseInt(n.slice(4,6),16)/255;
+  return [r,g,b,a];
+};
 
 
 function hsvToRyb(h, s, v) {

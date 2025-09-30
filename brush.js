@@ -8,7 +8,7 @@ const BRISTLE_LENGTH = 4.5; // relative to a scale of 1
 const BRISTLE_JITTER = 0.5;
 
 const ITERATIONS = 20;
-const GRAVITY = 30.0;
+const GRAVITY = 10.0;
 const BRUSH_DAMPING = 0.75;
 const STIFFNESS_VARIATION = 0.3;
 
