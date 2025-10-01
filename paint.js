@@ -133,7 +133,7 @@ class Paint {
         this.showPaintingRect = true;          // set false if you want to hide
         this.paintingRectThickness = 2.0;      // pixels
         // this.paintingRectColor = [1, 1, 1, 0.9]; // [0, 0, 0, 0.9]; // white | black, 90% opacity 
-        this.paintingRectColor = hexToRgba01('#0ea5e9', 1); 
+        this.paintingRectColor = hexToRgba01('#0ea5e9', 1);
 
 
         this.quadVertexBuffer = wgl.createBuffer();
@@ -300,7 +300,7 @@ class Paint {
             0
         );
 
-        this.brushViewer = new BrushViewer(wgl, this.brushProgram, 0, 800, 200, 300);
+        this.brushViewer = new BrushViewer(wgl, this.brushProgram, canvas.width - 250, 20, 250, 150);
 
         this.mainProjectionMatrix = makeOrthographicMatrix(
             new Float32Array(16),
@@ -328,7 +328,7 @@ class Paint {
             );
 
             this.colorPicker.bottom = this.canvas.height - COLOR_PICKER_TOP;
-            this.brushViewer.bottom = this.canvas.height - 800;
+            this.brushViewer.bottom = this.canvas.height - 150;
 
             this.mainProjectionMatrix = makeOrthographicMatrix(
                 new Float32Array(16),
@@ -578,6 +578,9 @@ class Paint {
         }
 
         this.save = () => {
+            //reset attributes so nothing gets saved if we hit an error somewhere
+            this.saveButton.removeAttribute('download');
+            this.saveButton.setAttribute('href', '#');
             //we first render the painting to a WebGL texture
             var wgl = this.wgl;
 
@@ -625,6 +628,8 @@ class Paint {
             //then we draw the pixels to a 2D canvas and then save from the canvas
             //is there a better way?
 
+
+
             var saveCanvas = document.createElement('canvas');
             saveCanvas.width = saveWidth;
             saveCanvas.height = saveHeight;
@@ -634,22 +639,8 @@ class Paint {
             imageData.data.set(savePixels);
             saveContext.putImageData(imageData, 0, 0);
 
-            // window.open(saveCanvas.toDataURL());
-            _save(saveCanvas);
-
-            function _save(canvas, filename = 'image.png') {
-                canvas.toBlob((blob) => {
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = filename;           // triggers a download instead of navigation
-                    document.body.appendChild(a);
-                    a.click();
-                    a.remove();
-                    URL.revokeObjectURL(url);
-                }, 'image/png');
-            };
-
+            this.saveButton.setAttribute('download', 'painting.png');
+            this.saveButton.setAttribute('href', saveCanvas.toDataURL());
         }
 
         const simulationUpdated = this.simulator.simulate();
@@ -904,7 +895,12 @@ class Paint {
         this.needsRedraw = false;
 
         this.colorPicker.draw(this.colorModel === ColorModel.RGB);
-        this.brushViewer.draw(this.brushX, this.brushY, this.brush);
+        const splatColor = hsvToRyb(
+            this.brushColorHSVA[0],
+            this.brushColorHSVA[1],
+            this.brushColorHSVA[2]
+        );
+        this.brushViewer.draw(this.brushX, this.brushY, this.brush, splatColor);
     }
 
     // what interaction mode would be triggered if we clicked with given mouse position
