@@ -16,7 +16,7 @@ const htmlmin = require('gulp-htmlmin');
 const gulpIf = require('gulp-if');
 const browserSync = require('browser-sync').create();
 
-const isProd = process.env.NODE_ENV === 'production';
+const isProd = false;// process.env.NODE_ENV === 'production';
 
 const paths = {
   src: '.',
@@ -39,7 +39,7 @@ const paths = {
     'brushviewer.js',
     'paint-setup.js',
     'paint.js'
-    
+
   ],
   shaders: 'shaders/**/*.{glsl,frag,vert}',
   html: 'index.html',
@@ -131,6 +131,24 @@ function staticFiles() {
     .pipe(dest(paths.dist));
 }
 
+// ---------- DEV COPY ----------
+function dev() {
+  return src([
+    '**/*',
+    '!node_modules/**',
+    '!dist/**',
+    '!.git/**',
+    '!**/*.md',
+    '!LICENSE',
+    '!.gitignore',
+    '!package*',
+    '!LICENSE.*',
+    '!gulpfile.js',
+
+  ], { dot: true })
+    .pipe(dest(paths.dist));
+}
+
 // ---------- SERVE ----------
 function serve() {
   browserSync.init({
@@ -141,7 +159,7 @@ function serve() {
 
   // initial build
   const initial = parallel(html, styles, shaders, scripts);
-  initial(() => {});
+  initial(() => { });
 
   watch(paths.html, html);
   watch(paths.css, styles);
@@ -161,4 +179,5 @@ exports.shaders = shaders;
 exports.html = html;
 exports.build = build;
 exports.serve = serve;
+exports.dev = dev;
 exports.default = build;
