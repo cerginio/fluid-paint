@@ -65,29 +65,53 @@
     <script src="paint-setup.js"></script>
     <script src="paint.js"></script>
 
-    <script>
-        document.addEventListener("DOMContentLoaded", (event) => {
-
+    <script>document.addEventListener('DOMContentLoaded', () => {
             const canvas = document.createElement('canvas');
             const wgl = WrappedGL.create(canvas);
+            document.body.appendChild(canvas);
+            // Ensure CSS size exists; style as you like:
+            if (!canvas.style.width) canvas.style.width = '100vw';
+            if (!canvas.style.height) canvas.style.height = '100vh';
 
-            if (wgl !== null && wgl.hasFloatTextureSupport()) {
-                //required features are supported
-                document.body.appendChild(canvas);
-                document.getElementById('placeholder').outerHTML = document.getElementById('main').innerHTML;
-                const painter = new Paint(canvas, wgl);
-                runWebGLSelfTest(wgl.gl)
-            } else {
-                //required features unsupported
-                document.getElementById('placeholder').outerHTML = document.getElementById('no-support').innerHTML;
 
-                if (wgl === null) {
-                    document.getElementById('error').innerHTML = 'Unfortunately, your browser does not support WebGL.';
+            const doResize = () => resizeCanvasToCSS(canvas, wgl.gl);
+            window.addEventListener('resize', doResize, { passive: true });
+            window.addEventListener('orientationchange', doResize, { passive: true });
+            doResize(); // initial
+            (async () => {
+                // TEST
+                // const results = await runWebGLUsageSelfTest({
+                //     canvas,
+                //     gl: wgl.gl,
+                //     getPaintingRect: () => ({
+                //         left: 0,
+                //         bottom: 0,
+                //         width: canvas.width,
+                //         height: canvas.height
+                //     })
+                // });
+                // console.table(results);
+
+                if (wgl !== null && wgl.hasFloatTextureSupport()) {
+
+                    //required features are supported
+                    document.getElementById('placeholder').outerHTML = document.getElementById('main').innerHTML;
+                    const painter = new Paint(canvas, wgl);
+                    runWebGLSelfTest(wgl.gl)
                 } else {
-                    document.getElementById('error').innerHTML = 'Unfortunately, your browser does not support WebGL floating point textures.';
+                    //required features unsupported
+                    document.getElementById('placeholder').outerHTML = document.getElementById('no-support').innerHTML;
+
+                    if (wgl === null) {
+                        document.getElementById('error').innerHTML = 'Unfortunately, your browser does not support WebGL.';
+                    } else {
+                        document.getElementById('error').innerHTML = 'Unfortunately, your browser does not support WebGL floating point textures.';
+                    }
                 }
-            }
+
+            })().catch(err => console.error(err));
         });
+
     </script>
 
 </body>

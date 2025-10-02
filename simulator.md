@@ -382,3 +382,184 @@ Do the three concrete changes first:
 3. Verify bottom-origin painting rect and pointer mapping.
 
 Then run your corner-tap test again. If anything still looks off, flip `DEBUG.forceCenterSplat` ON and tell me what you see; we’ll zero in on the exact line to change.
+
+
+---
+Great—those results are super helpful. Two things jump out:
+
+1. **Canvas drawing-buffer is still 300×150 (default).**
+   This alone can make everything look like it’s “pulled” toward the bottom-left on high-DPR mobiles because your paint space / splat mapping are in **drawing-buffer pixels**, but pointer/rect math is coming from **CSS pixels**. If the drawing buffer is smaller, your quads end up clumped near `(0,0)`.
+
+2. **Randoms sampling test says “keep +0.5 center sampling.”**
+   Not the root cause here, but worth locking in.
+
+Everything else (VTF, renderability, viewport/scissor discipline, painting rect origin) looks fine on the A52.
+
+Below are the exact fixes / patches.
+
+---
+
+## 1) Fix the canvas size (most likely root cause)
+
+Add a **resize** util and call it at startup *and* on resize / orientation change. After changing the drawing buffer, you **must** reset the viewport.
+
+```js
+function resizeCanvasToCSS(canvas, gl) {
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = Math.max(1, Math.floor(canvas.clientWidth  || canvas.width  || 300));
+  const cssH = Math.max(1, Math.floor(canvas.clientHeight || canvas.height || 150));
+  const newW = Math.floor(cssW * dpr);
+  const newH = Math.floor(cssH * dpr);
+  if (canvas.width !== newW || canvas.height !== newH) {
+    canvas.width  = newW;
+    canvas.height = newH;
+    // Screen (default framebuffer) viewport must match the new drawing buffer size.
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, newW, newH);
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const canvas = document.querySelector('canvas') || document.body.appendChild(document.createElement('canvas'));
+  // Ensure CSS size exists; style as you like:
+  if (!canvas.style.width)  canvas.style.width  = '100vw';
+  if (!canvas.style.height) canvas.style.height = '100vh';
+
+  const wgl = WrappedGL.create(canvas);
+  const gl = wgl.gl;
+
+  const doResize = () => resizeCanvasToCSS(canvas, gl);
+  window.addEventListener('resize', doResize, { passive: true });
+  window.addEventListener('orientationchange', doResize, { passive: true });
+  doResize(); // initial
+
+  // … continue boot (create brush/sim/etc) AFTER doResize so sizes/uniforms are correct
+});
+```
+
+**Also:** whenever you render to an **offscreen FBO**, you already verified you set the viewport per-target—keep doing that:
+
+```js
+gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+gl.viewport(0, 0, targetWidth, targetHeight);
+gl.disable(gl.SCISSOR_TEST);
+```
+
+---
+
+## 2) Make sure your painting rect is in **drawing-buffer pixels** (bottom-origin)
+
+Since your test showed the outline is correct, just double-check the rect is derived from the **current** drawing buffer (after resize):
+
+```js
+// Example: full-canvas paint area (bottom-origin)
+function getPaintingRect(gl) {
+  return {
+    left: 0,
+    bottom: 0,
+    width: gl.canvas.width,
+    height: gl.canvas.height
+  };
+}
+
+// When setting uniforms:
+const rect = getPaintingRect(gl);
+program.uniform2f('u_paintingPosition',   rect.left,  rect.bottom);
+program.uniform2f('u_paintingDimensions', rect.width, rect.height);
+```
+
+And pointer mapping should convert from CSS → drawing buffer with **bottom-origin y**:
+
+```js
+function pointerToCanvas(ev, canvas) {
+  const rect = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const x = (ev.clientX - rect.left) * (canvas.width  / rect.width);
+  const yTop = (ev.clientY - rect.top) * (canvas.height / rect.height);
+  const y = canvas.height - yTop;
+  return { x, y };
+}
+```
+
+---
+
+## 3) Lock in the safe randoms sampling (+0.5) and unpack alignment
+
+You saw “NOK” for the “edge vs center” difference—so keep center sampling; it’s correct across GPUs:
+
+```glsl
+// shaders/setbristles.frag
+vec2 coordinates = (gl_FragCoord.xy + 0.5) / u_resolution; // center sampling
+vec4 randoms = texture2D(u_randomsTexture, coordinates);
+```
+
+Before uploading your randoms buffer in JS:
+
+```js
+gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1); // avoids row padding issues
+```
+
+---
+
+## 4) Quick verification checklist
+
+1. **Open dev console** on the A52 and run your self-test again:
+   “Canvas drawing-buffer size” should now report something like `1080x2400` (or whatever CSS×DPR is on that device). Status should be **OK**.
+
+2. **Draw the red painting rect overlay** again after resize; it should cover the whole paintable area on screen.
+
+3. **Tap 4 corners**: bristles should no longer all bias towards bottom-left.
+   If they still do: toggle your debug bypass `FORCE_CENTER_SPLAT` (splat.vert) for one frame:
+
+   * If that fixes the visual, the issue is still **mapping/viewport** in the splat path.
+   * If not, we’ll peek at the exact uniforms bound for the splat draw (sampler units and rect values).
+
+---
+
+## 5) (Optional) Harden per-draw state
+
+Mobile drivers are unforgiving. Right before each draw:
+
+```js
+// Screen draws
+gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+gl.disable(gl.SCISSOR_TEST);
+
+// Offscreen draws (you already do this, but be religious about it)
+gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+gl.viewport(0, 0, targetW, targetH);
+gl.disable(gl.SCISSOR_TEST);
+
+// Samplers: set every draw
+gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, brush.positionsTexture);
+gl.uniform1i(u_positionsTexture, 0);
+gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, brush.previousPositionsTexture);
+gl.uniform1i(u_previousPositionsTexture, 1);
+// …and so on for other samplers
+```
+
+---
+
+### TL;DR
+
+* **Fix the canvas drawing buffer size** (and reset the viewport): that’s the big red flag in your log and the most plausible cause of the bottom-left bias.
+* Keep **center sampling** for randoms and **UNPACK_ALIGNMENT=1**.
+* Your painting rect origin and FBO writes look good—keep those habits.
+
+Do those changes, run the same JSON self-test again, and if anything still acts up, paste the updated table + a quick console log of `gl.canvas.width/height` and the `u_paintingPosition/Dimensions` you send during the splat draw. We’ll zero in on anything left.
+
+
+
+---
+
+brush js attempt to debug positionsTexture
+```js
+        // Assuming you have these around:
+        const texW = this.maxBristleCount;          // texture width  = bristles
+        const texH = VERTICES_PER_BRISTLE;     // texture height = segments per bristle
+        const brushScale = this.brushScale;       // whatever you pass into shaders
+        const bristleLen = BRISTLE_LENGTH;
+    
+        this.dbg.showPositions(this.positionsTexture, texW, texH, brushScale,bristleLen);
+```
