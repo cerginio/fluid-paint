@@ -982,7 +982,7 @@ class Paint {
         if (event.preventDefault) event.preventDefault();
 
         // Only handle primary button for mouse; accept pen/touch
-        if (event.pointerType === 'mouse' && event.button !== 0) return;
+        // if (event.pointerType === 'mouse' && event.button !== 0) return;
 
         const position = Utilities.getMousePosition(event, this.canvas);
         const mouseX = position.x;

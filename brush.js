@@ -1,7 +1,7 @@
 // ES6 class version of Brush
 
 const N_PREVIOUS_SPEEDS = 15; // how many previous speeds we store
-const SPLATS_PER_SEGMENT = 8;
+const SPLATS_PER_SEGMENT = 18;
 
 const VERTICES_PER_BRISTLE = 10;
 const BRISTLE_LENGTH = 4.5; // relative to a scale of 1
@@ -16,6 +16,9 @@ const STIFFNESS_VARIATION = 0.3;
 class Brush {
   constructor(wgl, shaderSources, maxBristleCount) {
     this.wgl = wgl;
+
+    const gl = wgl.gl || wgl;
+    this.dbg = makeDebugVisualizer(gl, gl.canvas);
 
     this.maxBristleCount = maxBristleCount;
     this.bristleCount = maxBristleCount; // number of bristles currently being used
@@ -76,6 +79,7 @@ class Brush {
       null, wgl.CLAMP_TO_EDGE, wgl.CLAMP_TO_EDGE, wgl.LINEAR, wgl.LINEAR
     );
 
+   
     // texture coordinates for each (bristle, vertex)
     const brushTextureCoordinates = [];
     for (let bristle = 0; bristle < maxBristleCount; ++bristle) {
@@ -85,7 +89,7 @@ class Brush {
         brushTextureCoordinates.push(tx, ty);
       }
     }
-
+    console.log(brushTextureCoordinates);
     this.brushTextureCoordinatesBuffer = wgl.createBuffer();
     wgl.bufferData(
       this.brushTextureCoordinatesBuffer,
@@ -225,7 +229,6 @@ class Brush {
       this.positionsTexture,
       0
     );
-
     wgl.drawArrays(setBristlesDrawState, wgl.TRIANGLE_STRIP, 0, 4);
   }
 
@@ -326,6 +329,7 @@ class Brush {
       0
     );
     wgl.drawArrays(projectDrawState, wgl.TRIANGLE_STRIP, 0, 4);
+
 
     // set bristle bases (first vertex/row)
     const setBristlesDrawState = wgl
@@ -509,6 +513,15 @@ class Brush {
 
     Utilities.swap(this, 'previousPositionsTexture', 'positionsTexture');
     Utilities.swap(this, 'positionsTexture', 'projectedPositionsTexture');
+
+
+        // Assuming you have these around:
+        const texW = this.maxBristleCount;          // texture width  = bristles
+        const texH = VERTICES_PER_BRISTLE;     // texture height = segments per bristle
+        const brushScale = this.brushScale;       // whatever you pass into shaders
+        const bristleLen = BRISTLE_LENGTH;
+    
+        this.dbg.showPositions(this.positionsTexture, texW, texH, brushScale,bristleLen);
   }
 }
 

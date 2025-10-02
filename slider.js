@@ -78,7 +78,7 @@ class Slider {
 
     // Events
     let mousePressed = false;
-
+// TODO: pointer api
     element.addEventListener('mousedown', (event) => {
       mousePressed = true;
       onChange(event);
