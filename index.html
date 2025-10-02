@@ -41,13 +41,14 @@
     <div id="footer">
         <a href="http://david.li">david.li</a> | <a href="http://github.com/dli/paint">Origin code</a>
     </div>
-</script>
-    <script type="text/template" id="no-support">
-    <div id="no-support-container">
-        <div id="error"></div>
-        <div id="backlink"><a href="/">Back to root</a></div>
-    </div>
-</script>
+
+    </script>
+        <script type="text/template" id="no-support">
+        <div id="no-support-container">
+            <div id="error"></div>
+            <div id="backlink"><a href="/">Back to root</a></div>
+        </div>
+    </script>
 
     <div id="placeholder"></div>
 
@@ -69,17 +70,16 @@
             const canvas = document.createElement('canvas');
             const wgl = WrappedGL.create(canvas);
             document.body.appendChild(canvas);
-            // Ensure CSS size exists; style as you like:
-            if (!canvas.style.width) canvas.style.width = '100vw';
-            if (!canvas.style.height) canvas.style.height = '100vh';
+            // PATCH#2: Ensure CSS size exists; style as you like:
+            // if (!canvas.style.width) canvas.style.width = '100vw';
+            // if (!canvas.style.height) canvas.style.height = '100vh';
+            // const doResize = () => resizeCanvasToCSS(canvas, wgl.gl);
+            // window.addEventListener('resize', doResize, { passive: true });
+            // window.addEventListener('orientationchange', doResize, { passive: true });
+            // doResize(); // initial
 
-
-            const doResize = () => resizeCanvasToCSS(canvas, wgl.gl);
-            window.addEventListener('resize', doResize, { passive: true });
-            window.addEventListener('orientationchange', doResize, { passive: true });
-            doResize(); // initial
             (async () => {
-                // TEST
+                // PATCH#1: TEST
                 // const results = await runWebGLUsageSelfTest({
                 //     canvas,
                 //     gl: wgl.gl,
@@ -113,7 +113,5 @@
         });
 
     </script>
-
 </body>
-
 </html>
