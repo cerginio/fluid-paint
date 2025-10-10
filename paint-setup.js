@@ -5,6 +5,10 @@ const InteractionMode = {
     PANNING: 3
 };
 
+const PaintState = {
+    showPanel: true,
+};
+
 const ResizingSide = {
     NONE: 0,
     LEFT: 1,

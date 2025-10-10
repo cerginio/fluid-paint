@@ -70,6 +70,12 @@ function makeYRotationMatrix(m, angle) {
     return m;
 }
 
+
+// h in [0,1], s,v in [0,1]
+function fixHueForPreview(h) {
+    return 1.0 - h; // перевертання: CW ↔ CCW
+}
+
 // --- class ---
 class BrushViewer {
     /**

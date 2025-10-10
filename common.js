@@ -55,6 +55,22 @@ function hexToRgba01(hex, a = 1) {
   const b = parseInt(n.slice(4, 6), 16) / 255;
   return [r, g, b, a];
 };
+// h in [0,1] (or any real; it wraps), s,v in [0,1]
+// returns r,g,b in [0,1]
+function hsvToRgb(h, s, v) {
+  h = ((h % 1) + 1) % 1;       // wrap h to [0,1)
+  const c = v * s;
+  const hDash = h * 6;
+  const x = c * (1 - Math.abs((hDash % 2) - 1));
+  const i = Math.floor(hDash);
+
+  let r = [c, x, 0, 0, x, c][i];
+  let g = [x, c, c, x, 0, 0][i];
+  let b = [0, 0, x, c, c, x][i];
+
+  const m = v - c;
+  return [r + m, g + m, b + m];
+}
 
 
 function hsvToRyb(h, s, v) {
@@ -146,6 +162,8 @@ const shaderFiles = [
   'shaders/jacobi.frag',
   'shaders/subtract.frag',
   'shaders/resize.frag',
+  
+  'shaders/rectborder.frag',
 
   'shaders/project.frag',
   'shaders/distanceconstraint.frag',

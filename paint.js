@@ -97,35 +97,8 @@ class Paint {
         // Uses gl_FragCoord in pixel space, so we can set thickness in pixels.
         this.rectOutlineProgram = wgl.createProgram(
             shaderSources['shaders/fullscreen.vert'],
-            `
-    precision mediump float;
-  
-    uniform vec2 u_bottomLeft;    // rectangle bottom-left in screen pixels
-    uniform vec2 u_topRight;      // rectangle top-right  in screen pixels
-    uniform float u_thickness;    // border thickness in pixels
-    uniform vec4 u_color;         // RGBA for the outline
-  
-    void main() {
-      vec2 p = gl_FragCoord.xy;
-      // quick reject if outside the rectangle's bounding box extended by thickness
-      if (p.x < u_bottomLeft.x - u_thickness || p.x > u_topRight.x + u_thickness ||
-          p.y < u_bottomLeft.y - u_thickness || p.y > u_topRight.y + u_thickness) {
-        discard;
-      }
-  
-      // near any of the four edges?
-      bool onLeft   = abs(p.x - u_bottomLeft.x) <= u_thickness && p.y >= u_bottomLeft.y - u_thickness && p.y <= u_topRight.y + u_thickness;
-      bool onRight  = abs(p.x - u_topRight.x)   <= u_thickness && p.y >= u_bottomLeft.y - u_thickness && p.y <= u_topRight.y + u_thickness;
-      bool onBottom = abs(p.y - u_bottomLeft.y) <= u_thickness && p.x >= u_bottomLeft.x - u_thickness && p.x <= u_topRight.x + u_thickness;
-      bool onTop    = abs(p.y - u_topRight.y)   <= u_thickness && p.x >= u_bottomLeft.x - u_thickness && p.x <= u_topRight.x + u_thickness;
-  
-      if (onLeft || onRight || onBottom || onTop) {
-        gl_FragColor = u_color;
-      } else {
-        discard;
-      }
-    }
-    `,
+            shaderSources['shaders/rectborder.frag'],
+    
             { a_position: 0 }
         );
 
@@ -223,6 +196,8 @@ class Paint {
         this.colorModel = ColorModel.RYB;
 
         this.needsRedraw = true; // whether we need to redraw the painting
+
+        document.getElementById('ui').style.display = PaintState.showPanel ? '' : 'none';
 
         this.brush = new Brush(wgl, shaderSources, MAX_BRISTLE_COUNT);
 
@@ -401,21 +376,37 @@ class Paint {
         // Wheel (brush size) – scoped to canvas
         canvas.addEventListener('wheel', this.onWheel.bind(this), { passive: false });
 
-        // Keyboard
-        document.addEventListener('keydown', (event) => {
-            if (event.keyCode === 32) {
-                this.spaceDown = true;
-            } else if (event.keyCode === 90) {
-                this.undo();
-            } else if (event.keyCode === 82) {
-                this.redo();
+        document.addEventListener('keydown', (e) => {
+            if (e.repeat) return; // ignore auto-repeats if you want single-fire actions
+
+            switch (e.code) {
+                case 'Space':
+                    this.spaceDown = true;
+                    e.preventDefault(); // stop page scroll
+                    break;
+
+                case 'KeyZ':
+                    this.undo();
+                    break;
+
+                case 'KeyY':
+                    this.redo();
+                    break;
+
+                default:
+                    break;
             }
         });
 
-        document.addEventListener('keyup', (event) => {
-            if (event.keyCode === 32) {
+        document.addEventListener('keyup', (e) => {
+            if (e.code === 'Space') {
                 this.spaceDown = false;
+                e.preventDefault();
             }
+        });
+
+        canvas.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
         });
 
         // --- Action buttons ---
@@ -448,6 +439,15 @@ class Paint {
             this.redoButton.addEventListener('pointerdown', (event) => {
                 event.preventDefault();
                 this.redo();
+            });
+        }
+
+        this.panelButton = document.getElementById('panel-button');
+        if (this.panelButton) {
+            this.panelButton.addEventListener('pointerdown', (event) => {
+                event.preventDefault();
+                PaintState.showPanel = !PaintState.showPanel;
+                document.getElementById('ui').style.display = PaintState.showPanel ? '' : 'none';
             });
         }
 
@@ -528,7 +528,6 @@ class Paint {
             }
         }
     }
-
 
 
     update() {
@@ -628,8 +627,6 @@ class Paint {
             //then we draw the pixels to a 2D canvas and then save from the canvas
             //is there a better way?
 
-
-
             var saveCanvas = document.createElement('canvas');
             saveCanvas.width = saveWidth;
             saveCanvas.height = saveHeight;
@@ -683,7 +680,6 @@ class Paint {
                         ? this.resizingPaintingProgramRGB
                         : this.paintingProgramRGB;
             }
-
             const paintingDrawState = wgl
                 .createDrawState()
                 .bindFramebuffer(this.framebuffer)
@@ -722,6 +718,7 @@ class Paint {
                 );
 
             wgl.drawArrays(paintingDrawState, wgl.TRIANGLE_STRIP, 0, 4);
+
         }
 
         // output painting to screen
@@ -731,9 +728,11 @@ class Paint {
             .useProgram(this.outputProgram)
             .uniformTexture('u_input', 0, wgl.TEXTURE_2D, this.canvasTexture)
             .vertexAttribPointer(this.quadVertexBuffer, 0, 2, wgl.FLOAT, wgl.FALSE, 0, 0);
+
         wgl.drawArrays(outputDrawState, wgl.TRIANGLE_STRIP, 0, 4);
 
         this.drawShadow(PAINTING_SHADOW_ALPHA, clippedPaintingRectangle); // draw painting shadow
+
         // --- draw the paintingRectangle outline (preview-aware) ---
         if (this.showPaintingRect) {
             // While resizing, show the preview rectangle; otherwise the current one
@@ -825,6 +824,9 @@ class Paint {
                 desiredCursor = 'pointer';
             }
         }
+        if (!PaintState.showPanel) {
+            desiredCursor = 'default';
+        }
 
         if (this.canvas.style.cursor !== desiredCursor) {
             this.canvas.style.cursor = desiredCursor;
@@ -875,37 +877,39 @@ class Paint {
                 .uniform2f('u_step', 0, PANEL_BLUR_STRIDE);
             wgl.drawArrays(blurDrawState, wgl.TRIANGLE_STRIP, 0, 4);
         }
+        if (PaintState.showPanel) {
+            // draw panel to screen
+            const panelDrawState = wgl
+                .createDrawState()
+                .viewport(0, panelBottom, PANEL_WIDTH, PANEL_HEIGHT)
+                .uniformTexture('u_canvasTexture', 0, wgl.TEXTURE_2D, this.blurredCanvasTexture)
+                .uniform2f('u_canvasResolution', this.canvas.width, this.canvas.height)
+                .uniform2f('u_panelResolution', PANEL_WIDTH, PANEL_HEIGHT)
+                .useProgram(this.panelProgram)
+                .vertexAttribPointer(this.quadVertexBuffer, 0, 2, wgl.FLOAT, wgl.FALSE, 0, 0);
+            wgl.drawArrays(panelDrawState, wgl.TRIANGLE_STRIP, 0, 4);
 
-        // draw panel to screen
-        const panelDrawState = wgl
-            .createDrawState()
-            .viewport(0, panelBottom, PANEL_WIDTH, PANEL_HEIGHT)
-            .uniformTexture('u_canvasTexture', 0, wgl.TEXTURE_2D, this.blurredCanvasTexture)
-            .uniform2f('u_canvasResolution', this.canvas.width, this.canvas.height)
-            .uniform2f('u_panelResolution', PANEL_WIDTH, PANEL_HEIGHT)
-            .useProgram(this.panelProgram)
-            .vertexAttribPointer(this.quadVertexBuffer, 0, 2, wgl.FLOAT, wgl.FALSE, 0, 0);
-        wgl.drawArrays(panelDrawState, wgl.TRIANGLE_STRIP, 0, 4);
+            this.drawShadow(
+                PANEL_SHADOW_ALPHA,
+                new Rectangle(0, panelBottom, PANEL_WIDTH, PANEL_HEIGHT)
+            ); // shadow for panel
 
-        this.drawShadow(
-            PANEL_SHADOW_ALPHA,
-            new Rectangle(0, panelBottom, PANEL_WIDTH, PANEL_HEIGHT)
-        ); // shadow for panel
 
-        this.needsRedraw = false;
+            this.needsRedraw = false;
 
-        this.colorPicker.draw(this.colorModel === ColorModel.RGB);
-        const splatColor = hsvToRyb(
-            this.brushColorHSVA[0],
-            this.brushColorHSVA[1],
-            this.brushColorHSVA[2]
-        );
-        this.brushViewer.draw(this.brushX, this.brushY, this.brush, splatColor);
+            this.colorPicker.draw(this.colorModel === ColorModel.RGB);
+
+        }
+        const hsva = this.brushColorHSVA;
+        const H = fixHueForPreview(hsva[0]);
+        const rgb = hsvToRgb(H, hsva[1], hsva[2]);
+
+        this.brushViewer.draw(this.brushX, this.brushY, this.brush, rgb);
     }
 
     // what interaction mode would be triggered if we clicked with given mouse position
     desiredInteractionMode(mouseX, mouseY) {
-        const mouseOverPanel = mouseX < PANEL_WIDTH && mouseY > this.canvas.height - PANEL_HEIGHT;
+        const mouseOverPanel = PaintState.showPanel && mouseX < PANEL_WIDTH && mouseY > this.canvas.height - PANEL_HEIGHT;
 
         if (mouseOverPanel) {
             return InteractionMode.NONE;
@@ -982,7 +986,11 @@ class Paint {
         if (event.preventDefault) event.preventDefault();
 
         // Only handle primary button for mouse; accept pen/touch
-        // if (event.pointerType === 'mouse' && event.button !== 0) return;
+        if (event.pointerType === 'mouse' && event.button !== 0) {
+            PaintState.showPanel = !PaintState.showPanel;
+            document.getElementById('ui').style.display = PaintState.showPanel ? '' : 'none';
+            return;
+        }
 
         const position = Utilities.getMousePosition(event, this.canvas);
         const mouseX = position.x;
@@ -1002,7 +1010,9 @@ class Paint {
         this.brushY = mouseY;
 
         // Color picker first
-        this.colorPicker.onMouseDown(mouseX, mouseY);
+        if (PaintState.showPanel) {
+            this.colorPicker.onMouseDown(mouseX, mouseY);
+        }
         if (this.colorPicker.isInUse()) return;
 
         const mode = this.desiredInteractionMode(mouseX, mouseY);
