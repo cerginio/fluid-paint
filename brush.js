@@ -363,7 +363,7 @@ class Brush {
       this.projectedPositionsTexture,
       0
     );
-    wgl.drawArrays(setBristlesDrawState, wgl.TRIANGLE_STRIP, 0, 4);
+    wgl.drawArrays(setBristlesDrawState, wgl.TRIANGLE_STRIP, 0, 4); //OK, verified
 
     // PBD iterations (distance, bending, plane constraints)
     for (let i = 0; i < ITERATIONS; ++i) {
@@ -376,11 +376,11 @@ class Brush {
         this.projectedPositionsTexture,
         0
       );
-      wgl.drawArrays(setBristlesDrawState, wgl.TRIANGLE_STRIP, 0, 4);
+      wgl.drawArrays(setBristlesDrawState, wgl.TRIANGLE_STRIP, 0, 4);// OK, verified
 
       // distance constraints (2 passes)
-      for (let pass = 0; pass < 2; ++pass) {
-        const constraintDrawState = wgl
+      for (let distPass = 0; distPass < 2; ++distPass) {
+        const distConstraintDrawState = wgl
           .createDrawState()
           .bindFramebuffer(this.simulationFramebuffer)
           .viewport(0, 0, this.bristleCount, VERTICES_PER_BRISTLE)
@@ -391,7 +391,7 @@ class Brush {
             'u_targetDistance',
             (this.scale * BRISTLE_LENGTH) / (VERTICES_PER_BRISTLE - 1)
           )
-          .uniform1i('u_pass', pass)
+          .uniform1i('u_pass', distPass)
           .uniform2f('u_resolution', this.maxBristleCount, VERTICES_PER_BRISTLE)
           .vertexAttribPointer(
             this.quadVertexBuffer,
@@ -411,13 +411,13 @@ class Brush {
           this.projectedPositionsTextureTemp,
           0
         );
-        wgl.drawArrays(constraintDrawState, wgl.TRIANGLE_STRIP, 0, 4);
+        wgl.drawArrays(distConstraintDrawState, wgl.TRIANGLE_STRIP, 0, 4); // OK, verified
         Utilities.swap(this, 'projectedPositionsTexture', 'projectedPositionsTextureTemp');
       }
 
       // bending constraints (3 passes)
-      for (let pass = 0; pass < 3; ++pass) {
-        const constraintDrawState = wgl
+      for (let bendPass = 0; bendPass < 3; ++bendPass) {
+        const bendConstraintDrawState = wgl
           .createDrawState()
           .bindFramebuffer(this.simulationFramebuffer)
           .viewport(0, 0, this.bristleCount, VERTICES_PER_BRISTLE)
@@ -426,7 +426,7 @@ class Brush {
           .uniformTexture('u_randomsTexture', 1, wgl.TEXTURE_2D, this.randomsTexture)
           .uniform1f('u_pointCount', VERTICES_PER_BRISTLE)
           .uniform1f('u_stiffnessVariation', STIFFNESS_VARIATION)
-          .uniform1i('u_pass', pass)
+          .uniform1i('u_pass', bendPass)
           .uniform2f('u_resolution', this.maxBristleCount, VERTICES_PER_BRISTLE)
           .vertexAttribPointer(
             this.quadVertexBuffer,
@@ -446,7 +446,7 @@ class Brush {
           this.projectedPositionsTextureTemp,
           0
         );
-        wgl.drawArrays(constraintDrawState, wgl.TRIANGLE_STRIP, 0, 4);
+        wgl.drawArrays(bendConstraintDrawState, wgl.TRIANGLE_STRIP, 0, 4);
         Utilities.swap(this, 'projectedPositionsTexture', 'projectedPositionsTextureTemp');
       }
 
@@ -507,7 +507,7 @@ class Brush {
       this.previousVelocitiesTexture,
       0
     );
-    wgl.drawArrays(updateVelocityDrawState, wgl.TRIANGLE_STRIP, 0, 4);
+    wgl.drawArrays(updateVelocityDrawState, wgl.TRIANGLE_STRIP, 0, 4);// OK, verified
 
     Utilities.swap(this, 'velocitiesTexture', 'previousVelocitiesTexture');
 

@@ -26,8 +26,8 @@ const paths = {
   // Order matters because the project uses globals (no module system).
   // Adjust if you add/remove files.
   js: [
-    'common.js',           // utility helpers (present in your zip)
-    // If you actually have wrappedgl.js/utilities.js, include them here:
+    'common.js',
+    'debug.js',
     'wrappedgl.js',
     'utilities.js',
     'rectangle.js',

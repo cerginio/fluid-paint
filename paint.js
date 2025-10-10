@@ -107,7 +107,7 @@ class Paint {
         this.paintingRectThickness = 2.0;      // pixels
         // this.paintingRectColor = [1, 1, 1, 0.9]; // [0, 0, 0, 0.9]; // white | black, 90% opacity 
         this.paintingRectColor = hexToRgba01('#0ea5e9', 1);
-
+        this.interactionState =   InteractionMode.NONE;
 
         this.quadVertexBuffer = wgl.createBuffer();
         wgl.bufferData(
@@ -1009,10 +1009,11 @@ class Paint {
         this.brushX = mouseX;
         this.brushY = mouseY;
 
-        // Color picker first
         if (PaintState.showPanel) {
             this.colorPicker.onMouseDown(mouseX, mouseY);
         }
+
+        // Color picker first
         if (this.colorPicker.isInUse()) return;
 
         const mode = this.desiredInteractionMode(mouseX, mouseY);

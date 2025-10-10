@@ -1,4 +1,4 @@
-// ES6 class version of Slider
+// ES6 class version of Slider (Pointer Events)
 
 const SLIDER_THICKNESS = 2;
 const LEFT_COLOR = 'white';
@@ -19,11 +19,16 @@ class Slider {
     this.maxValue = maxValue;
     this.changeCallback = changeCallback;
 
-    const height = element.offsetHeight;
-    const length = element.offsetWidth;
+    // Prevent touch scrolling/zooming while interacting
+    // (needed for proper Pointer Events behavior on mobile)
+    if (!this.div.style.touchAction) this.div.style.touchAction = 'none';
 
     // Track value internally
     this.value = initialValue;
+
+    // Initial layout numbers
+    const height = element.offsetHeight;
+    const length = element.offsetWidth;
 
     // Left (filled) track
     const sliderLeftDiv = document.createElement('div');
@@ -31,7 +36,7 @@ class Slider {
     sliderLeftDiv.style.width = length + 'px';
     sliderLeftDiv.style.height = SLIDER_THICKNESS.toFixed(0) + 'px';
     sliderLeftDiv.style.backgroundColor = LEFT_COLOR;
-    sliderLeftDiv.style.top = height / 2 - 1 + 'px';
+    sliderLeftDiv.style.top = (height / 2 - SLIDER_THICKNESS / 2) + 'px';
     sliderLeftDiv.style.zIndex = 999;
     element.appendChild(sliderLeftDiv);
 
@@ -41,7 +46,7 @@ class Slider {
     sliderRightDiv.style.width = length + 'px';
     sliderRightDiv.style.height = SLIDER_THICKNESS.toFixed(0) + 'px';
     sliderRightDiv.style.backgroundColor = RIGHT_COLOR;
-    sliderRightDiv.style.top = height / 2 - 1 + 'px';
+    sliderRightDiv.style.top = (height / 2 - SLIDER_THICKNESS / 2) + 'px';
     element.appendChild(sliderRightDiv);
 
     // Handle
@@ -52,64 +57,108 @@ class Slider {
     handleDiv.style.borderRadius = height * 0.5 + 'px';
     handleDiv.style.cursor = 'ew-resize';
     handleDiv.style.background = HANDLE_COLOR;
+    // Improve hit target a bit
+    handleDiv.style.touchAction = 'none';
     element.appendChild(handleDiv);
+
+    // Utilities (fallbacks if your Utilities helper isn’t present)
+    const clamp = (typeof Utilities?.clamp === 'function')
+      ? Utilities.clamp
+      : (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+    const getRelativeX = (clientX) => {
+      const rect = element.getBoundingClientRect();
+      return clientX - rect.left; // in CSS px
+    };
 
     // Redraw UI from current value
     const redraw = () => {
+      // Recompute length each time in case of responsive layout
+      const L = element.offsetWidth;
+      const H = element.offsetHeight;
+
       const fraction = (this.value - this.minValue) / (this.maxValue - this.minValue);
-      sliderLeftDiv.style.width = fraction * length + 'px';
-      sliderRightDiv.style.width = (1.0 - fraction) * length + 'px';
-      sliderRightDiv.style.left = Math.floor(fraction * length) + 'px';
-      handleDiv.style.left = Math.floor(fraction * length) - element.offsetHeight / 2 + 'px';
+      const px = Math.floor(fraction * L);
+
+      sliderLeftDiv.style.width = px + 'px';
+
+      sliderRightDiv.style.width = (L - px) + 'px';
+      sliderRightDiv.style.left = px + 'px';
+
+      handleDiv.style.left = (px - H / 2) + 'px';
     };
 
     // Apply a pointer change
-    const onChange = (event) => {
-      const mouseX = Utilities.getMousePosition(event, element).x;
-      this.value = Utilities.clamp(
-        (mouseX / length) * (this.maxValue - this.minValue) + this.minValue,
-        this.minValue,
-        this.maxValue
-      );
-
+    const applyFromX = (cssX) => {
+      // Use current width (responsive-safe)
+      const L = element.offsetWidth;
+      const fraction = clamp(cssX / Math.max(1, L), 0, 1);
+      this.value = this.minValue + fraction * (this.maxValue - this.minValue);
       this.changeCallback(this.value);
       redraw();
     };
 
-    // Events
-    let mousePressed = false;
-// TODO: pointer api
-    element.addEventListener('mousedown', (event) => {
-      mousePressed = true;
-      onChange(event);
-    });
+    // Pointer Events
+    let activePointerId = null;
 
-    document.addEventListener('mouseup', () => {
-      mousePressed = false;
-    });
+    const onPointerDown = (e) => {
+      // Only react to primary button / primary touch
+      if (e.isPrimary === false) return;
 
-    document.addEventListener('mousemove', (event) => {
-      if (mousePressed) onChange(event);
-    });
+      // Prevent scroll on touch/pen while interacting
+      if (e.pointerType === 'touch' || e.pointerType === 'pen') {
+        e.preventDefault();
+      }
 
-    element.addEventListener('touchstart', (event) => {
-      event.preventDefault();
-      const firstTouch = event.targetTouches[0];
-      onChange(firstTouch);
-    });
+      activePointerId = e.pointerId;
+      // Capture so we keep getting moves outside the element
+      try { element.setPointerCapture(activePointerId); } catch {}
 
-    element.addEventListener('touchmove', (event) => {
-      event.preventDefault();
-      const firstTouch = event.targetTouches[0];
-      onChange(firstTouch);
-    });
+      const x = getRelativeX(e.clientX);
+      applyFromX(x);
+    };
+
+    const onPointerMove = (e) => {
+      if (activePointerId === null || e.pointerId !== activePointerId) return;
+      if (e.pointerType === 'touch' || e.pointerType === 'pen') {
+        e.preventDefault();
+      }
+      const x = getRelativeX(e.clientX);
+      applyFromX(x);
+    };
+
+    const endInteraction = () => {
+      if (activePointerId !== null) {
+        try { element.releasePointerCapture(activePointerId); } catch {}
+        activePointerId = null;
+      }
+    };
+
+    const onPointerUp = (e) => {
+      if (e.pointerId !== activePointerId) return;
+      if (e.pointerType === 'touch' || e.pointerType === 'pen') {
+        e.preventDefault();
+      }
+      endInteraction();
+    };
+
+    const onPointerCancel = (e) => {
+      if (e.pointerId !== activePointerId) return;
+      endInteraction();
+    };
+
+    // Attach listeners (non-passive so we can preventDefault for touch)
+    element.addEventListener('pointerdown', onPointerDown, { passive: false });
+    element.addEventListener('pointermove', onPointerMove, { passive: false });
+    element.addEventListener('pointerup', onPointerUp, { passive: false });
+    element.addEventListener('pointercancel', onPointerCancel, { passive: false });
+    element.addEventListener('lostpointercapture', onPointerCancel, { passive: true });
 
     // Public API (same as original)
     this.setValue = (newValue) => {
-      this.value = newValue;
+      this.value = clamp(newValue, this.minValue, this.maxValue);
       redraw();
     };
-
     this.getValue = () => this.value;
 
     redraw();
