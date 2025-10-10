@@ -1,6 +1,6 @@
 precision highp float;
 
-uniform vec2 u_canvasDimensions;
+// uniform vec2 u_canvasDimensions;
 
 uniform mat4 u_projectionViewMatrix;
 

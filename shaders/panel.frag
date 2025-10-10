@@ -1,6 +1,6 @@
 precision highp float;
 
-varying vec2 v_coordinates;
+// varying vec2 v_coordinates;
 
 uniform sampler2D u_canvasTexture;
 

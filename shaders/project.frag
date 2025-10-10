@@ -6,12 +6,12 @@ uniform vec2 u_resolution;
 
 uniform sampler2D u_positionsTexture; 
 uniform sampler2D u_velocitiesTexture;
-uniform sampler2D u_randomsTexture;
+// uniform sampler2D u_randomsTexture;
 
 uniform float u_damping;
 uniform float u_gravity;
 
-uniform float u_verticesPerBristle;
+// uniform float u_verticesPerBristle;
 
 float random (float n) {
     return fract(0.5 + n * (0.6180339887498949));
