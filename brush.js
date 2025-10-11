@@ -17,8 +17,8 @@ class Brush {
   constructor(wgl, shaderSources, maxBristleCount) {
     this.wgl = wgl;
 
-    const gl = wgl.gl || wgl;
-    this.dbg = makeDebugVisualizer(gl, gl.canvas);
+    // const gl = wgl.gl || wgl;
+    // this.dbg = makeDebugVisualizer(gl, gl.canvas);
 
     this.maxBristleCount = maxBristleCount;
     this.bristleCount = maxBristleCount; // number of bristles currently being used
@@ -79,7 +79,7 @@ class Brush {
       null, wgl.CLAMP_TO_EDGE, wgl.CLAMP_TO_EDGE, wgl.LINEAR, wgl.LINEAR
     );
 
-   
+
     // texture coordinates for each (bristle, vertex)
     const brushTextureCoordinates = [];
     for (let bristle = 0; bristle < maxBristleCount; ++bristle) {
@@ -365,8 +365,14 @@ class Brush {
     );
     wgl.drawArrays(setBristlesDrawState, wgl.TRIANGLE_STRIP, 0, 4); //OK, verified
 
+
+
+
+
+
+
     // PBD iterations (distance, bending, plane constraints)
-    for (let i = 0; i < ITERATIONS; ++i) {
+    for (let i = 0; i < ITERATIONS; ++i) {// >> iterations loop
       // base positions each iteration
       wgl.framebufferTexture2D(
         this.simulationFramebuffer,
@@ -478,7 +484,7 @@ class Brush {
       );
       wgl.drawArrays(planeConstraintDrawState, wgl.TRIANGLE_STRIP, 0, 4);
       Utilities.swap(this, 'projectedPositionsTexture', 'projectedPositionsTextureTemp');
-    }
+    }// << iterations loop
 
     // update velocities from old vs projected positions
     const updateVelocityDrawState = wgl
@@ -514,14 +520,31 @@ class Brush {
     Utilities.swap(this, 'previousPositionsTexture', 'positionsTexture');
     Utilities.swap(this, 'positionsTexture', 'projectedPositionsTexture');
 
+    const brushScale = this.brushScale; // whatever you pass into shaders
+    const bristleLen = BRISTLE_LENGTH;
 
-        // Assuming you have these around:
-        const texW = this.maxBristleCount;          // texture width  = bristles
-        const texH = VERTICES_PER_BRISTLE;     // texture height = segments per bristle
-        const brushScale = this.brushScale;       // whatever you pass into shaders
-        const bristleLen = BRISTLE_LENGTH;
-    
-        this.dbg.showPositions(this.positionsTexture, texW, texH, brushScale,bristleLen);
+
+    // const texW = this.maxBristleCount; // texture width  = bristles
+    // const texH = VERTICES_PER_BRISTLE; // texture height = segments per bristle
+    // this.dbg.showPositions(this.positionsTexture, texW, texH, brushScale, bristleLen);
+
+    debugTexture(this.velocitiesTexture, 2);
+    // debugTexture(this.positionsTexture, 1);
+    // debugTexture(this.projectedPositionsTexture, 1);
+
+    function debugTexture(velocitiesTexture, mode = 1) {
+      if (presenter) {
+        presenter.presentTextureToCanvas2D({
+          srcTexture: velocitiesTexture,
+          debugCanvas,
+          mode: mode, // velocity view
+          scaleXY: brushScale, // or an appropriate velocity scale
+          scaleZ: bristleLen
+        });
+      }
+    }
+
+
   }
 }
 

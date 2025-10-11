@@ -68,17 +68,25 @@
     <script src="paint-setup.js"></script>
     <script src="paint.js"></script>
 
-    <script>document.addEventListener('DOMContentLoaded', () => {
+    <script>
+        // ---- globals ----
+        let presenter;             // will be assigned after DOM is ready
+        let debugCanvas;           // global handle to the debug canvas
+        let debugCtx2d;            // (optional) its 2D context
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // main app canvas
             const canvas = document.createElement('canvas');
-            const wgl = WrappedGL.create(canvas);
             document.body.appendChild(canvas);
-            // PATCH#2: Ensure CSS size exists; style as you like:
-            // if (!canvas.style.width) canvas.style.width = '100vw';
-            // if (!canvas.style.height) canvas.style.height = '100vh';
-            // const doResize = () => resizeCanvasToCSS(canvas, wgl.gl);
-            // window.addEventListener('resize', doResize, { passive: true });
-            // window.addEventListener('orientationchange', doResize, { passive: true });
-            // doResize(); // initial
+            const wgl = WrappedGL.create(canvas);
+
+            // create the debug canvas now that DOM exists
+            const dbg = setupDebugCanvas({ w: 256, h: 256, corner: 'bottom-right' });
+            debugCanvas = dbg.canvas;          // <-- assign to globals
+            debugCtx2d = dbg.ctx2d;
+
+            // presenter uses the same WebGL context
+            presenter = makeGLDebugPresenter(wgl.gl);
 
             (async () => {
                 // PATCH#1: TEST
