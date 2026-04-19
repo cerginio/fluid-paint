@@ -42,8 +42,9 @@ void main () {
     vec2 mid = (planarPosition + previousPlanarPosition) * 0.5;
     
 
-    float dist = distance(previousPlanarPosition.xy, planarPosition.xy);
-    vec2 direction = (planarPosition - previousPlanarPosition) / dist;
+    vec2 delta = planarPosition - previousPlanarPosition;
+    float dist = length(delta);
+    vec2 direction = dist > 0.0001 ? delta / dist : vec2(1.0, 0.0);
     vec2 tangent = vec2(-direction.y, direction.x);
 
 

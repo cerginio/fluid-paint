@@ -56,7 +56,6 @@
 
     <script src="wrappedgl.js"></script>
     <script src="common.js"></script>
-    <script src="debug.js"></script>
     <script src="utilities.js"></script>
     <script src="rectangle.js"></script>
     <script src="brush.js"></script>
@@ -69,45 +68,18 @@
     <script src="paint.js"></script>
 
     <script>
-        // ---- globals ----
-        let presenter;             // will be assigned after DOM is ready
-        let debugCanvas;           // global handle to the debug canvas
-        let debugCtx2d;            // (optional) its 2D context
-
         document.addEventListener('DOMContentLoaded', () => {
             // main app canvas
             const canvas = document.createElement('canvas');
             document.body.appendChild(canvas);
             const wgl = WrappedGL.create(canvas);
 
-            // create the debug canvas now that DOM exists
-            const dbg = setupDebugCanvas({ w: 256, h: 256, corner: 'bottom-right' });
-            debugCanvas = dbg.canvas;          // <-- assign to globals
-            debugCtx2d = dbg.ctx2d;
-
-            // presenter uses the same WebGL context
-            presenter = makeGLDebugPresenter(wgl.gl);
-
             (async () => {
-                // PATCH#1: TEST
-                // const results = await runWebGLUsageSelfTest({
-                //     canvas,
-                //     gl: wgl.gl,
-                //     getPaintingRect: () => ({
-                //         left: 0,
-                //         bottom: 0,
-                //         width: canvas.width,
-                //         height: canvas.height
-                //     })
-                // });
-                // console.table(results);
-
-                if (wgl !== null && wgl.hasFloatTextureSupport()) {
+                if (wgl !== null && wgl.getPreferredRenderableTextureType() !== null) {
 
                     //required features are supported
                     document.getElementById('placeholder').outerHTML = document.getElementById('main').innerHTML;
-                    const painter = new Paint(canvas, wgl);
-                    runWebGLSelfTest(wgl.gl)
+                    new Paint(canvas, wgl);
                 } else {
                     //required features unsupported
                     document.getElementById('placeholder').outerHTML = document.getElementById('no-support').innerHTML;
@@ -115,7 +87,7 @@
                     if (wgl === null) {
                         document.getElementById('error').innerHTML = 'Unfortunately, your browser does not support WebGL.';
                     } else {
-                        document.getElementById('error').innerHTML = 'Unfortunately, your browser does not support WebGL floating point textures.';
+                        document.getElementById('error').innerHTML = 'Unfortunately, your browser does not support WebGL renderable float or half-float textures.';
                     }
                 }
 

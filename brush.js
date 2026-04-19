@@ -22,6 +22,7 @@ class Brush {
 
     this.maxBristleCount = maxBristleCount;
     this.bristleCount = maxBristleCount; // number of bristles currently being used
+    this.renderTextureType = wgl.getPreferredRenderableTextureType();
 
     this.projectProgram = wgl.createProgram(
       shaderSources['shaders/fullscreen.vert'],
@@ -55,27 +56,27 @@ class Brush {
 
     // contains bristle vertex positions (x axis = bristle, y axis = vertex index)
     this.positionsTexture = wgl.buildTexture(
-      wgl.RGBA, wgl.FLOAT, maxBristleCount, VERTICES_PER_BRISTLE,
+      wgl.RGBA, this.renderTextureType, maxBristleCount, VERTICES_PER_BRISTLE,
       null, wgl.CLAMP_TO_EDGE, wgl.CLAMP_TO_EDGE, wgl.LINEAR, wgl.LINEAR
     );
     this.previousPositionsTexture = wgl.buildTexture(
-      wgl.RGBA, wgl.FLOAT, maxBristleCount, VERTICES_PER_BRISTLE,
+      wgl.RGBA, this.renderTextureType, maxBristleCount, VERTICES_PER_BRISTLE,
       null, wgl.CLAMP_TO_EDGE, wgl.CLAMP_TO_EDGE, wgl.LINEAR, wgl.LINEAR
     );
     this.velocitiesTexture = wgl.buildTexture(
-      wgl.RGBA, wgl.FLOAT, maxBristleCount, VERTICES_PER_BRISTLE,
+      wgl.RGBA, this.renderTextureType, maxBristleCount, VERTICES_PER_BRISTLE,
       null, wgl.CLAMP_TO_EDGE, wgl.CLAMP_TO_EDGE, wgl.LINEAR, wgl.LINEAR
     );
     this.previousVelocitiesTexture = wgl.buildTexture(
-      wgl.RGBA, wgl.FLOAT, maxBristleCount, VERTICES_PER_BRISTLE,
+      wgl.RGBA, this.renderTextureType, maxBristleCount, VERTICES_PER_BRISTLE,
       null, wgl.CLAMP_TO_EDGE, wgl.CLAMP_TO_EDGE, wgl.LINEAR, wgl.LINEAR
     );
     this.projectedPositionsTexture = wgl.buildTexture(
-      wgl.RGBA, wgl.FLOAT, maxBristleCount, VERTICES_PER_BRISTLE,
+      wgl.RGBA, this.renderTextureType, maxBristleCount, VERTICES_PER_BRISTLE,
       null, wgl.CLAMP_TO_EDGE, wgl.CLAMP_TO_EDGE, wgl.LINEAR, wgl.LINEAR
     );
     this.projectedPositionsTextureTemp = wgl.buildTexture(
-      wgl.RGBA, wgl.FLOAT, maxBristleCount, VERTICES_PER_BRISTLE,
+      wgl.RGBA, this.renderTextureType, maxBristleCount, VERTICES_PER_BRISTLE,
       null, wgl.CLAMP_TO_EDGE, wgl.CLAMP_TO_EDGE, wgl.LINEAR, wgl.LINEAR
     );
 
@@ -89,7 +90,6 @@ class Brush {
         brushTextureCoordinates.push(tx, ty);
       }
     }
-    console.log(brushTextureCoordinates);
     this.brushTextureCoordinatesBuffer = wgl.createBuffer();
     wgl.bufferData(
       this.brushTextureCoordinatesBuffer,
@@ -101,11 +101,11 @@ class Brush {
     // randoms texture
     const randoms = [];
     for (let i = 0; i < maxBristleCount * VERTICES_PER_BRISTLE * 4; ++i) {
-      randoms.push(Math.random());
+      randoms.push(Math.floor(Math.random() * 256));
     }
     this.randomsTexture = wgl.buildTexture(
-      wgl.RGBA, wgl.FLOAT, maxBristleCount, VERTICES_PER_BRISTLE,
-      new Float32Array(randoms), wgl.CLAMP_TO_EDGE, wgl.CLAMP_TO_EDGE, wgl.LINEAR, wgl.LINEAR
+      wgl.RGBA, wgl.UNSIGNED_BYTE, maxBristleCount, VERTICES_PER_BRISTLE,
+      new Uint8Array(randoms), wgl.CLAMP_TO_EDGE, wgl.CLAMP_TO_EDGE, wgl.LINEAR, wgl.LINEAR
     );
 
     // splat mesh (quads per segment)
@@ -519,32 +519,6 @@ class Brush {
 
     Utilities.swap(this, 'previousPositionsTexture', 'positionsTexture');
     Utilities.swap(this, 'positionsTexture', 'projectedPositionsTexture');
-
-    const brushScale = this.brushScale; // whatever you pass into shaders
-    const bristleLen = BRISTLE_LENGTH;
-
-
-    // const texW = this.maxBristleCount; // texture width  = bristles
-    // const texH = VERTICES_PER_BRISTLE; // texture height = segments per bristle
-    // this.dbg.showPositions(this.positionsTexture, texW, texH, brushScale, bristleLen);
-
-    debugTexture(this.velocitiesTexture, 2);
-    // debugTexture(this.positionsTexture, 1);
-    // debugTexture(this.projectedPositionsTexture, 1);
-
-    function debugTexture(velocitiesTexture, mode = 1) {
-      if (presenter) {
-        presenter.presentTextureToCanvas2D({
-          srcTexture: velocitiesTexture,
-          debugCanvas,
-          mode: mode, // velocity view
-          scaleXY: brushScale, // or an appropriate velocity scale
-          scaleZ: bristleLen
-        });
-      }
-    }
-
-
   }
 }
 

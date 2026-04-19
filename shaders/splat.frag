@@ -19,6 +19,9 @@ varying vec2 v_coordinates;
 
 float distanceToLine(vec2 a, vec2 b, vec2 p) {
     float dist = distance(a, b);
+    if (dist <= 0.0001) {
+        return distance(p, a);
+    }
     vec2 direction = (b - a) / dist;
 
     float projectedDistance = dot(p - a, direction);

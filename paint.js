@@ -13,6 +13,7 @@ class Paint {
         // Enable required extensions
         wgl.getExtension('OES_texture_float');
         wgl.getExtension('OES_texture_float_linear');
+        this.renderTextureType = wgl.getPreferredRenderableTextureType();
 
         // Load shader sources then complete async setup
         WrappedGL.loadTextFiles(shaderFiles, (shaderSources) => {
@@ -151,7 +152,7 @@ class Paint {
             // keep HISTORY_SIZE snapshots to avoid reallocating textures
             const texture = wgl.buildTexture(
                 wgl.RGBA,
-                wgl.FLOAT,
+                this.renderTextureType,
                 this.getPaintingResolutionWidth(),
                 this.getPaintingResolutionHeight(),
                 null,
@@ -1292,7 +1293,7 @@ class Paint {
             this.wgl.rebuildTexture(
                 snapshot.texture,
                 this.wgl.RGBA,
-                this.wgl.FLOAT,
+                this.renderTextureType,
                 this.simulator.resolutionWidth,
                 this.simulator.resolutionHeight,
                 null,

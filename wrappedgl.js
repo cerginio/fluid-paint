@@ -25,7 +25,7 @@ function arraysEqual(a, b) {
         gl.shaderSource(shader, source);
         gl.compileShader(shader);
         if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-          console.log(gl.getShaderInfoLog(shader));
+          throw new Error(gl.getShaderInfoLog(shader) || 'Shader compilation failed.');
         }
         return shader;
       };
@@ -43,6 +43,9 @@ function arraysEqual(a, b) {
         }
       }
       gl.linkProgram(program);
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        throw new Error(gl.getProgramInfoLog(program) || 'Program linking failed.');
+      }
   
       // Attribute locations
       this.attributeLocations = {};
@@ -184,7 +187,10 @@ function arraysEqual(a, b) {
     static create(canvas, options) {
       let gl = null;
       try {
-        gl = canvas.getContext('webgl', options) || canvas.getContext('experimental-webgl', options);
+        gl =
+          canvas.getContext('webgl2', options) ||
+          canvas.getContext('webgl', options) ||
+          canvas.getContext('experimental-webgl', options);
       } catch (_) {
         return null; // no webgl support
       }
@@ -194,6 +200,9 @@ function arraysEqual(a, b) {
   
     constructor(gl) {
       this.gl = gl;
+      this.isWebGL2 =
+        typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext;
+      this.halfFloatTextureType = this.isWebGL2 ? gl.HALF_FLOAT : null;
   
       // copy numeric constants from the WebGLRenderingContext onto this (replaces CONSTANT_NAMES loop)
       for (const k in gl) {
@@ -347,6 +356,16 @@ function arraysEqual(a, b) {
     // returns null if not supported, otherwise extension object (and patches state for instancing)
     getExtension(name) {
       const gl = this.gl;
+
+      if (this.isWebGL2) {
+        if (name === 'OES_texture_float' || name === 'OES_texture_float_linear') {
+          return {};
+        }
+        if (name === 'OES_texture_half_float' || name === 'OES_texture_half_float_linear') {
+          if (this.halfFloatTextureType === null) this.halfFloatTextureType = gl.HALF_FLOAT;
+          return { HALF_FLOAT_OES: gl.HALF_FLOAT };
+        }
+      }
   
       if (name === 'ANGLE_instanced_arrays') {
         const instancedExt = gl.getExtension('ANGLE_instanced_arrays');
@@ -422,15 +441,39 @@ function arraysEqual(a, b) {
     hasHalfFloatTextureSupport() {
       const ext = this.getExtension('OES_texture_half_float');
       if (ext === null) return false;
-      if (this.getExtension('OES_texture_half_float_linear') === null) return false;
+      if (!this.isWebGL2 && this.getExtension('OES_texture_half_float_linear') === null) return false;
       if (!this.canRenderToTexture(ext.HALF_FLOAT_OES)) return false;
+      this.halfFloatTextureType = ext.HALF_FLOAT_OES;
       return true;
     }
   
     hasFloatTextureSupport() {
-      if (this.getExtension('OES_texture_float') === null || this.getExtension('OES_texture_float_linear') === null) return false;
+      if (this.getExtension('OES_texture_float') === null) return false;
+      if (!this.isWebGL2 && this.getExtension('OES_texture_float_linear') === null) return false;
       if (!this.canRenderToTexture(this.FLOAT)) return false;
       return true;
+    }
+
+    getPreferredRenderableTextureType() {
+      if (this.hasFloatTextureSupport()) return this.FLOAT;
+      if (this.hasHalfFloatTextureSupport()) return this.halfFloatTextureType;
+      return null;
+    }
+
+    getTextureInternalFormat(format, type) {
+      if (!this.isWebGL2) return format;
+      if (format === this.RGBA) {
+        if (type === this.FLOAT) return this.RGBA32F;
+        if (type === this.HALF_FLOAT || type === this.halfFloatTextureType) return this.RGBA16F;
+        if (type === this.UNSIGNED_BYTE) return this.RGBA8;
+      }
+      return format;
+    }
+
+    getTextureUploadType(type) {
+      if (!this.isWebGL2) return type;
+      if (type === this.halfFloatTextureType) return this.HALF_FLOAT;
+      return type;
     }
   
     // --- state resolution ---
@@ -586,7 +629,9 @@ function arraysEqual(a, b) {
     }
   
     rebuildTexture(texture, format, type, width, height, data, wrapS, wrapT, minFilter, magFilter) {
-      this.texImage2D(this.TEXTURE_2D, texture, 0, format, width, height, 0, format, type, data)
+      const internalFormat = this.getTextureInternalFormat(format, type);
+      const uploadType = this.getTextureUploadType(type);
+      this.texImage2D(this.TEXTURE_2D, texture, 0, internalFormat, width, height, 0, format, uploadType, data)
         .setTextureFiltering(this.TEXTURE_2D, texture, wrapS, wrapT, minFilter, magFilter);
       return this;
     }

@@ -19,12 +19,8 @@ class Simulator {
     wgl.getExtension('OES_texture_float');
     wgl.getExtension('OES_texture_float_linear');
 
-    const halfFloatExt = wgl.getExtension('OES_texture_half_float');
-    wgl.getExtension('OES_texture_half_float_linear');
-
-    this.simulationTextureType = wgl.hasHalfFloatTextureSupport()
-      ? halfFloatExt.HALF_FLOAT_OES
-      : wgl.FLOAT; // use float if half float not available
+    this.simulationTextureType = wgl.getPreferredRenderableTextureType();
+    this.paintTextureType = this.simulationTextureType;
 
     this.resolutionWidth = resolutionWidth;
     this.resolutionHeight = resolutionHeight;
@@ -93,7 +89,7 @@ class Simulator {
     // textures
     this.paintTexture = wgl.buildTexture(
       wgl.RGBA,
-      wgl.FLOAT,
+      this.paintTextureType,
       this.resolutionWidth,
       this.resolutionHeight,
       null,
@@ -104,7 +100,7 @@ class Simulator {
     );
     this.paintTextureTemp = wgl.buildTexture(
       wgl.RGBA,
-      wgl.FLOAT,
+      this.paintTextureType,
       this.resolutionWidth,
       this.resolutionHeight,
       null,
@@ -261,7 +257,7 @@ class Simulator {
     wgl.rebuildTexture(
       this.paintTextureTemp,
       wgl.RGBA,
-      wgl.FLOAT,
+      this.paintTextureType,
       newWidth,
       newHeight,
       null,
@@ -289,7 +285,7 @@ class Simulator {
     wgl.rebuildTexture(
       this.paintTextureTemp,
       wgl.RGBA,
-      wgl.FLOAT,
+      this.paintTextureType,
       this.resolutionWidth,
       this.resolutionHeight,
       null,
@@ -379,7 +375,7 @@ class Simulator {
     wgl.rebuildTexture(
       this.paintTextureTemp,
       wgl.RGBA,
-      wgl.FLOAT,
+      this.paintTextureType,
       newWidth,
       newHeight,
       null,
@@ -397,7 +393,7 @@ class Simulator {
     wgl.rebuildTexture(
       this.paintTextureTemp,
       wgl.RGBA,
-      wgl.FLOAT,
+      this.paintTextureType,
       this.resolutionWidth,
       this.resolutionHeight,
       null,
