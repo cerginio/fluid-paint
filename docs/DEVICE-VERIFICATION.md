@@ -44,6 +44,7 @@ The diagnostic panel reports:
 
 | Line | Expected on a Samsung A56 | Meaning |
 |---|---|---|
+| context | **WebGL 2** expected | The A56 supports it. `?webgl=1` forces the WebGL 1 fallback if you want to compare. |
 | `OES_texture_float` | **true** | Float textures usable at all. If false, the device cannot run the simulation. |
 | `OES_texture_float_linear` | **false** | Confirms the device is in the affected class. |
 | `hasFloatTextureSupport()` | **true** | The relaxed gate now lets it boot. Was false before the fix. |
@@ -78,6 +79,19 @@ adb reverse tcp:8099 tcp:8099
 
 Then on the phone open `http://localhost:8099/index.html?diag=1`, and on the
 desktop open `chrome://inspect` to see the phone's console.
+
+## 4b. Check both paths
+
+Worth doing once, since the app now has two rendering backends:
+
+```
+http://192.168.1.224:8099/index.html?diag=1              WebGL 2 (default)
+http://192.168.1.224:8099/index.html?diag=1&webgl=1      WebGL 1 fallback
+```
+
+Both should paint identically. If WebGL 2 misbehaves but `?webgl=1` is fine, the
+problem is in the ES 3.00 translation (see docs/WEBGL2-DUAL-PATH.md), not in the
+filtering fix.
 
 ## 5. Report back
 
