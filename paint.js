@@ -11,8 +11,15 @@ class Paint {
         this.wgl = wgl;
 
         // Enable required extensions
-        wgl.getExtension('OES_texture_float');
-        wgl.getExtension('OES_texture_float_linear');
+        if (wgl.isWebGL2) {
+            // float textures are core in WebGL 2; this enables rendering to them
+            wgl.getExtension('EXT_color_buffer_float');
+        } else {
+            wgl.getExtension('OES_texture_float');
+            // OES_texture_float_linear is deliberately NOT required -- all float
+            // textures are NEAREST and interpolation is done in the shaders.
+            // See docs/MOBILE-GPU-BRISTLE-COLLAPSE-SPEC.md
+        }
 
         // Load shader sources then complete async setup
         WrappedGL.loadTextFiles(shaderFiles, (shaderSources) => {

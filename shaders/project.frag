@@ -20,8 +20,8 @@ float random (float n) {
 void main () {
     vec2 coordinates = gl_FragCoord.xy / u_resolution;
 
-    vec3 position = texture2D(u_positionsTexture, coordinates).rgb;
-    vec3 velocity = texture2D(u_velocitiesTexture, coordinates).rgb;
+    vec3 position = texelFetch2D(u_positionsTexture, coordinates, u_resolution).rgb;
+    vec3 velocity = texelFetch2D(u_velocitiesTexture, coordinates, u_resolution).rgb;
 
     velocity *= u_damping;
 

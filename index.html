@@ -54,6 +54,7 @@
 
     <div id="placeholder"></div>
 
+    <script src="glsl3.js"></script>
     <script src="debug/gpu-profiles.js"></script>
     <script src="debug/texture-selftest.js"></script>
     <script src="debug/device-diag.js"></script>
@@ -93,6 +94,7 @@
                 if (gpuProfile) installGpuClamp(rawGl, gpuProfile);
             });
 
+            window.__wgl = wgl;   // debug handle for the test harness
             if (wgl !== null) {
                 if (params.get('audit') === '1') auditFloatLinearTextures(wgl);
                 if (params.get('selftest') === '1') runTextureSelfTest(wgl.gl);

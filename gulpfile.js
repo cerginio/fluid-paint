@@ -24,6 +24,7 @@ const paths = {
   // Adjust if you add/remove files.
   js: [
     // device-emulation harness must load before wrappedgl.js
+    'glsl3.js',
     'debug/gpu-profiles.js',
     'debug/texture-selftest.js',
     'debug/device-diag.js',

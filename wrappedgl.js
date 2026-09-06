@@ -20,18 +20,34 @@ function arraysEqual(a, b) {
   
       const gl = wgl.gl;
   
-      const buildShader = (type, source) => {
+      // Sources are authored in GLSL ES 1.00 and translated per backend, so
+      // both paths share one set of shader files.
+      // See glsl3.js and docs/MOBILE-GPU-BRISTLE-COLLAPSE-SPEC.md §5.
+      const translate = (source, stage) =>
+        wgl.isWebGL2 ? GLSL3.toES3(source, stage) : GLSL3.toES1(source, stage);
+
+      const buildShader = (type, source, stage) => {
+        const translated = translate(source, stage);
         const shader = gl.createShader(type);
-        gl.shaderSource(shader, source);
+        gl.shaderSource(shader, translated);
         gl.compileShader(shader);
         if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-          console.log(gl.getShaderInfoLog(shader));
+          const log = gl.getShaderInfoLog(shader);
+          // Numbered listing -- the driver reports lines of the TRANSLATED
+          // source, which does not line up with the file on disk.
+          const listing = translated.split('\n')
+            .map((l, i) => String(i + 1).padStart(4) + ' | ' + l).join('\n');
+          console.error(
+            '[glsl] %s shader failed to compile (%s)\n%s\n%s',
+            stage, wgl.isWebGL2 ? 'ES 3.00' : 'ES 1.00', log, listing
+          );
+          throw new Error('shader compile failed (' + stage + '): ' + log);
         }
         return shader;
       };
-  
-      const vertexShader = buildShader(gl.VERTEX_SHADER, vertexShaderSource);
-      const fragmentShader = buildShader(gl.FRAGMENT_SHADER, fragmentShaderSource);
+
+      const vertexShader = buildShader(gl.VERTEX_SHADER, vertexShaderSource, 'vertex');
+      const fragmentShader = buildShader(gl.FRAGMENT_SHADER, fragmentShaderSource, 'fragment');
   
       const program = (this.program = gl.createProgram());
       gl.attachShader(program, vertexShader);
@@ -186,19 +202,40 @@ function arraysEqual(a, b) {
     // (debug/gpu-profiles.js) to clamp capabilities down to a target GPU.
     static create(canvas, options, onContext) {
       let gl = null;
+      let isWebGL2 = false;
+
+      // WebGL 2 first: it makes the float-filtering bug class unwritable
+      // (texelFetch takes no sampler filter) and gives sized float formats.
+      // Falls back to the WebGL 1 path, which is fixed and works on the
+      // affected mobile GPUs. Opt out with ?webgl=1.
+      let forceWebGL1 = false;
       try {
-        gl = canvas.getContext('webgl', options) || canvas.getContext('experimental-webgl', options);
-      } catch (_) {
-        return null; // no webgl support
+        forceWebGL1 = new URLSearchParams(location.search).get('webgl') === '1';
+      } catch (_) { /* no location (tests) */ }
+
+      if (!forceWebGL1) {
+        try {
+          gl = canvas.getContext('webgl2', options);
+          if (gl !== null) isWebGL2 = true;
+        } catch (_) { /* fall through to webgl1 */ }
+      }
+
+      if (gl === null) {
+        try {
+          gl = canvas.getContext('webgl', options) || canvas.getContext('experimental-webgl', options);
+        } catch (_) {
+          return null; // no webgl support
+        }
       }
       if (gl === null) return null;
       if (typeof onContext === 'function') onContext(gl);
-      return new WrappedGL(gl);
+      return new WrappedGL(gl, isWebGL2);
     }
   
-    constructor(gl) {
+    constructor(gl, isWebGL2) {
       this.gl = gl;
-  
+      this.isWebGL2 = !!isWebGL2;
+
       // copy numeric constants from the WebGLRenderingContext onto this (replaces CONSTANT_NAMES loop)
       for (const k in gl) {
         if (typeof gl[k] === 'number') this[k] = gl[k];
@@ -438,7 +475,12 @@ function arraysEqual(a, b) {
     // genuinely need interpolation do it in the shader.
     // See docs/MOBILE-GPU-BRISTLE-COLLAPSE-SPEC.md
     hasFloatTextureSupport() {
-      if (this.getExtension('OES_texture_float') === null) return false;
+      if (this.isWebGL2) {
+        // WebGL 2 has float textures in core; rendering to them needs this.
+        if (this.getExtension('EXT_color_buffer_float') === null) return false;
+      } else {
+        if (this.getExtension('OES_texture_float') === null) return false;
+      }
       if (!this.canRenderToTexture(this.FLOAT)) return false;
       return true;
     }
@@ -595,8 +637,27 @@ function arraysEqual(a, b) {
       return texture;
     }
   
+    // WebGL 2 requires a SIZED internal format for float render targets --
+    // the unsized RGBA/FLOAT pair that WebGL 1 uses is not colour-renderable
+    // there. The external format/type stay as given.
+    internalFormatFor(format, type) {
+      if (!this.isWebGL2) return format;
+      const gl = this.gl;
+      if (type === gl.FLOAT) {
+        if (format === gl.RGBA) return gl.RGBA32F;
+        if (format === gl.RGB) return gl.RGB32F;
+        if (format === gl.RED) return gl.R32F;
+      }
+      if (type === gl.HALF_FLOAT || type === this.HALF_FLOAT_OES) {
+        if (format === gl.RGBA) return gl.RGBA16F;
+        if (format === gl.RGB) return gl.RGB16F;
+      }
+      return format;
+    }
+
     rebuildTexture(texture, format, type, width, height, data, wrapS, wrapT, minFilter, magFilter) {
-      this.texImage2D(this.TEXTURE_2D, texture, 0, format, width, height, 0, format, type, data)
+      const internalFormat = this.internalFormatFor(format, type);
+      this.texImage2D(this.TEXTURE_2D, texture, 0, internalFormat, width, height, 0, format, type, data)
         .setTextureFiltering(this.TEXTURE_2D, texture, wrapS, wrapT, minFilter, magFilter);
       return this;
     }

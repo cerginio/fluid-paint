@@ -17,7 +17,7 @@ void main () {
     float myWeight = 1.0;
     if (index < 0.1) myWeight = 0.0;
 
-    vec3 myPosition = texture2D(u_positionsTexture, vec2(coordinates.x, (index + 0.5) / u_pointCount)).rgb;
+    vec3 myPosition = texelFetch2D(u_positionsTexture, vec2(coordinates.x, (index + 0.5) / u_pointCount), u_resolution).rgb;
 
     float otherIndex = 0.0;
 
@@ -41,7 +41,7 @@ void main () {
     vec3 newPosition = myPosition;
 
     if (otherIndex >= 0.0 && otherIndex < u_pointCount) {
-        vec3 otherPosition = texture2D(u_positionsTexture, vec2(coordinates.x, (otherIndex + 0.5) / u_pointCount)).rgb;
+        vec3 otherPosition = texelFetch2D(u_positionsTexture, vec2(coordinates.x, (otherIndex + 0.5) / u_pointCount), u_resolution).rgb;
 
         float currentDistance = distance(myPosition, otherPosition);
         vec3 towards = (otherPosition - myPosition) / max(currentDistance, 0.01);

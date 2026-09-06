@@ -18,7 +18,7 @@ const float PI = 3.14159265;
 void main () {
     vec2 coordinates = gl_FragCoord.xy / u_resolution;
 
-    vec4 randoms = texture2D(u_randomsTexture, coordinates);
+    vec4 randoms = texelFetch2D(u_randomsTexture, coordinates, u_resolution);
 
     float bristleIndex = floor(gl_FragCoord.x); //which bristle
     float vertexIndex = floor(gl_FragCoord.y);

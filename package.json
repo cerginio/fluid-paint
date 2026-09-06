@@ -28,6 +28,7 @@
     "picomatch": "2.3.2"
   },
   "devDependencies": {
+    "@playwright/cli": "^0.1.19",
     "autoprefixer": "^10.5.5",
     "cross-env": "^10.1.0",
     "cssnano": "^7.1.9",

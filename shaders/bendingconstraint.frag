@@ -28,14 +28,14 @@ void main () {
         float bIndex = baseIndex + 1.0;
         float cIndex = baseIndex + 2.0;
 
-        vec3 aPos = texture2D(u_positionsTexture, vec2(coordinates.x, (aIndex + 0.5) / u_pointCount)).rgb;
+        vec3 aPos = texelFetch2D(u_positionsTexture, vec2(coordinates.x, (aIndex + 0.5) / u_pointCount), u_resolution).rgb;
         float aW = 1.0;
         if (aIndex < 0.1) aW = 0.0;
 
-        vec3 bPos = texture2D(u_positionsTexture, vec2(coordinates.x, (bIndex + 0.5) / u_pointCount)).rgb;
+        vec3 bPos = texelFetch2D(u_positionsTexture, vec2(coordinates.x, (bIndex + 0.5) / u_pointCount), u_resolution).rgb;
         float bW = 1.0;
 
-        vec3 cPos = texture2D(u_positionsTexture, vec2(coordinates.x, (cIndex + 0.5) / u_pointCount)).rgb;
+        vec3 cPos = texelFetch2D(u_positionsTexture, vec2(coordinates.x, (cIndex + 0.5) / u_pointCount), u_resolution).rgb;
         float cW = 1.0;
 
         //coincident points give a zero distance; dividing would yield NaN,
@@ -45,7 +45,7 @@ void main () {
 
         float constraint = dot(r1, r2) - 1.0;
 
-        float random = texture2D(u_randomsTexture, vec2(coordinates.x, 0.5 / u_pointCount)).g;
+        float random = texelFetch2D(u_randomsTexture, vec2(coordinates.x, 0.5 / u_pointCount), u_resolution).g;
         float stiffness = random * u_stiffnessVariation;
 
         if (constraint > -1.0) {
@@ -68,9 +68,9 @@ void main () {
 
             gl_FragColor = vec4(newPosition, 0.0);
         } else {
-            gl_FragColor = texture2D(u_positionsTexture, coordinates).rgba;
+            gl_FragColor = texelFetch2D(u_positionsTexture, coordinates, u_resolution).rgba;
         }
     } else {
-        gl_FragColor = texture2D(u_positionsTexture, coordinates).rgba;
+        gl_FragColor = texelFetch2D(u_positionsTexture, coordinates, u_resolution).rgba;
     }
 }
