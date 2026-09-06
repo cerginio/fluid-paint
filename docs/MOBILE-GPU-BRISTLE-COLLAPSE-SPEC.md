@@ -465,14 +465,39 @@ target because it makes this entire bug class impossible:
 
 | Problem today (WebGL 1) | WebGL 2 resolution |
 |---|---|
-| `OES_texture_float_linear` optional; absence silently zeroes fetches | Sized internal formats (`R32F`, `RGBA32F`) with explicit filterability rules; `EXT_color_buffer_float` is the single gate |
-| No integer texture addressing | `texelFetch(tex, ivec2(x,y), 0)` — **no filter involved at all**, cannot be made incomplete by a filter mismatch |
+| `OES_texture_float_linear` optional; absence silently zeroes fetches | Sized internal formats (`R32F`, `RGBA32F`) make the format explicit; `EXT_color_buffer_float` is the single gate. **Does not by itself prevent the zeroing** — see the correction below |
+| No integer texture addressing | `texelFetch(tex, ivec2(x,y), 0)` — states exact-texel intent so the code cannot drift into accidental filtering. **Does not bypass texture completeness** |
 | `gl_FragCoord.xy / u_resolution` round-trip | `texelFetch` with `ivec2(gl_FragCoord.xy)` — exact, no division, no half-texel reasoning |
 | Ping-pong via framebuffer re-attachment per pass | Multiple render targets, transform feedback |
 | `%`-style index math in float | Real integer ops in GLSL ES 3.00 |
 
-`texelFetch` alone would have made this bug unwritable. Every state-texture read in the PBD
-solver is an integer texel lookup wearing a float-coordinate costume.
+**[CORRECTED 2026-09-07 — measured, not assumed]** This section originally claimed
+`texelFetch` "alone would have made this bug unwritable". **That is wrong**, and the
+measurement is worth recording so nobody relies on it.
+
+Test: an `RGBA32F` texture with `TEXTURE_MIN/MAG_FILTER = LINEAR`, read both ways in
+the same WebGL 2 shader:
+
+```
+texture(tex, uv)                   -> [0,0,0,1, 0,0,0,1, ...]   FAIL
+texelFetch(tex, ivec2(uv*res), 0)  -> [0,0,0,1, 0,0,0,0, ...]   FAIL
+```
+
+With `NEAREST` on the same texture, both return the correct `[1,2,3,4,...]`.
+
+Texture **completeness is a property of the texture object, not of the lookup
+function.** An incomplete texture yields `vec4(0,0,0,1)` to *every* sampling
+function, `texelFetch` included. WebGL 2 therefore provides **no structural
+immunity** to this bug.
+
+What actually prevents it — on both paths — is the NEAREST discipline plus the lint
+that enforces it (§4.1, `npm run lint:shaders`). `texelFetch` is still worth having,
+because it states exact-texel intent in the source so a future edit cannot silently
+reintroduce filtered sampling of a state texture. That is a drift guarantee, not a
+hardware one.
+
+Every state-texture read in the PBD solver is an integer texel lookup wearing a
+float-coordinate costume — and now says so explicitly.
 
 **Migration cost:** moderate and mechanical.
 - Add `#version 300 es` to all shaders; `attribute`→`in`, `varying`→`in`/`out`,

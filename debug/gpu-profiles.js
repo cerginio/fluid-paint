@@ -56,12 +56,18 @@ const GPU_PROFILES = {
   // Strictest realistic mobile baseline: no renderable float at all.
   // Expected outcome: the app shows the "no float textures" page. That is
   // correct behavior, not a bug.
+  //
+  // NOTE: on a WebGL 2 context this profile is only meaningful together with
+  // ?webgl=1. WebGL 2 has float textures in core and gates rendering on
+  // EXT_color_buffer_float, which is denied here too -- but a device with
+  // WebGL 2 at all is very unlikely to lack it.
   'mobile-worst': {
     label: 'Worst-case mobile (no float rendering)',
     deny: [
       'OES_texture_float_linear',
       'OES_texture_float',
       'WEBGL_color_buffer_float',
+      'EXT_color_buffer_float',
       'EXT_float_blend',
     ],
     params: { MAX_TEXTURE_SIZE: 4096 },

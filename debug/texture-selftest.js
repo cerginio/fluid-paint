@@ -33,6 +33,10 @@ void main () {
 `;
 
 function compileSelfTestProgram(gl) {
+  const gl2 = typeof WebGL2RenderingContext !== 'undefined' &&
+              gl instanceof WebGL2RenderingContext;
+  const vsSrc = gl2 ? GLSL3.toES3(SELFTEST_VS, 'vertex') : SELFTEST_VS;
+  const fsSrc = gl2 ? GLSL3.toES3(SELFTEST_FS, 'fragment') : SELFTEST_FS;
   function sh(type, src) {
     const s = gl.createShader(type);
     gl.shaderSource(s, src);
@@ -43,8 +47,8 @@ function compileSelfTestProgram(gl) {
     return s;
   }
   const p = gl.createProgram();
-  gl.attachShader(p, sh(gl.VERTEX_SHADER, SELFTEST_VS));
-  gl.attachShader(p, sh(gl.FRAGMENT_SHADER, SELFTEST_FS));
+  gl.attachShader(p, sh(gl.VERTEX_SHADER, vsSrc));
+  gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fsSrc));
   gl.bindAttribLocation(p, 0, 'a_position');
   gl.linkProgram(p);
   if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
@@ -66,9 +70,13 @@ function textureRoundTrip(gl, width, height, filter) {
   }
 
   // Source texture holding the known pattern.
+  const gl2 = typeof WebGL2RenderingContext !== 'undefined' &&
+              gl instanceof WebGL2RenderingContext;
+  const internal = gl2 ? gl.RGBA32F : gl.RGBA;
+
   const src = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, src);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.FLOAT, expected);
+  gl.texImage2D(gl.TEXTURE_2D, 0, internal, width, height, 0, gl.RGBA, gl.FLOAT, expected);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
@@ -78,7 +86,7 @@ function textureRoundTrip(gl, width, height, filter) {
   // render target's own filter is irrelevant to the test).
   const dst = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, dst);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.FLOAT, null);
+  gl.texImage2D(gl.TEXTURE_2D, 0, internal, width, height, 0, gl.RGBA, gl.FLOAT, null);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
@@ -139,17 +147,24 @@ function runTextureSelfTest(gl, opts) {
 
   const results = [];
 
-  const hasFloat = !!gl.getExtension('OES_texture_float');
+  // Float textures are core in WebGL 2 (gated on EXT_color_buffer_float for
+  // rendering); the OES extensions only exist on WebGL 1.
+  const isGL2 = typeof WebGL2RenderingContext !== 'undefined' &&
+                gl instanceof WebGL2RenderingContext;
+  const hasFloat = isGL2
+    ? !!gl.getExtension('EXT_color_buffer_float')
+    : !!gl.getExtension('OES_texture_float');
   const hasFloatLinear = !!gl.getExtension('OES_texture_float_linear');
 
   console.group('%c[selftest] texture round-trip', 'font-weight:bold');
-  console.log('OES_texture_float        : %s', hasFloat);
-  console.log('OES_texture_float_linear : %s', hasFloatLinear);
+  console.log('context                  : %s', isGL2 ? 'WebGL 2' : 'WebGL 1');
+  console.log('float render targets     : %s', hasFloat);
+  console.log('float linear filtering   : %s', hasFloatLinear);
 
   if (!hasFloat) {
-    console.error('No OES_texture_float -- float simulation is impossible on this device.');
+    console.error('No renderable float textures -- the simulation cannot run here.');
     console.groupEnd();
-    return [{ name: 'OES_texture_float', pass: false, reason: 'extension absent' }];
+    return [{ name: 'float render targets', pass: false, reason: 'unsupported' }];
   }
 
   for (const [name, filter] of [['NEAREST', gl.NEAREST], ['LINEAR', gl.LINEAR]]) {
@@ -179,10 +194,136 @@ function runTextureSelfTest(gl, opts) {
   }
 
   console.groupEnd();
+
+  if (typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext) {
+    testTexelFetchImmunity(gl);
+  }
+
   return results;
+}
+
+
+/*
+ * Does texelFetch bypass texture incompleteness? (WebGL 2 only)
+ *
+ * MEASURED ANSWER: no. Completeness is a property of the texture object, not of
+ * the lookup function -- an incomplete texture returns vec4(0,0,0,1) to every
+ * sampling function, texelFetch included.
+ *
+ * This is kept as a runnable check because the opposite is widely assumed (it
+ * was assumed in the first draft of the migration spec). What actually prevents
+ * the bug on both paths is the NEAREST discipline plus debug/lint-shaders.js.
+ */
+function testTexelFetchImmunity(gl) {
+  const NL = String.fromCharCode(10);
+  if (typeof WebGL2RenderingContext === 'undefined' ||
+      !(gl instanceof WebGL2RenderingContext)) {
+    return { skipped: 'not a WebGL 2 context' };
+  }
+  gl.getExtension('EXT_color_buffer_float');
+
+  const W = 8, H = 4;
+  const expected = new Float32Array(W * H * 4);
+  for (let i = 0; i < expected.length; ++i) expected[i] = i + 1;
+
+  function readBack(filter, mode) {
+    const src = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, src);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, W, H, 0, gl.RGBA, gl.FLOAT, expected);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+    const fetch = mode === 'texelFetch'
+      ? 'texelFetch(t, ivec2(uv * r), 0)'
+      : 'texture(t, uv)';
+    const vs = [
+      '#version 300 es',
+      'in vec2 a_position;',
+      'void main(){ gl_Position = vec4(a_position, 0.0, 1.0); }',
+    ].join(NL);
+    const fs = [
+      '#version 300 es',
+      'precision highp float;',
+      'precision highp int;',
+      'out vec4 o;',
+      'uniform sampler2D t;',
+      'uniform vec2 r;',
+      'void main(){ vec2 uv = gl_FragCoord.xy / r; o = ' + fetch + '; }',
+    ].join(NL);
+
+    const sh = (type, source) => {
+      const s2 = gl.createShader(type);
+      gl.shaderSource(s2, source); gl.compileShader(s2);
+      if (!gl.getShaderParameter(s2, gl.COMPILE_STATUS)) {
+        throw new Error(gl.getShaderInfoLog(s2));
+      }
+      return s2;
+    };
+    const prog = gl.createProgram();
+    gl.attachShader(prog, sh(gl.VERTEX_SHADER, vs));
+    gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, fs));
+    gl.bindAttribLocation(prog, 0, 'a_position');
+    gl.linkProgram(prog);
+
+    const dst = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, dst);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, W, H, 0, gl.RGBA, gl.FLOAT, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, dst, 0);
+
+    const quad = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,-1,1,1,-1,1,1]), gl.STATIC_DRAW);
+    gl.useProgram(prog);
+    gl.viewport(0, 0, W, H);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    gl.uniform2f(gl.getUniformLocation(prog, 'r'), W, H);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, src);
+    gl.uniform1i(gl.getUniformLocation(prog, 't'), 0);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    const out = new Float32Array(W * H * 4);
+    gl.readPixels(0, 0, W, H, gl.RGBA, gl.FLOAT, out);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.deleteFramebuffer(fbo); gl.deleteTexture(src); gl.deleteTexture(dst);
+    gl.deleteBuffer(quad); gl.deleteProgram(prog);
+
+    let ok = true;
+    for (let i = 0; i < expected.length; ++i) if (out[i] !== expected[i]) ok = false;
+    return { pass: ok, first4: Array.from(out.slice(0, 4)) };
+  }
+
+  const result = {
+    linear_texture: readBack(gl.LINEAR, 'texture'),
+    linear_texelFetch: readBack(gl.LINEAR, 'texelFetch'),
+    nearest_texture: readBack(gl.NEAREST, 'texture'),
+    nearest_texelFetch: readBack(gl.NEAREST, 'texelFetch'),
+  };
+  result.texelFetchGivesImmunity = result.linear_texelFetch.pass;
+
+  console.group('%c[selftest] does texelFetch bypass incompleteness?', 'font-weight:bold');
+  console.log('LINEAR  + texture()    :', result.linear_texture.pass ? 'pass' : 'FAIL', result.linear_texture.first4);
+  console.log('LINEAR  + texelFetch() :', result.linear_texelFetch.pass ? 'pass' : 'FAIL', result.linear_texelFetch.first4);
+  console.log('NEAREST + texture()    :', result.nearest_texture.pass ? 'pass' : 'FAIL', result.nearest_texture.first4);
+  console.log('NEAREST + texelFetch() :', result.nearest_texelFetch.pass ? 'pass' : 'FAIL', result.nearest_texelFetch.first4);
+  console.log(result.texelFetchGivesImmunity
+    ? 'texelFetch DOES bypass incompleteness on this driver (unexpected).'
+    : 'texelFetch does NOT bypass incompleteness -- NEAREST is what protects us.');
+  console.groupEnd();
+
+  return result;
 }
 
 if (typeof window !== 'undefined') {
   window.runTextureSelfTest = runTextureSelfTest;
+  window.testTexelFetchImmunity = testTexelFetchImmunity;
   window.textureRoundTrip = textureRoundTrip;
 }
