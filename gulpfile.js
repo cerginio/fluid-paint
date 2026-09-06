@@ -26,6 +26,9 @@ const paths = {
   // Order matters because the project uses globals (no module system).
   // Adjust if you add/remove files.
   js: [
+    // device-emulation harness must load before wrappedgl.js
+    'debug/gpu-profiles.js',
+    'debug/texture-selftest.js',
     'common.js',
     'debug.js',
     'wrappedgl.js',

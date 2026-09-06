@@ -54,6 +54,8 @@
 
     <div id="placeholder"></div>
 
+    <script src="debug/gpu-profiles.js"></script>
+    <script src="debug/texture-selftest.js"></script>
     <script src="wrappedgl.js"></script>
     <script src="common.js"></script>
     <script src="debug.js"></script>
@@ -78,7 +80,22 @@
             // main app canvas
             const canvas = document.createElement('canvas');
             document.body.appendChild(canvas);
-            const wgl = WrappedGL.create(canvas);
+
+            // ---- device-emulation harness (see docs/MOBILE-GPU-BRISTLE-COLLAPSE-SPEC.md) ----
+            // ?gpu=samsung-a56   clamp capabilities to a target mobile device
+            // ?selftest=1        run the texture round-trip assertions
+            // ?audit=1           log every FLOAT+LINEAR texture creation
+            const params = new URLSearchParams(location.search);
+            const gpuProfile = params.get('gpu');
+
+            const wgl = WrappedGL.create(canvas, null, (rawGl) => {
+                if (gpuProfile) installGpuClamp(rawGl, gpuProfile);
+            });
+
+            if (wgl !== null) {
+                if (params.get('audit') === '1') auditFloatLinearTextures(wgl);
+                if (params.get('selftest') === '1') runTextureSelfTest(wgl.gl);
+            }
 
             // create the debug canvas now that DOM exists
             const dbg = setupDebugCanvas({ w: 256, h: 256, corner: 'bottom-right' });

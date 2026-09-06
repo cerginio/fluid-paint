@@ -181,7 +181,10 @@ function arraysEqual(a, b) {
   
   class WrappedGL {
     // --- static factory ---
-    static create(canvas, options) {
+    // `onContext` is an optional hook that receives the raw WebGLRenderingContext
+    // before WrappedGL wraps it. Used by the device-emulation harness
+    // (debug/gpu-profiles.js) to clamp capabilities down to a target GPU.
+    static create(canvas, options, onContext) {
       let gl = null;
       try {
         gl = canvas.getContext('webgl', options) || canvas.getContext('experimental-webgl', options);
@@ -189,6 +192,7 @@ function arraysEqual(a, b) {
         return null; // no webgl support
       }
       if (gl === null) return null;
+      if (typeof onContext === 'function') onContext(gl);
       return new WrappedGL(gl);
     }
   
