@@ -21,7 +21,8 @@
   "scripts": {
     "dev": "NODE_ENV=development gulp serve",
     "build": "NODE_ENV=production gulp build",
-    "clean": "gulp clean"
+    "clean": "gulp clean",
+    "lint:shaders": "node debug/lint-shaders.js"
   },
   "devDependencies": {
     "autoprefixer": "^10.4.0",

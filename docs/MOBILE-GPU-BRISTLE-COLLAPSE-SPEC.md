@@ -1,7 +1,10 @@
 # Fluid Paint — Mobile GPU Bristle Collapse
 
-> **STATUS (2026-09-06): diagnosis CONFIRMED, fix IMPLEMENTED and VERIFIED in the
-> desktop harness. Awaiting confirmation on a physical Samsung A56.**
+> **STATUS (2026-09-06): RESOLVED. Diagnosis confirmed, fix implemented, and
+> VERIFIED WORKING ON A PHYSICAL SAMSUNG A56.**
+>
+> The device that motivated this investigation now paints correctly. The
+> filtering bug is closed.
 >
 > - Reproduced on desktop: `?gpu=samsung-a56-boots` painted a fully blank canvas
 >   for a stroke that paints correctly unclamped.
@@ -11,8 +14,10 @@
 > - Fixed in commit `a31ea61`; `?gpu=samsung-a56` now boots and paints a correct
 >   bristle stroke where it previously showed the capability-gate error page.
 > - Holds on the strict SwiftShader/Vulkan ANGLE backend as well as D3D11.
-> - Device verification: see [DEVICE-VERIFICATION.md](DEVICE-VERIFICATION.md).
-> - §5 migration is **deferred** pending real-device confirmation.
+> - **Confirmed on the physical Samsung A56 by the project owner.** Procedure:
+>   [DEVICE-VERIFICATION.md](DEVICE-VERIFICATION.md).
+> - §5 migration is now an open choice on its own merits, not a remediation
+>   step — the WebGL 1 path works on the affected hardware.
 >
 > Corrections to the original analysis, from what the harness actually showed,
 > are marked **[CONFIRMED]** / **[CORRECTED]** inline below.
@@ -548,7 +553,9 @@ Steps 1–4 are the fix. Steps 5–6 keep it fixed. Steps 7–8 are strategy.
    divisor use `maxBristleCount`. This is correct as written but fragile — worth a comment.
    It is *not* the bug; it behaves identically on both platforms.
 
-3. **Does the A56 tolerate `RGBA/FLOAT` render targets at all?** `WEBGL_color_buffer_float`
-   is present in the probe, and the NEAREST round-trip passes under the clamp, so
-   yes in principle. **Still to confirm on the physical device** — this is the one
-   remaining question, and `?diag=1` answers it directly.
+3. **~~Does the A56 tolerate `RGBA/FLOAT` render targets at all?~~ RESOLVED.**
+   Yes. Confirmed on the physical device: the app boots and paints correctly with
+   `RGBA/FLOAT` render targets and NEAREST filtering. The WebGL 1 path is viable
+   as the long-term mobile path.
+
+**No open questions remain for this bug.**

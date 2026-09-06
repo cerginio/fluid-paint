@@ -1,4 +1,4 @@
- precision mediump float;
+ precision highp float;
   
     uniform vec2 u_bottomLeft;    // rectangle bottom-left in screen pixels
     uniform vec2 u_topRight;      // rectangle top-right  in screen pixels
