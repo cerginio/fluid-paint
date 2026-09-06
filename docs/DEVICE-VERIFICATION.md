@@ -45,7 +45,7 @@ The diagnostic panel reports:
 | Line | Expected on a Samsung A56 | Meaning |
 |---|---|---|
 | context | **WebGL 2** expected | The A56 supports it. `?webgl=1` forces the WebGL 1 fallback if you want to compare. |
-| `OES_texture_float` | **true** | Float textures usable at all. If false, the device cannot run the simulation. |
+| `EXT_color_buffer_float` (WebGL 2)<br>`OES_texture_float` (WebGL 1) | **true** | Renderable float textures. The panel shows whichever one applies to the active path. If false, the device cannot run the simulation. |
 | `OES_texture_float_linear` | **false** | Confirms the device is in the affected class. |
 | `hasFloatTextureSupport()` | **true** | The relaxed gate now lets it boot. Was false before the fix. |
 | `FLOAT + NEAREST round-trip` | **PASS** | The path the app now uses. **This is the one that must pass.** |

@@ -42,14 +42,19 @@ function showDeviceDiagnostics(wgl) {
     const dbg = gl.getExtension('WEBGL_debug_renderer_info');
     const renderer = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : '(masked)';
 
-    const hasFloat = !!gl.getExtension('OES_texture_float');
+    const hasFloat = wgl.isWebGL2
+      ? !!gl.getExtension('EXT_color_buffer_float')   // core textures, this gates rendering
+      : !!gl.getExtension('OES_texture_float');
     const hasFloatLinear = !!gl.getExtension('OES_texture_float_linear');
     const gate = wgl.hasFloatTextureSupport();
 
     rows.push('<div style="font-weight:700;margin-bottom:4px">fluid-paint device diagnostics</div>');
     rows.push('<div style="opacity:.55;word-break:break-all;margin-bottom:6px">' + renderer + '</div>');
 
-    add('OES_texture_float', String(hasFloat), hasFloat ? 'good' : 'bad');
+    add('context', wgl.isWebGL2 ? 'WebGL 2' : 'WebGL 1 (fallback)',
+        wgl.isWebGL2 ? 'good' : 'expected');
+    add(wgl.isWebGL2 ? 'EXT_color_buffer_float' : 'OES_texture_float',
+        String(hasFloat), hasFloat ? 'good' : 'bad');
     add('OES_texture_float_linear', String(hasFloatLinear),
         hasFloatLinear ? 'good' : 'expected');
     add('hasFloatTextureSupport()', String(gate), gate ? 'good' : 'bad');
