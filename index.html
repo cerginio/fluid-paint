@@ -124,7 +124,7 @@
                     //required features are supported
                     document.getElementById('placeholder').outerHTML = document.getElementById('main').innerHTML;
                     const painter = new Paint(canvas, wgl);
-                    runWebGLSelfTest(wgl.gl)
+                    if (typeof runWebGLSelfTest === 'function') runWebGLSelfTest(wgl.gl);
                 } else {
                     //required features unsupported
                     document.getElementById('placeholder').outerHTML = document.getElementById('no-support').innerHTML;

@@ -38,8 +38,10 @@ void main () {
         vec3 cPos = texture2D(u_positionsTexture, vec2(coordinates.x, (cIndex + 0.5) / u_pointCount)).rgb;
         float cW = 1.0;
 
-        vec3 r1 = (bPos - aPos) / distance(aPos, bPos);
-        vec3 r2 = (cPos - bPos) / distance(bPos, cPos);
+        //coincident points give a zero distance; dividing would yield NaN,
+        //which then propagates through the whole texture on later iterations
+        vec3 r1 = (bPos - aPos) / max(distance(aPos, bPos), 0.0001);
+        vec3 r2 = (cPos - bPos) / max(distance(bPos, cPos), 0.0001);
 
         float constraint = dot(r1, r2) - 1.0;
 

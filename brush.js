@@ -23,6 +23,10 @@ class Brush {
     this.maxBristleCount = maxBristleCount;
     this.bristleCount = maxBristleCount; // number of bristles currently being used
 
+    // exposed so the splat shaders can do their own bristle interpolation
+    // (the state textures are NEAREST -- see docs/MOBILE-GPU-BRISTLE-COLLAPSE-SPEC.md)
+    this.verticesPerBristle = VERTICES_PER_BRISTLE;
+
     this.projectProgram = wgl.createProgram(
       shaderSources['shaders/fullscreen.vert'],
       shaderSources['shaders/project.frag']
@@ -56,27 +60,27 @@ class Brush {
     // contains bristle vertex positions (x axis = bristle, y axis = vertex index)
     this.positionsTexture = wgl.buildTexture(
       wgl.RGBA, wgl.FLOAT, maxBristleCount, VERTICES_PER_BRISTLE,
-      null, wgl.CLAMP_TO_EDGE, wgl.CLAMP_TO_EDGE, wgl.LINEAR, wgl.LINEAR
+      null, wgl.CLAMP_TO_EDGE, wgl.CLAMP_TO_EDGE, wgl.NEAREST, wgl.NEAREST
     );
     this.previousPositionsTexture = wgl.buildTexture(
       wgl.RGBA, wgl.FLOAT, maxBristleCount, VERTICES_PER_BRISTLE,
-      null, wgl.CLAMP_TO_EDGE, wgl.CLAMP_TO_EDGE, wgl.LINEAR, wgl.LINEAR
+      null, wgl.CLAMP_TO_EDGE, wgl.CLAMP_TO_EDGE, wgl.NEAREST, wgl.NEAREST
     );
     this.velocitiesTexture = wgl.buildTexture(
       wgl.RGBA, wgl.FLOAT, maxBristleCount, VERTICES_PER_BRISTLE,
-      null, wgl.CLAMP_TO_EDGE, wgl.CLAMP_TO_EDGE, wgl.LINEAR, wgl.LINEAR
+      null, wgl.CLAMP_TO_EDGE, wgl.CLAMP_TO_EDGE, wgl.NEAREST, wgl.NEAREST
     );
     this.previousVelocitiesTexture = wgl.buildTexture(
       wgl.RGBA, wgl.FLOAT, maxBristleCount, VERTICES_PER_BRISTLE,
-      null, wgl.CLAMP_TO_EDGE, wgl.CLAMP_TO_EDGE, wgl.LINEAR, wgl.LINEAR
+      null, wgl.CLAMP_TO_EDGE, wgl.CLAMP_TO_EDGE, wgl.NEAREST, wgl.NEAREST
     );
     this.projectedPositionsTexture = wgl.buildTexture(
       wgl.RGBA, wgl.FLOAT, maxBristleCount, VERTICES_PER_BRISTLE,
-      null, wgl.CLAMP_TO_EDGE, wgl.CLAMP_TO_EDGE, wgl.LINEAR, wgl.LINEAR
+      null, wgl.CLAMP_TO_EDGE, wgl.CLAMP_TO_EDGE, wgl.NEAREST, wgl.NEAREST
     );
     this.projectedPositionsTextureTemp = wgl.buildTexture(
       wgl.RGBA, wgl.FLOAT, maxBristleCount, VERTICES_PER_BRISTLE,
-      null, wgl.CLAMP_TO_EDGE, wgl.CLAMP_TO_EDGE, wgl.LINEAR, wgl.LINEAR
+      null, wgl.CLAMP_TO_EDGE, wgl.CLAMP_TO_EDGE, wgl.NEAREST, wgl.NEAREST
     );
 
 
@@ -105,7 +109,7 @@ class Brush {
     }
     this.randomsTexture = wgl.buildTexture(
       wgl.RGBA, wgl.FLOAT, maxBristleCount, VERTICES_PER_BRISTLE,
-      new Float32Array(randoms), wgl.CLAMP_TO_EDGE, wgl.CLAMP_TO_EDGE, wgl.LINEAR, wgl.LINEAR
+      new Float32Array(randoms), wgl.CLAMP_TO_EDGE, wgl.CLAMP_TO_EDGE, wgl.NEAREST, wgl.NEAREST
     );
 
     // splat mesh (quads per segment)

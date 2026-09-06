@@ -431,8 +431,14 @@ function arraysEqual(a, b) {
       return true;
     }
   
+    // OES_texture_float_linear is deliberately NOT required. Most mobile GPUs
+    // (e.g. Samsung Xclipse 540) do not expose it, and a FLOAT texture with a
+    // LINEAR filter is incomplete there -- every fetch returns vec4(0,0,0,1).
+    // All float textures are therefore created NEAREST and the few sites that
+    // genuinely need interpolation do it in the shader.
+    // See docs/MOBILE-GPU-BRISTLE-COLLAPSE-SPEC.md
     hasFloatTextureSupport() {
-      if (this.getExtension('OES_texture_float') === null || this.getExtension('OES_texture_float_linear') === null) return false;
+      if (this.getExtension('OES_texture_float') === null) return false;
       if (!this.canRenderToTexture(this.FLOAT)) return false;
       return true;
     }

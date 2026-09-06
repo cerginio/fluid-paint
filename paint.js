@@ -157,8 +157,8 @@ class Paint {
                 null,
                 wgl.CLAMP_TO_EDGE,
                 wgl.CLAMP_TO_EDGE,
-                wgl.LINEAR,
-                wgl.LINEAR
+                wgl.NEAREST,
+                wgl.NEAREST
             );
 
             wgl.framebufferTexture2D(
@@ -323,8 +323,8 @@ class Paint {
                 null,
                 wgl.CLAMP_TO_EDGE,
                 wgl.CLAMP_TO_EDGE,
-                wgl.LINEAR,
-                wgl.LINEAR
+                wgl.NEAREST,
+                wgl.NEAREST
             );
             this.tempCanvasTexture = wgl.buildTexture(
                 wgl.RGBA,
@@ -334,8 +334,8 @@ class Paint {
                 null,
                 wgl.CLAMP_TO_EDGE,
                 wgl.CLAMP_TO_EDGE,
-                wgl.LINEAR,
-                wgl.LINEAR
+                wgl.NEAREST,
+                wgl.NEAREST
             );
             this.blurredCanvasTexture = wgl.buildTexture(
                 wgl.RGBA,
@@ -345,8 +345,8 @@ class Paint {
                 null,
                 wgl.CLAMP_TO_EDGE,
                 wgl.CLAMP_TO_EDGE,
-                wgl.LINEAR,
-                wgl.LINEAR
+                wgl.NEAREST,
+                wgl.NEAREST
             );
 
             this.needsRedraw = true;
@@ -1298,8 +1298,8 @@ class Paint {
                 null,
                 this.wgl.CLAMP_TO_EDGE,
                 this.wgl.CLAMP_TO_EDGE,
-                this.wgl.LINEAR,
-                this.wgl.LINEAR
+                this.wgl.NEAREST,
+                this.wgl.NEAREST
             );
         }
 

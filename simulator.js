@@ -99,8 +99,8 @@ class Simulator {
       null,
       wgl.CLAMP_TO_EDGE,
       wgl.CLAMP_TO_EDGE,
-      wgl.LINEAR,
-      wgl.LINEAR
+      wgl.NEAREST,
+      wgl.NEAREST
     );
     this.paintTextureTemp = wgl.buildTexture(
       wgl.RGBA,
@@ -110,8 +110,8 @@ class Simulator {
       null,
       wgl.CLAMP_TO_EDGE,
       wgl.CLAMP_TO_EDGE,
-      wgl.LINEAR,
-      wgl.LINEAR
+      wgl.NEAREST,
+      wgl.NEAREST
     );
 
     this.velocityTexture = wgl.buildTexture(
@@ -122,8 +122,8 @@ class Simulator {
       null,
       wgl.CLAMP_TO_EDGE,
       wgl.CLAMP_TO_EDGE,
-      wgl.LINEAR,
-      wgl.LINEAR
+      wgl.NEAREST,
+      wgl.NEAREST
     );
     this.velocityTextureTemp = wgl.buildTexture(
       wgl.RGBA,
@@ -133,8 +133,8 @@ class Simulator {
       null,
       wgl.CLAMP_TO_EDGE,
       wgl.CLAMP_TO_EDGE,
-      wgl.LINEAR,
-      wgl.LINEAR
+      wgl.NEAREST,
+      wgl.NEAREST
     );
 
     this.divergenceTexture = wgl.buildTexture(
@@ -267,8 +267,8 @@ class Simulator {
       null,
       wgl.CLAMP_TO_EDGE,
       wgl.CLAMP_TO_EDGE,
-      wgl.LINEAR,
-      wgl.LINEAR
+      wgl.NEAREST,
+      wgl.NEAREST
     );
 
     wgl.framebufferTexture2D(
@@ -295,8 +295,8 @@ class Simulator {
       null,
       wgl.CLAMP_TO_EDGE,
       wgl.CLAMP_TO_EDGE,
-      wgl.LINEAR,
-      wgl.LINEAR
+      wgl.NEAREST,
+      wgl.NEAREST
     );
     this.copyTexture(newWidth, newHeight, this.paintTexture, this.paintTextureTemp);
 
@@ -309,8 +309,8 @@ class Simulator {
       null,
       wgl.CLAMP_TO_EDGE,
       wgl.CLAMP_TO_EDGE,
-      wgl.LINEAR,
-      wgl.LINEAR
+      wgl.NEAREST,
+      wgl.NEAREST
     );
     wgl.rebuildTexture(
       this.velocityTextureTemp,
@@ -321,8 +321,8 @@ class Simulator {
       null,
       wgl.CLAMP_TO_EDGE,
       wgl.CLAMP_TO_EDGE,
-      wgl.LINEAR,
-      wgl.LINEAR
+      wgl.NEAREST,
+      wgl.NEAREST
     );
 
     wgl.rebuildTexture(
@@ -385,8 +385,8 @@ class Simulator {
       null,
       wgl.CLAMP_TO_EDGE,
       wgl.CLAMP_TO_EDGE,
-      wgl.LINEAR,
-      wgl.LINEAR
+      wgl.NEAREST,
+      wgl.NEAREST
     );
     this.copyTexture(newWidth, newHeight, this.paintTexture, this.paintTextureTemp);
     Utilities.swap(this, 'paintTexture', 'paintTextureTemp');
@@ -403,8 +403,8 @@ class Simulator {
       null,
       wgl.CLAMP_TO_EDGE,
       wgl.CLAMP_TO_EDGE,
-      wgl.LINEAR,
-      wgl.LINEAR
+      wgl.NEAREST,
+      wgl.NEAREST
     );
     this.copyTexture(newWidth, newHeight, this.paintTexture, this.paintTextureTemp);
 
@@ -417,8 +417,8 @@ class Simulator {
       null,
       wgl.CLAMP_TO_EDGE,
       wgl.CLAMP_TO_EDGE,
-      wgl.LINEAR,
-      wgl.LINEAR
+      wgl.NEAREST,
+      wgl.NEAREST
     );
     wgl.rebuildTexture(
       this.velocityTextureTemp,
@@ -429,8 +429,8 @@ class Simulator {
       null,
       wgl.CLAMP_TO_EDGE,
       wgl.CLAMP_TO_EDGE,
-      wgl.LINEAR,
-      wgl.LINEAR
+      wgl.NEAREST,
+      wgl.NEAREST
     );
 
     wgl.rebuildTexture(
@@ -563,6 +563,7 @@ class Simulator {
       .uniform4f('u_splatColor', splatColor[0], splatColor[1], splatColor[2], splatColor[3])
       .uniformTexture('u_positionsTexture', 0, wgl.TEXTURE_2D, brush.positionsTexture)
       .uniformTexture('u_previousPositionsTexture', 1, wgl.TEXTURE_2D, brush.previousPositionsTexture)
+      .uniform1f('u_verticesPerBristle', brush.verticesPerBristle)
       .uniform1f('u_zThreshold', zThreshold);
 
     wgl.framebufferTexture2D(
@@ -618,6 +619,7 @@ class Simulator {
       .uniformTexture('u_previousPositionsTexture', 1, wgl.TEXTURE_2D, brush.previousPositionsTexture)
       .uniformTexture('u_velocitiesTexture', 2, wgl.TEXTURE_2D, brush.velocitiesTexture)
       .uniformTexture('u_previousVelocitiesTexture', 3, wgl.TEXTURE_2D, brush.previousVelocitiesTexture)
+      .uniform1f('u_verticesPerBristle', brush.verticesPerBristle)
       .uniform1f('u_zThreshold', zThreshold)
       .uniform1f('u_velocityScale', velocityScale);
 
