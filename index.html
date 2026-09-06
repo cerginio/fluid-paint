@@ -56,6 +56,7 @@
 
     <script src="debug/gpu-profiles.js"></script>
     <script src="debug/texture-selftest.js"></script>
+    <script src="debug/device-diag.js"></script>
     <script src="wrappedgl.js"></script>
     <script src="common.js"></script>
     <script src="debug.js"></script>
@@ -95,6 +96,7 @@
             if (wgl !== null) {
                 if (params.get('audit') === '1') auditFloatLinearTextures(wgl);
                 if (params.get('selftest') === '1') runTextureSelfTest(wgl.gl);
+                if (params.get('diag') === '1') showDeviceDiagnostics(wgl);
             }
 
             // create the debug canvas now that DOM exists
