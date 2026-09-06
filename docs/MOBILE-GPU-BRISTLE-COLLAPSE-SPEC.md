@@ -1,5 +1,22 @@
 # Fluid Paint — Mobile GPU Bristle Collapse
 
+> **STATUS (2026-09-06): diagnosis CONFIRMED, fix IMPLEMENTED and VERIFIED in the
+> desktop harness. Awaiting confirmation on a physical Samsung A56.**
+>
+> - Reproduced on desktop: `?gpu=samsung-a56-boots` painted a fully blank canvas
+>   for a stroke that paints correctly unclamped.
+> - Root cause proven directly: a FLOAT+LINEAR texture round-trip reads back
+>   `[0,0,0,1]` per texel — exactly `vec4(0,0,0,1)` — while FLOAT+NEAREST reads
+>   back correctly.
+> - Fixed in commit `a31ea61`; `?gpu=samsung-a56` now boots and paints a correct
+>   bristle stroke where it previously showed the capability-gate error page.
+> - Holds on the strict SwiftShader/Vulkan ANGLE backend as well as D3D11.
+> - Device verification: see [DEVICE-VERIFICATION.md](DEVICE-VERIFICATION.md).
+> - §5 migration is **deferred** pending real-device confirmation.
+>
+> Corrections to the original analysis, from what the harness actually showed,
+> are marked **[CONFIRMED]** / **[CORRECTED]** inline below.
+
 **Findings & Remediation Spec**
 
 Author: analysis pass, 2026-09-06
@@ -74,6 +91,11 @@ At DPR 2.8125 a 384-CSS-px viewport backs onto ~1080 device px. Combined with th
 ever exercises — see §4.3.
 
 ### 1.2 The offending code
+
+**[CORRECTED]** The problem is not confined to `brush.js`. The `?audit=1` pass
+found FLOAT+LINEAR textures in `brush.js` (7), `simulator.js` (12) and `paint.js`
+(5) — the fluid paint/velocity/pressure textures and the undo snapshots are
+affected too. The brush is simply where the failure is most visible.
 
 `brush.js` creates **six** simulation state textures, all identically:
 
@@ -505,14 +527,19 @@ Steps 1–4 are the fix. Steps 5–6 keep it fixed. Steps 7–8 are strategy.
 
 ## 7. Open questions
 
-1. **Does the A56 currently reach the app at all, or does it show the "no float textures"
-   page?** `hasFloatTextureSupport()` requires `OES_texture_float_linear`, which the A56 lacks
-   — so strictly read, the A56 should be showing the error page, not a collapsed brush. The
-   reported symptom (bristles collapsed, bottom-left corner paints) implies it *is* running.
-   Resolve by confirming on-device whether `hasFloatTextureSupport()` returns true. If it
-   returns false and the app still runs, something bypasses the gate; if it returns true,
-   `canRenderToTexture` is masking the `getExtension` result. Either way §4 is still the fix —
-   this only changes which devices are currently in which failure mode.
+1. **~~Does the A56 currently reach the app at all?~~ RESOLVED.** **[CONFIRMED]**
+   Under the honest `samsung-a56` profile the app did **not** start — it showed
+   "your browser does not support WebGL floating point textures", because
+   `hasFloatTextureSupport()` required `OES_texture_float_linear`.
+
+   So a device in this class has **two** distinct failure modes, and which one
+   you see depends on whether the gate is reached:
+   - gate enforced → error page, app never runs;
+   - gate bypassed → app runs, bristles collapse, only the origin corner paints.
+
+   The reported field symptom is the second. Both are fixed: §4.1–4.2 make the
+   simulation work without the extension, and §4.3 removes the gate that
+   rejected the device.
 
 2. **`u_resolution` vs viewport.** `brush.js` passes `u_resolution = (maxBristleCount,
    VERTICES_PER_BRISTLE)` while setting `viewport(0, 0, this.bristleCount,
@@ -521,6 +548,7 @@ Steps 1–4 are the fix. Steps 5–6 keep it fixed. Steps 7–8 are strategy.
    divisor use `maxBristleCount`. This is correct as written but fragile — worth a comment.
    It is *not* the bug; it behaves identically on both platforms.
 
-3. **Does the A56 tolerate `RGBA/FLOAT` render targets at all?** `WEBGL_color_buffer_float` is
-   present, so yes in principle. Confirm with the §3.4 readback test on-device before
-   committing to the WebGL 1 fix as the long-term mobile path.
+3. **Does the A56 tolerate `RGBA/FLOAT` render targets at all?** `WEBGL_color_buffer_float`
+   is present in the probe, and the NEAREST round-trip passes under the clamp, so
+   yes in principle. **Still to confirm on the physical device** — this is the one
+   remaining question, and `?diag=1` answers it directly.
