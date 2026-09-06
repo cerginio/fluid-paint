@@ -19,24 +19,24 @@
   },
   "homepage": "https://github.com/cerginio/fluid-paint#readme",
   "scripts": {
-    "dev": "NODE_ENV=development gulp serve",
-    "build": "NODE_ENV=production gulp build",
+    "dev": "cross-env NODE_ENV=development gulp serve",
+    "build": "cross-env NODE_ENV=production gulp build",
     "clean": "gulp clean",
     "lint:shaders": "node debug/lint-shaders.js"
   },
+  "overrides": {
+    "picomatch": "2.3.2"
+  },
   "devDependencies": {
-    "autoprefixer": "^10.4.0",
-    "browser-sync": "^2.29.0",
-    "cssnano": "^6.0.0",
-    "gulp": "^4.0.2",
+    "autoprefixer": "^10.5.5",
+    "cross-env": "^10.1.0",
+    "cssnano": "^7.1.9",
+    "gulp": "^5.0.1",
     "gulp-concat": "^2.6.1",
-    "gulp-htmlmin": "^5.0.1",
-    "gulp-if": "^3.0.0",
-    "gulp-order": "^1.2.0",
+    "gulp-html-minifier-terser": "^8.0.0",
     "gulp-plumber": "^1.2.1",
-    "gulp-postcss": "^9.0.1",
+    "gulp-postcss": "^10.0.0",
     "gulp-replace": "^1.1.4",
-    "gulp-sourcemaps": "^3.0.0",
     "gulp-terser": "^2.1.0"
   }
 }

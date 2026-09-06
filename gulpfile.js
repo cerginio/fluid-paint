@@ -1,22 +1,19 @@
 /* eslint-disable no-undef */
 const { src, dest, series, parallel, watch } = require('gulp');
 const fs = require('fs/promises');
+const http = require('http');
 const path = require('path');
 
 const plumber = require('gulp-plumber');
-const sourcemaps = require('gulp-sourcemaps');
 const concat = require('gulp-concat');
-const order = require('gulp-order');
 const terser = require('gulp-terser');
 const postcss = require('gulp-postcss');
 const autoprefixer = require('autoprefixer');
 const cssnano = require('cssnano');
 const replace = require('gulp-replace');
-const htmlmin = require('gulp-htmlmin');
-const gulpIf = require('gulp-if');
-const browserSync = require('browser-sync').create();
+const htmlmin = require('gulp-html-minifier-terser');
 
-const isProd = false;// process.env.NODE_ENV === 'production';
+const isProd = process.env.NODE_ENV === 'production';
 
 const paths = {
   src: '.',
@@ -59,45 +56,37 @@ async function clean() {
 function scripts() {
   return src(paths.js, { allowEmpty: true })
     .pipe(plumber())
-    .pipe(sourcemaps.init())
-    .pipe(order(paths.js, { base: './' }))
     .pipe(concat('bundle.js', { newLine: ';\n' }))
     .pipe(terser({
       compress: isProd,
       mangle: isProd,
       keep_fnames: !isProd
     }))
-    .pipe(sourcemaps.write('.', { includeContent: false, sourceRoot: '/' }))
-    .pipe(dest(paths.dist))
-    .pipe(browserSync.stream({ match: '**/*.js' }));
+    .pipe(dest(paths.dist));
 }
 
 // ---------- STYLES ----------
 function styles() {
   return src(paths.css, { allowEmpty: true })
     .pipe(plumber())
-    .pipe(sourcemaps.init())
     .pipe(postcss([
       autoprefixer(),
-      cssnano()
+      ...(isProd ? [cssnano()] : [])
     ]))
-    .pipe(sourcemaps.write('.'))
-    .pipe(dest(paths.dist))
-    .pipe(browserSync.stream({ match: '**/*.css' }));
+    .pipe(dest(paths.dist));
 }
 
 // ---------- SHADERS ----------
 function shaders() {
   return src(paths.shaders, { allowEmpty: true })
-    .pipe(dest(path.join(paths.dist, 'shaders')))
-    .pipe(browserSync.stream({ match: '**/*' }));
+    .pipe(dest(path.join(paths.dist, 'shaders')));
 }
 
 // ---------- HTML ----------
 // Remove all local <script src="*.js"> tags and inject a single bundle.js.
 // Also minify in production.
 function html() {
-  return src(paths.html, { allowEmpty: true })
+  let stream = src(paths.html, { allowEmpty: true })
     .pipe(plumber())
 
     // 1) Remove existing bundle reference (idempotent)
@@ -117,16 +106,18 @@ function html() {
     .pipe(replace(
       /<\/body>/i,
       '  <script src="bundle.js"></script>\n</body>'
-    ))
+    ));
 
-    .pipe(gulpIf(isProd, htmlmin({
+  if (isProd) {
+    stream = stream.pipe(htmlmin({
       collapseWhitespace: true,
       removeComments: true,
       minifyJS: true,
       minifyCSS: true
-    })))
-    .pipe(dest(paths.dist))
-    .pipe(browserSync.stream({ match: '**/*.html' }));
+    }));
+  }
+
+  return stream.pipe(dest(paths.dist));
 }
 
 // ---------- STATIC (optional) ----------
@@ -135,35 +126,41 @@ function staticFiles() {
     .pipe(dest(paths.dist));
 }
 
-// ---------- DEV COPY ----------
-function dev() {
-  return src([
-    '**/*',
-    '!node_modules/**',
-    '!dist/**',
-    '!.git/**',
-    '!**/*.md',
-    '!LICENSE',
-    '!.gitignore',
-    '!package*',
-    '!LICENSE.*',
-    '!gulpfile.js',
-
-  ], { dot: true })
-    .pipe(dest(paths.dist));
-}
-
 // ---------- SERVE ----------
-function serve() {
-  browserSync.init({
-    server: { baseDir: paths.dist },
-    open: false,
-    notify: false
-  });
+function startServer(done) {
+  const contentTypes = {
+    '.css': 'text/css; charset=utf-8',
+    '.html': 'text/html; charset=utf-8',
+    '.js': 'text/javascript; charset=utf-8',
+    '.json': 'application/json; charset=utf-8',
+    '.frag': 'text/plain; charset=utf-8',
+    '.vert': 'text/plain; charset=utf-8'
+  };
+  const root = path.resolve(paths.dist);
 
-  // initial build
-  const initial = parallel(html, styles, shaders, scripts);
-  initial(() => { });
+  http.createServer(async (request, response) => {
+    const requestPath = new URL(request.url, 'http://localhost').pathname;
+    const relativePath = decodeURIComponent(requestPath === '/' ? '/index.html' : requestPath)
+      .replace(/^[/\\]+/, '');
+    const filePath = path.resolve(root, relativePath);
+
+    if (!filePath.startsWith(`${root}${path.sep}`)) {
+      response.writeHead(403).end('Forbidden');
+      return;
+    }
+
+    try {
+      const file = await fs.readFile(filePath);
+      response.writeHead(200, {
+        'Content-Type': contentTypes[path.extname(filePath)] || 'application/octet-stream'
+      }).end(file);
+    } catch {
+      response.writeHead(404).end('Not found');
+    }
+  }).listen(3000, () => {
+    console.log('Development server running at http://localhost:3000');
+    done();
+  });
 
   watch(paths.html, html);
   watch(paths.css, styles);
@@ -182,6 +179,6 @@ exports.styles = styles;
 exports.shaders = shaders;
 exports.html = html;
 exports.build = build;
-exports.serve = serve;
-exports.dev = dev;
+exports.serve = series(build, startServer);
+exports.dev = series(build, startServer);
 exports.default = build;
