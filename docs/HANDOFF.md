@@ -1,13 +1,12 @@
-# Handoff — Phase 2 verified, iPhone fixed
+# Handoff — Phase 3 done, iPhone fixed but not re-tested
 
 Written 2026-09-07. Read this, then `FLUID-ENGINE-EXTRACTION-PLAN.md`.
 
 ## Where things stand
 
-Branch: **`fluid-engine-v1`**. **Phases 0, 1 and 2 are done and
-device-verified.** The iPhone 14 failure is **diagnosed and fixed**; the fix is
-verified on a reproduction harness but **not yet confirmed on the device
-itself** — that is the one open item.
+Branch: **`fluid-engine-v1`**. **Phases 0-3 are done.** The iPhone 14 failure
+is **diagnosed and fixed**; the fix is verified on a reproduction harness but
+**not yet confirmed on the device itself** — that is the one open item.
 
 Golden images: **12/12 pass** on both the source and dist paths, with hashes
 byte-identical to the pre-fix baseline.
@@ -174,19 +173,49 @@ are decomposition, not a visibility switch; the ±5000 depth range is unresolved
 because the harness cannot see the bristle overlay; `debug2.js` (751 lines) is
 dead in the build; both `index.html` and `gulpfile.js` must list any new script.
 
-## Phase 3 — the iPhone question is settled
+## Phase 3 — done
 
-From the plan, §6: move the engine, unchanged, into `fluid-engine/`.
+The engine now lives in `fluid-engine/`: `simulation.js` (was `simulator.js`),
+`brush.js`, `gl/wrappedgl.js`, `gl/glsl3.js` and `shaders/`. It is inside the
+repo — the empty `fluid-engine/` sitting *beside* the repo at
+`d:/work/fluid-paint/` is a placeholder and is not where anything went.
 
-The last §2 defect belongs to that work: **`Simulator.splat()` takes a
-screen-space `paintingRectangle`** and does the screen-to-simulation transform
-itself (simulator.js:525-531). The engine knows about the screen and that must
-be severed, or the engine is not UI-independent.
-`viewport.screenToSimulation` was written for that seam and currently has no
-caller.
+**The shader keys did not change, on purpose.** `loadTextFiles()` gained a
+`basePath` that is prepended to fetch a file but is not part of the result key,
+so every `shaderSources['shaders/...']` lookup still resolves and
+`SHADER_BASE_PATH` in `common.js` is the only place that knows the real
+location. The dist task mirrors the layout into `dist/fluid-engine/shaders`,
+because a flat `dist/shaders` would 404 every fetch in the bundle.
 
-The iPhone fix landed in the `Simulator` constructor rather than inside
-`splat()`, so it does not conflict with moving that code.
+**There was no `constants.js` to split.** The plan assumed one. The constants
+are actually in `paint-setup.js` (app) and as file-local `const`s in the engine
+files. Verified mechanically with comments stripped: zero app constants are used
+by engine code and zero engine constants by app code. The one apparent
+crossing, `BRUSH_HEIGHT` in `simulation.js`, is inside a comment.
+
+`splat()` no longer names the screen: it takes `brushRectangle`, the painting
+expressed in the brush's own coordinate space. The app still passes its
+screen-space rectangle, because its brush lives in screen pixels — that is the
+app's business, not the engine's.
+
+`debug/lint-shaders.js` scanned only the repo root for `.js` files, so after the
+move it would have checked nothing that creates textures — the same silent-pass
+failure mode this project keeps hitting. It now walks `fluid-engine/` and
+`fluid-engine/gl/` too, and reports repo-relative paths.
+
+**The UI shaders moved with the rest.** `panel`, `picker`, `shadow` and
+`rectborder` are chrome, not engine, and they now sit in
+`fluid-engine/shaders/`. Splitting them is Phase 4's renderer extraction; doing
+it during a move would mix relocation with redesign and the golden images could
+not tell which had broken things.
+
+Golden 12/12 on source and dist throughout, hashes byte-identical.
+
+## Phase 4 — next
+
+From the plan: extract the painting render out of `Paint.update()` into
+`fluid-engine/renderer.js`. That is where the UI-shader split belongs, since the
+chrome and the painting render are currently interleaved in one `update()` body.
 
 ## Environment notes
 
@@ -207,8 +236,6 @@ The iPhone fix landed in the `Simulator` constructor rather than inside
   show `blend into HALF_FLOAT target PASS`, and a stroke should deposit paint.
   Look for banding in long strokes.
 - The 1 GB render-target budget is validated on Android, not on iOS.
-- `Simulator.splat()` still takes screen-space coordinates.
-- `debug2.js` — dead in the build; fold in or delete.
 - The ±5000 depth range — unresolved; needs a mid-stroke golden scenario.
 - `docs/image.png` / `docs/image-ui.png` are untracked device screenshots;
   `image.png` is the `?diag=1` report that confirmed this diagnosis.

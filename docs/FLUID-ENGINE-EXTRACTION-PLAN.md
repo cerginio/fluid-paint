@@ -1,6 +1,6 @@
 # Fluid Engine Extraction Plan
 
-Status: Phase 0 complete (58e7d74) -- see HANDOFF.md
+Status: Phases 0-3 complete -- see HANDOFF.md
 Branch: `fluid-engine-v1` (from df884cc on webgl2_migration)
 Decisions taken: keep the david.li UI working as the reference harness; fix the
 coordinate/DPR problem as part of the move; build extension *points* but only
@@ -452,13 +452,31 @@ gracefully. 1 GB leaves the pre-DPR path untouched (712 MB at 1280×800).
 SwiftShader's memory limits are not a phone's, and the clamp's chosen ceiling
 is the thing most in need of a real measurement.
 
-### Phase 3 — Move the engine, unchanged
-- Move `Simulator`, `Brush`, `wrappedgl`, `glsl3`, shaders into `fluid-engine/`.
-- Split `constants.js`: simulation/render constants to the engine, panel/picker
-  geometry stays with the app.
-- Sever the screen dependency: `splat()` receives simulation-space arguments
-  from `Viewport`, not a screen-space `paintingRectangle`.
-- Still no public API — `paint.js` imports the moved modules directly.
+### Phase 3 — Move the engine, unchanged — **DONE**
+- `Simulator` (now `simulation.js`), `Brush`, `wrappedgl`, `glsl3` and the
+  shader tree live in `fluid-engine/`, inside the repo. The empty
+  `fluid-engine/` beside the repo was a placeholder, not the destination.
+- **The shader manifest keys did not change.** `loadTextFiles()` takes a
+  `basePath` that is prepended to fetch but is not part of the result key, so
+  `SHADER_BASE_PATH` is the only thing that knows where the tree lives.
+  Relocating the shaders is a one-string change, not a rename of ~24 keys.
+- **There was no `constants.js` to split.** The plan assumed a shared constants
+  module; the constants actually live in `paint-setup.js` (app) and as file-local
+  `const`s inside `brush.js` and `simulation.js` (engine). Checked
+  mechanically with comments stripped: **zero** `paint-setup.js` constants are
+  referenced by engine code, and **zero** engine constants by app code. The
+  separation this bullet asked for already held.
+- The screen dependency is severed: `splat()` takes a `brushRectangle` — the
+  painting expressed in the brush's own coordinate space — and no longer names
+  the screen. The app passes its screen-space rectangle because its brush lives
+  in screen pixels, which is the app's business.
+- Still no public API — `paint.js` uses the moved modules directly.
+
+**What is NOT done here.** The UI shaders (`panel`, `picker`, `shadow`,
+`rectborder`) moved into `fluid-engine/shaders/` with the rest. They are chrome,
+not engine, but separating them is the renderer extraction in Phase 4 — doing it
+during a move would mix a relocation with a redesign, and the golden images
+could not tell the two apart.
 
 ### Phase 4 — Extract the renderer
 - Lift the painting draw out of `Paint.update()` into `renderer.js`.
