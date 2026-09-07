@@ -36,19 +36,21 @@ them is named in the code:
 3. **Simulation texels** — `paintingRectangle.width * resolutionScale`
    (paint.js:470)
 
-Concrete defects that follow from having no single owner of the mapping:
+Concrete defects that follow from having no single owner of the mapping
+(status after Phases 1-2):
 
-- **`devicePixelRatio` is never read.** Not once in the codebase. On a DPR-3
-  phone the backing store equals CSS pixels, so the painting is soft and pointer
-  coordinates are only approximately right.
-- **The Y-flip is open-coded in four places** — `canvas.height - position.y` at
-  paint.js:1004, :1064, :1166, :1250. Any new input path must remember to repeat
-  it, and forgetting is silent.
-- **`onResize` rebuilds three textures without deleting the old ones**
-  (paint.js:318-355). A GPU leak on every resize — and on mobile, resize fires
-  on rotation and on every soft-keyboard open.
-- **The orthographic matrix is built twice** (paint.js:289 and :314) from the
-  same inputs, so the two can drift apart under edit.
+- ~~**`devicePixelRatio` is never read.**~~ **Fixed in Phase 2.** Honoured and
+  clamped to 2, via `Viewport`.
+- ~~**The Y-flip is open-coded in four places.**~~ **Fixed in Phase 2.** All
+  four now go through `viewport.eventToScreen`; none is left.
+- ~~**`onResize` rebuilds three textures without deleting the old ones.**~~
+  **Fixed in Phase 1.** Measured: 18 leaked over 6 resizes before, 0 after.
+- ~~**The orthographic matrix is built twice.**~~ **Fixed in Phase 1.** One
+  `rebuildProjectionMatrix()`; the constructor's copy was in fact dead.
+- **Found while fixing the above, still open:** nothing clamps the *total*
+  memory of the resolution-dependent render targets, only each dimension.
+  Phase 2 added a 1 GB budget as a guard, but the real ceiling is unmeasured on
+  hardware — see Phase 2 below.
 - **`Simulator.splat()` takes a screen-space `paintingRectangle`** and does the
   screen-to-simulation transform itself (simulator.js:525-531). The engine
   currently knows about the screen. This must be severed or the engine is not
@@ -418,18 +420,37 @@ No behavioural change intended in the default configuration; golden images must
 not move. If one does, that item was load-bearing and the commit is reverted —
 which is exactly the information we want.
 
-### Phase 2 — Viewport module
-- Introduce `Viewport`: owns canvas sizing, `devicePixelRatio`, the Y-flip, and
-  all three coordinate spaces, with explicit conversions
-  (`screenToPainting`, `paintingToSimulation`, ...).
-- Replace all four open-coded Y-flips and every ad-hoc scale with calls into it.
-- **DPR is turned on here.** This is the one phase that intentionally changes
-  rendered output on high-DPR devices — the painting gets sharper. Golden
-  baselines are re-recorded per DPR, and the phone/tablet are retested
-  deliberately rather than compared to the old blurry baseline.
+### Phase 2 — Viewport module — **DONE**, except device verification
+- `viewport.js` owns canvas sizing, `devicePixelRatio`, the Y-flip and all
+  three coordinate spaces (`eventToScreen`, `cssToScreen`, `screenToCss`,
+  `cssLengthToScreen`, `screenToPainting`, `paintingToSimulation`,
+  `screenToSimulation`).
+- All four open-coded Y-flips are gone. The CSS-authored UI metrics
+  (`PANEL_*`, `COLOR_PICKER_*`, `RESIZING_RADIUS_CSS`, and the colour picker's
+  own geometry via its `scale`) go through the viewport.
+- **DPR is on**, clamped to 2. `?dpr=1` restores the old behaviour, `?dpr=N`
+  raises the cap.
+- The golden harness gained a **DPR axis** (dpr1, dpr2 — 12 entries). Without
+  it the phase's headline change would have had no coverage, since at ratio 1
+  the new code is equivalent to the old by construction.
 
-**Risk:** highest of any phase, because it is the one that changes behaviour.
-Mitigation: it lands alone, on its own commit, with device retest before Phase 3.
+**What this uncovered.** An unbounded memory defect that predates DPR.
+`maxPaintingWidth` clamps each *dimension* against `MAX_TEXTURE_SIZE`, but
+nothing clamped total memory, and the app holds 22 float RGBA render targets at
+the painting resolution (7 simulator buffers + `HISTORY_SIZE` = 15 undo
+snapshots, 16 bytes a texel). A 1280×800 window at ratio 2 asks for 2969 MB and
+the driver drops the context — a black canvas, not a slow one. A 2560×1440
+window at quality High asks for 2.6 GB *today, with no DPR at all*.
+
+`getEffectiveResolutionScale()` now clamps to `PaintState.maxRenderTargetBytes`
+(1 GB) and warns once per distinct clamp. The budget covers **all** targets
+including the undo history: the painting keeps its size, undo keeps its depth,
+and simulation fidelity is what degrades — the one of the three that degrades
+gracefully. 1 GB leaves the pre-DPR path untouched (712 MB at 1280×800).
+
+**Remaining:** manual device verification on real hardware before Phase 3.
+SwiftShader's memory limits are not a phone's, and the clamp's chosen ceiling
+is the thing most in need of a real measurement.
 
 ### Phase 3 — Move the engine, unchanged
 - Move `Simulator`, `Brush`, `wrappedgl`, `glsl3`, shaders into `fluid-engine/`.
