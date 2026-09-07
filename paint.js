@@ -284,15 +284,7 @@ class Paint {
 
         this.brushViewer = new BrushViewer(wgl, this.brushProgram, canvas.width - 250, 20, 250, 150);
 
-        this.mainProjectionMatrix = makeOrthographicMatrix(
-            new Float32Array(16),
-            0.0,
-            this.canvas.width,
-            0,
-            this.canvas.height,
-            -5000.0,// TODO: debug mainProjectionMatrix influence on bristels
-            5000.0
-        );
+        this.rebuildProjectionMatrix();
 
         this.onResize = () => {
             this.canvas.width = window.innerWidth;
@@ -312,15 +304,7 @@ class Paint {
             this.colorPicker.bottom = this.canvas.height - COLOR_PICKER_TOP;
             this.brushViewer.bottom = this.canvas.height - 150;
 
-            this.mainProjectionMatrix = makeOrthographicMatrix(
-                new Float32Array(16),
-                0.0,
-                this.canvas.width,
-                0,
-                this.canvas.height,
-                -5000.0,
-                5000.0
-            );
+            this.rebuildProjectionMatrix();
 
             // Release the previous frame-sized textures before rebuilding them.
             // Without this every resize (a phone rotation, a desktop drag) leaked
@@ -925,6 +909,26 @@ class Paint {
 
         this.saveButton.setAttribute('download', 'painting.png');
         this.saveButton.setAttribute('href', saveCanvas.toDataURL());
+    }
+
+    // Screen-space orthographic projection for the bristle preview, rebuilt
+    // whenever the canvas changes size. Single source of truth: it was
+    // previously open-coded identically in the constructor and in onResize().
+    //
+    // The +/-5000 depth range is inherited from debugging the mobile bristle
+    // collapse and is far wider than the bristles need (their z spans about
+    // brushScale * BRISTLE_LENGTH). It is kept bit-for-bit here so this commit
+    // stays a pure deduplication; narrowing it is a separate, testable change.
+    rebuildProjectionMatrix() {
+        this.mainProjectionMatrix = makeOrthographicMatrix(
+            new Float32Array(16),
+            0.0,
+            this.canvas.width,
+            0,
+            this.canvas.height,
+            -5000.0,
+            5000.0
+        );
     }
 
     // what interaction mode would be triggered if we clicked with given mouse position
