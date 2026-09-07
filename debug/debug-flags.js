@@ -33,6 +33,7 @@
 const DEBUG_FLAG_DEFAULTS = {
   paintingRect: true,    // the painting-rectangle outline overlay
   brushViewer: true,     // the live bristle preview panel
+  textureProbe: true,    // the 2D readback view of a brush texture (debug.js)
 };
 
 function parseDebugFlags(search) {

@@ -105,13 +105,21 @@
                 if (params.get('diag') === '1') showDeviceDiagnostics(wgl);
             }
 
-            // create the debug canvas now that DOM exists
-            const dbg = setupDebugCanvas({ w: 256, h: 256, corner: 'bottom-right' });
-            debugCanvas = dbg.canvas;          // <-- assign to globals
-            debugCtx2d = dbg.ctx2d;
+            // The texture probe: a 2D view of a brush texture, read back each
+            // frame from brush.js. Enabled by default, ?debug=-textureProbe
+            // turns it off -- and when off nothing here is created, which is
+            // what makes brush.js's `if (presenter)` skip the readback rather
+            // than merely hide its output.
+            const debugFlags = parseDebugFlags();
+            if (debugFlags.textureProbe) {
+                // create the debug canvas now that DOM exists
+                const dbg = setupDebugCanvas({ w: 256, h: 256, corner: 'bottom-right' });
+                debugCanvas = dbg.canvas;          // <-- assign to globals
+                debugCtx2d = dbg.ctx2d;
 
-            // presenter uses the same WebGL context
-            presenter = makeGLDebugPresenter(wgl.gl);
+                // presenter uses the same WebGL context
+                presenter = makeGLDebugPresenter(wgl.gl);
+            }
 
             (async () => {
                 // PATCH#1: TEST
