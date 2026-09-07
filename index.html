@@ -54,10 +54,12 @@
 
     <div id="placeholder"></div>
 
+    <script src="debug/deterministic-rng.js"></script>
     <script src="glsl3.js"></script>
     <script src="debug/gpu-profiles.js"></script>
     <script src="debug/texture-selftest.js"></script>
     <script src="debug/device-diag.js"></script>
+    <script src="debug/golden-harness.js"></script>
     <script src="wrappedgl.js"></script>
     <script src="common.js"></script>
     <script src="debug.js"></script>
@@ -128,6 +130,13 @@
                     //required features are supported
                     document.getElementById('placeholder').outerHTML = document.getElementById('main').innerHTML;
                     const painter = new Paint(canvas, wgl);
+                    window.__painter = painter;   // handle for the golden harness
+
+                    // ?golden=basic|colorMix|wetBlend|all -- scripted stroke, hashed readback
+                    const goldenScenario = params.get('golden');
+                    if (goldenScenario) {
+                        scheduleGoldenSuite(() => window.__painter, goldenScenario);
+                    }
                     if (typeof runWebGLSelfTest === 'function') runWebGLSelfTest(wgl.gl);
                 } else {
                     //required features unsupported

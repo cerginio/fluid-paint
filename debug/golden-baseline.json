@@ -1,0 +1,49 @@
+{
+  "recorded": "2026-09-07T09:16:30.558Z",
+  "seed": 20260907,
+  "note": "headless SwiftShader; not comparable to real-GPU hashes",
+  "entries": {
+    "webgl2/basic": {
+      "paintHash": "1de870d1",
+      "screenHash": "6bf3ad4b",
+      "resolution": "1860x1140",
+      "webgl": 2,
+      "description": "single diagonal stroke, default brush"
+    },
+    "webgl2/colorMix": {
+      "paintHash": "8fe5c7ab",
+      "screenHash": "9573739d",
+      "resolution": "1860x1140",
+      "webgl": 2,
+      "description": "yellow over blue -- the Y+B cube corner must yield green"
+    },
+    "webgl2/wetBlend": {
+      "paintHash": "06ace8f7",
+      "screenHash": "3bb1f42d",
+      "resolution": "1860x1140",
+      "webgl": 2,
+      "description": "overlapping strokes, heavy paint load"
+    },
+    "webgl1/basic": {
+      "paintHash": "65e76ea0",
+      "screenHash": "d4a73b34",
+      "resolution": "1860x1140",
+      "webgl": 1,
+      "description": "single diagonal stroke, default brush"
+    },
+    "webgl1/colorMix": {
+      "paintHash": "80e13791",
+      "screenHash": "236927c9",
+      "resolution": "1860x1140",
+      "webgl": 1,
+      "description": "yellow over blue -- the Y+B cube corner must yield green"
+    },
+    "webgl1/wetBlend": {
+      "paintHash": "b25c5a04",
+      "screenHash": "36207149",
+      "resolution": "1860x1140",
+      "webgl": 1,
+      "description": "overlapping strokes, heavy paint load"
+    }
+  }
+}

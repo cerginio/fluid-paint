@@ -22,7 +22,10 @@
     "dev": "cross-env NODE_ENV=development gulp serve",
     "build": "cross-env NODE_ENV=production gulp build",
     "clean": "gulp clean",
-    "lint:shaders": "node debug/lint-shaders.js"
+    "lint:shaders": "node debug/lint-shaders.js",
+    "test:golden": "node debug/golden-run.js",
+    "test:golden:record": "node debug/golden-run.js --record",
+    "test:golden:dist": "cross-env GOLDEN_ROOT=dist node debug/golden-run.js"
   },
   "overrides": {
     "picomatch": "2.3.2"

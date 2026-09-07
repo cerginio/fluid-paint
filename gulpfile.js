@@ -23,11 +23,17 @@ const paths = {
   // Order matters because the project uses globals (no module system).
   // Adjust if you add/remove files.
   js: [
+    // Seeded RNG must load before anything that draws, so Brush's constructor
+    // sees it. Inert unless ?seed= is present.
+    'debug/deterministic-rng.js',
     // device-emulation harness must load before wrappedgl.js
     'glsl3.js',
     'debug/gpu-profiles.js',
     'debug/texture-selftest.js',
     'debug/device-diag.js',
+    // Golden-image harness. Inert unless ?golden= is present; included so the
+    // production bundle can be verified the same way the sources are.
+    'debug/golden-harness.js',
     'common.js',
     'debug.js',
     'wrappedgl.js',
