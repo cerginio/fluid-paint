@@ -323,6 +323,21 @@ function testTexelFetchImmunity(gl) {
 }
 
 /*
+ * Decode an IEEE 754 half-precision bit pattern into a JS number.
+ * Only needed to read back a half-float target where the implementation
+ * refuses a FLOAT readback.
+ */
+function halfToFloat(bits) {
+  const sign = (bits & 0x8000) ? -1 : 1;
+  const exponent = (bits & 0x7c00) >> 10;
+  const fraction = bits & 0x03ff;
+
+  if (exponent === 0) return sign * Math.pow(2, -14) * (fraction / 1024);
+  if (exponent === 0x1f) return fraction ? NaN : sign * Infinity;
+  return sign * Math.pow(2, exponent - 15) * (1 + fraction / 1024);
+}
+
+/*
  * Can this device ALPHA-BLEND into a FLOAT render target?
  *
  * This is the exact path Simulator.splat() uses: it enables BLEND with
@@ -340,11 +355,21 @@ function testTexelFetchImmunity(gl) {
  * Method: clear the target to 0, then draw a full-coverage quad of
  * colour (1,1,1,1) with alpha 0.5 blending. The correct result is 0.5.
  *
+ * The same question applies to a HALF-float target, which is the cheapest
+ * candidate fix when full float will not blend: EXT_float_blend gates 32-bit
+ * blending only, so a device that fails at FLOAT may well pass at HALF_FLOAT.
+ * Pass 'half' to ask that question -- the answer decides whether degrading
+ * paintTexture is a real option on this device or merely a different way to
+ * paint nothing.
+ *
+ * @param {WebGLRenderingContext|WebGL2RenderingContext} gl
+ * @param {'float'|'half'} [precision='float'] which target type to blend into
  * @returns {{pass: boolean, value: number|null, extension: boolean, error: string|null}}
  */
-function floatBlendRoundTrip(gl) {
+function floatBlendRoundTrip(gl, precision) {
   const gl2 = typeof WebGL2RenderingContext !== 'undefined' &&
               gl instanceof WebGL2RenderingContext;
+  const half = precision === 'half';
   const out = {
     pass: false,
     value: null,
@@ -356,21 +381,39 @@ function floatBlendRoundTrip(gl) {
   if (gl2) gl.getExtension('EXT_color_buffer_float');
   else { gl.getExtension('OES_texture_float'); gl.getExtension('WEBGL_color_buffer_float'); }
 
-  const internalFormat = gl2 ? gl.RGBA32F : gl.RGBA;
+  // Half-float needs its own extensions on WebGL 1; on WebGL 2 it is core and
+  // EXT_color_buffer_float (above) already covers rendering to it.
+  let halfType = null;
+  if (half) {
+    if (gl2) {
+      halfType = gl.HALF_FLOAT;
+    } else {
+      const ext = gl.getExtension('OES_texture_half_float');
+      if (ext === null) {
+        out.error = 'OES_texture_half_float unavailable';
+        return out;
+      }
+      gl.getExtension('EXT_color_buffer_half_float');
+      halfType = ext.HALF_FLOAT_OES;
+    }
+  }
+
+  const textureType = half ? halfType : gl.FLOAT;
+  const internalFormat = gl2 ? (half ? gl.RGBA16F : gl.RGBA32F) : gl.RGBA;
   const texture = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, texture);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, 1, 1, 0, gl.RGBA, gl.FLOAT, null);
+  gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, 1, 1, 0, gl.RGBA, textureType, null);
 
   const fbo = gl.createFramebuffer();
   gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
 
   if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
-    out.error = 'float render target incomplete';
+    out.error = (half ? 'half-float' : 'float') + ' render target incomplete';
     gl.deleteFramebuffer(fbo); gl.deleteTexture(texture);
     return out;
   }
@@ -423,13 +466,36 @@ function floatBlendRoundTrip(gl) {
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   gl.disable(gl.BLEND);
 
-  const px = new Float32Array(4);
   try {
-    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.FLOAT, px);
-    out.value = px[0];
+    // A FLOAT readback is not guaranteed to be accepted from a half-float
+    // target. Where the implementation names its own preferred combination,
+    // honour it and convert; otherwise fall back to reading floats.
+    let readType = gl.FLOAT;
+    let readFormat = gl.RGBA;
+    if (half) {
+      const implType = gl.getParameter(gl.IMPLEMENTATION_COLOR_READ_TYPE);
+      const implFormat = gl.getParameter(gl.IMPLEMENTATION_COLOR_READ_FORMAT);
+      if (implType === gl.HALF_FLOAT || implType === 0x8D61 /* HALF_FLOAT_OES */) {
+        readType = implType;
+        readFormat = implFormat === gl.RGBA ? gl.RGBA : implFormat;
+      }
+    }
+
+    let value;
+    if (readType === gl.FLOAT) {
+      const px = new Float32Array(4);
+      gl.readPixels(0, 0, 1, 1, readFormat, readType, px);
+      value = px[0];
+    } else {
+      const px = new Uint16Array(4);
+      gl.readPixels(0, 0, 1, 1, readFormat, readType, px);
+      value = halfToFloat(px[0]);
+    }
+
+    out.value = value;
     // src.a * src.rgb + (1 - src.a) * dst.rgb = 0.5 * 1 + 0.5 * 0 = 0.5
-    out.pass = Math.abs(px[0] - 0.5) < 0.05;
-    if (!out.pass && px[0] === 0) out.error = 'blend produced zero -- the splat would deposit nothing';
+    out.pass = Math.abs(value - 0.5) < 0.05;
+    if (!out.pass && value === 0) out.error = 'blend produced zero -- the splat would deposit nothing';
   } catch (e) {
     out.error = 'readPixels: ' + e.message;
   }

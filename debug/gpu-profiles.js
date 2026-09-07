@@ -53,6 +53,28 @@ const GPU_PROFILES = {
     params: { MAX_TEXTURE_SIZE: 8192 },
   },
 
+  /*
+   * iPhone 14 / Apple GPU, as reported 2026-09-07.
+   *
+   * Float textures are renderable (EXT_color_buffer_float is present and
+   * hasFloatTextureSupport() passes), but EXT_float_blend is absent and
+   * blending into a 32-bit float target silently produces zero. The app boots,
+   * the brush moves, the bristles touch the canvas, and nothing is deposited.
+   *
+   * Half-float blending is left working, which is what makes the fallback the
+   * fix rather than a different way to paint nothing.
+   *
+   * Denying the extension is not enough on a lenient desktop driver -- it will
+   * keep blending 32-bit floats correctly and the bug will not reproduce. So
+   * suppressFloatBlend forces the observable behaviour too; see below.
+   */
+  'iphone-14': {
+    label: 'iPhone 14 / Apple GPU (no float blending)',
+    deny: ['EXT_float_blend', 'OES_texture_float_linear'],
+    suppressFloatBlend: true,
+    params: { MAX_TEXTURE_SIZE: 16384 },
+  },
+
   // Strictest realistic mobile baseline: no renderable float at all.
   // Expected outcome: the app shows the "no float textures" page. That is
   // correct behavior, not a bug.
@@ -176,6 +198,63 @@ function installGpuClamp(gl, profileName) {
     return realTexParameteri(target, pname, param);
   };
 
+  // ---- blending into a FLOAT target: drop the draw --------------------------
+  /*
+   * A device without EXT_float_blend is entitled to drop a blended draw into a
+   * 32-bit float target. A desktop driver will not do that on its own, so to
+   * reproduce the iPhone we have to force it.
+   *
+   * The mechanism: track which texture is attached to the bound framebuffer,
+   * and if a draw is about to blend into a FLOAT one, mask off all four colour
+   * channels for the duration of that draw. Nothing is written and no error is
+   * raised -- which is precisely the reported symptom.
+   *
+   * Half-float targets are deliberately left alone; EXT_float_blend gates
+   * 32-bit blending only, and the fallback depends on that distinction.
+   */
+  let suppressedBlendedDraws = 0;
+  if (profile.suppressFloatBlend === true) {
+    // Which texture is attached to which framebuffer, and is it 32-bit float?
+    const floatAttachment = new WeakMap();
+
+    const realFramebufferTexture2D = gl.framebufferTexture2D.bind(gl);
+    gl.framebufferTexture2D = function (target, attachment, textarget, texture, level) {
+      const framebuffer = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+      if (framebuffer && attachment === gl.COLOR_ATTACHMENT0) {
+        floatAttachment.set(framebuffer, floatTextures.has(texture));
+      }
+      return realFramebufferTexture2D(target, attachment, textarget, texture, level);
+    };
+
+    const wouldDropDraw = () => {
+      if (!gl.isEnabled(gl.BLEND)) return false;
+      const framebuffer = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+      // The default framebuffer is never float, so it always blends.
+      if (!framebuffer) return false;
+      return floatAttachment.get(framebuffer) === true;
+    };
+
+    const suppress = (realDraw) => function (...args) {
+      if (!wouldDropDraw()) return realDraw(...args);
+
+      suppressedBlendedDraws += 1;
+      if (suppressedBlendedDraws === 1) {
+        console.warn(
+          '[gpu-clamp] blended draw into a FLOAT target -- dropping it ' +
+            '(this is the iPhone 14 bug)'
+        );
+      }
+      const mask = gl.getParameter(gl.COLOR_WRITEMASK);
+      gl.colorMask(false, false, false, false);
+      const result = realDraw(...args);
+      gl.colorMask(mask[0], mask[1], mask[2], mask[3]);
+      return result;
+    };
+
+    gl.drawArrays = suppress(gl.drawArrays.bind(gl));
+    gl.drawElements = suppress(gl.drawElements.bind(gl));
+  }
+
   return {
     profile,
     report: () => ({
@@ -184,6 +263,7 @@ function installGpuClamp(gl, profileName) {
       label: profile.label,
       denied: profile.deny,
       floatLinearTexturesAffected: incompleteTextures.length,
+      suppressedBlendedDraws,
     }),
   };
 }

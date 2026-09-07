@@ -460,6 +460,17 @@ function arraysEqual(a, b) {
       return this.gl.getShaderPrecisionFormat(shaderType, precisionType);
     }
   
+    // The half-float texture type for this context, or null if unavailable.
+    // On WebGL 2 half-float is core and OES_texture_half_float is generally
+    // NOT exposed, so asking for the extension object is the wrong question
+    // there -- it returns null on hardware that supports half-float perfectly
+    // well. This is the safe way to name the type on either context version.
+    getHalfFloatType() {
+      if (this.isWebGL2) return this.gl.HALF_FLOAT;
+      const ext = this.getExtension('OES_texture_half_float');
+      return ext === null ? null : ext.HALF_FLOAT_OES;
+    }
+
     hasHalfFloatTextureSupport() {
       const ext = this.getExtension('OES_texture_half_float');
       if (ext === null) return false;
@@ -483,6 +494,146 @@ function arraysEqual(a, b) {
       }
       if (!this.canRenderToTexture(this.FLOAT)) return false;
       return true;
+    }
+
+    // Renderable is NOT the same question as blendable. Simulator.splat()
+    // alpha-blends into paintTexture, and 32-bit blending is gated by
+    // EXT_float_blend; an implementation without it is entitled to drop the
+    // draw silently, which looks exactly like a brush that moves correctly
+    // over a canvas that stays white. Reported on iPhone 14 (Apple GPU,
+    // WebGL 2, EXT_float_blend absent), 2026-09-07.
+    //
+    // The extension flag alone is not trusted in either direction: some
+    // implementations blend correctly without advertising it, and the cost of
+    // being wrong is a silently broken app. So this performs the blend and
+    // reads the result back.
+    //
+    // @param {number} type gl.FLOAT or a half-float type
+    // @returns {boolean}
+    canBlendIntoTexture(type) {
+      const gl = this.gl;
+
+      const framebuffer = this.createFramebuffer();
+      const texture = this.buildTexture(
+        gl.RGBA, type, 1, 1, null,
+        gl.CLAMP_TO_EDGE, gl.CLAMP_TO_EDGE, gl.NEAREST, gl.NEAREST
+      );
+      this.framebufferTexture2D(framebuffer, gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+
+      if (this.checkFramebufferStatus(framebuffer) !== gl.FRAMEBUFFER_COMPLETE) {
+        this.deleteFramebuffer(framebuffer);
+        this.deleteTexture(texture);
+        return false;
+      }
+
+      const vertexSource = this.isWebGL2
+        ? '#version 300 es\nin vec2 a_position; void main() { gl_Position = vec4(a_position, 0.0, 1.0); }'
+        : 'attribute vec2 a_position; void main() { gl_Position = vec4(a_position, 0.0, 1.0); }';
+      const fragmentSource = this.isWebGL2
+        ? '#version 300 es\nprecision highp float; out vec4 o; void main() { o = vec4(1.0, 1.0, 1.0, 0.5); }'
+        : 'precision highp float; void main() { gl_FragColor = vec4(1.0, 1.0, 1.0, 0.5); }';
+
+      let result = false;
+      let program = null;
+      let vertexShader = null;
+      let fragmentShader = null;
+      let buffer = null;
+
+      try {
+        vertexShader = gl.createShader(gl.VERTEX_SHADER);
+        gl.shaderSource(vertexShader, vertexSource);
+        gl.compileShader(vertexShader);
+
+        fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
+        gl.shaderSource(fragmentShader, fragmentSource);
+        gl.compileShader(fragmentShader);
+
+        if (gl.getShaderParameter(vertexShader, gl.COMPILE_STATUS) &&
+            gl.getShaderParameter(fragmentShader, gl.COMPILE_STATUS)) {
+          program = gl.createProgram();
+          gl.attachShader(program, vertexShader);
+          gl.attachShader(program, fragmentShader);
+          gl.bindAttribLocation(program, 0, 'a_position');
+          gl.linkProgram(program);
+
+          buffer = gl.createBuffer();
+          gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+          gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
+
+          gl.viewport(0, 0, 1, 1);
+          gl.disable(gl.SCISSOR_TEST);
+          gl.clearColor(0, 0, 0, 0);
+          gl.clear(gl.COLOR_BUFFER_BIT);
+
+          // Exactly the blend state splat() uses.
+          gl.enable(gl.BLEND);
+          gl.blendEquation(gl.FUNC_ADD);
+          gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE);
+
+          gl.useProgram(program);
+          gl.enableVertexAttribArray(0);
+          gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+          gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+          gl.disable(gl.BLEND);
+
+          // 0.5 * 1 + 0.5 * 0 = 0.5. Anything else (in practice 0, the dropped
+          // draw) means splatting cannot deposit paint at this precision.
+          //
+          // A FLOAT readback is not guaranteed to be accepted from a
+          // half-float target, so honour the implementation's own preferred
+          // combination when it names a half-float one.
+          const implType = gl.getParameter(gl.IMPLEMENTATION_COLOR_READ_TYPE);
+          const isHalfRead = type !== gl.FLOAT &&
+            (implType === gl.HALF_FLOAT || implType === 0x8D61 /* HALF_FLOAT_OES */);
+
+          let blended;
+          if (isHalfRead) {
+            const pixels = new Uint16Array(4);
+            gl.readPixels(0, 0, 1, 1, gl.RGBA, implType, pixels);
+            // Decode IEEE 754 half precision.
+            const bits = pixels[0];
+            const exponent = (bits & 0x7c00) >> 10;
+            const fraction = bits & 0x03ff;
+            blended = exponent === 0
+              ? Math.pow(2, -14) * (fraction / 1024)
+              : (exponent === 0x1f ? NaN : Math.pow(2, exponent - 15) * (1 + fraction / 1024));
+            if (bits & 0x8000) blended = -blended;
+          } else {
+            const pixels = new Float32Array(4);
+            gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.FLOAT, pixels);
+            blended = pixels[0];
+          }
+
+          result = Math.abs(blended - 0.5) < 0.05;
+        }
+      } catch (e) {
+        result = false;
+      }
+
+      if (buffer !== null) gl.deleteBuffer(buffer);
+      if (program !== null) gl.deleteProgram(program);
+      if (vertexShader !== null) gl.deleteShader(vertexShader);
+      if (fragmentShader !== null) gl.deleteShader(fragmentShader);
+      this.deleteFramebuffer(framebuffer);
+      this.deleteTexture(texture);
+
+      // The probe set GL state directly, behind the state cache's back, so the
+      // cache's dirty-set no longer describes the context. Restore every
+      // parameter it touched to the tracked default and then declare the
+      // context clean -- clearing the dirty-set alone would let the 1x1
+      // viewport and the blend funcs leak into the next draw.
+      gl.viewport.apply(gl, this.parameters.viewport.defaults);
+      gl.blendEquationSeparate.apply(gl, this.parameters.blendEquation.defaults);
+      gl.blendFuncSeparate.apply(gl, this.parameters.blendFunc.defaults);
+      gl.clearColor.apply(gl, this.parameters.clearColor.defaults);
+      gl.disable(gl.BLEND);
+      gl.disable(gl.SCISSOR_TEST);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.useProgram(null);
+      gl.bindBuffer(gl.ARRAY_BUFFER, null);
+      this.changedParameters = {};
+
+      return result;
     }
   
     // --- state resolution ---

@@ -1,33 +1,16 @@
-# Handoff — Phase 2 verified, one device open
+# Handoff — Phase 2 verified, iPhone fixed
 
 Written 2026-09-07. Read this, then `FLUID-ENGINE-EXTRACTION-PLAN.md`.
 
 ## Where things stand
 
 Branch: **`fluid-engine-v1`**. **Phases 0, 1 and 2 are done and
-device-verified**, with one device failing — see the next section, which is the
-most important thing in this file.
+device-verified.** The iPhone 14 failure is **diagnosed and fixed**; the fix is
+verified on a reproduction harness but **not yet confirmed on the device
+itself** — that is the one open item.
 
-```
-ad4c3e3  Add a float-blend probe to the device diagnostics
-05299c8  Update the plan and handoff for the end of Phase 2
-19ef834  Turn devicePixelRatio on, with a render-target memory budget
-fe6f42f  Express the CSS-authored UI metrics in screen pixels
-7dc05bd  Introduce the Viewport module, with DPR still off
-a5eb6ac  Update the handoff and the 3a table for the end of Phase 1
-85292c9  Gate the per-frame texture readback probe behind debug.textureProbe
-43e7d6d  Gate the live bristle preview behind debug.brushViewer
-57f033e  Extract the painting-rect outline into its own module
-599c125  Amend §3a: the debug work is decomposition, not removal
-142567a  Introduce the engine.debug flag object and ?debug= parsing
-7f5176d  Record why the +/-5000 depth range could not be resolved
-1355353  Build the main projection matrix in one place
-7b48c01  Release the canvas-sized textures before rebuilding them on resize
-43681b8  Hoist save() out of the per-frame update loop
-```
-
-Working tree clean apart from `docs/image.png` (untracked, not from this work).
-Golden images: **12/12 pass** on both the source and dist paths.
+Golden images: **12/12 pass** on both the source and dist paths, with hashes
+byte-identical to the pre-fix baseline.
 
 ### Device verification results (user, 2026-09-07)
 
@@ -35,114 +18,86 @@ Golden images: **12/12 pass** on both the source and dist paths.
 |---|---|
 | Samsung A56 | **Good** — Phase 2 works, DPR on |
 | Samsung Galaxy Tab S9 | **Good** |
-| iPhone 14 | **Fails — canvas stays white.** See below |
+| iPhone 14 | **Was blank; fixed, awaiting re-test** |
 
-Phase 2's DPR change and the 1 GB render-target budget are therefore validated
-on real Android hardware. The budget was never hit on those devices.
+## The iPhone 14 failure — diagnosed and fixed
 
-## The iPhone 14 failure — start here
-
-**Symptom, as reported.** The brush moves correctly. The bristles orient
-correctly. The debug view shows them touching the canvas. **The canvas stays
-white and clean.** No error, no crash.
-
-That combination is precise and it rules a lot out. The brush simulation, the
-pointer path, the coordinate transforms and the projection are all working —
-you can see them working. What fails is the step that turns bristle contact
-into pigment: **the splat**.
-
-### The leading hypothesis, and why
-
-`Simulator.splat()` (simulator.js:540-575) enables blending —
-
-```js
-.enable(wgl.BLEND)
-.blendEquation(wgl.FUNC_ADD)
-.blendFuncSeparate(wgl.SRC_ALPHA, wgl.ONE_MINUS_SRC_ALPHA, wgl.ONE, wgl.ONE)
-```
-
-— and renders into `paintTexture`, which is **always `gl.FLOAT`**
-(simulator.js:94). That is not true of the other targets: velocity, divergence
-and pressure all go through `simulationTextureType`, which prefers half-float
-and falls back to float (simulator.js:25-27). `paintTexture` is the one
-resolution-sized target with no fallback.
-
-Blending into a floating-point render target is gated by **`EXT_float_blend`**.
-The app **never requests it and never checks for it** — the only mention in the
-tree is in `debug/gpu-profiles.js`, in a list of extensions to deny. An
-implementation without it is entitled to drop the draw, and dropping it
-silently is exactly the reported symptom.
-
-`hasFloatTextureSupport()` does not catch this. It checks that a float texture
-is *renderable* (`canRenderToTexture`), which is a different question from
-whether it can be *blended into*. So the app passes its own gate, initialises
-fully, runs its physics — and deposits nothing.
-
-This is a hypothesis with strong circumstantial support, **not a confirmed
-diagnosis.** It has not been observed on the device.
-
-### What to do first — one measurement, no code change
-
-`?diag=1` now answers this directly. Open on the iPhone:
+**The hypothesis in the previous handoff was correct.** The user ran `?diag=1`
+on the device and it reported:
 
 ```
-http://<host>:8099/index.html?diag=1
+context                  WebGL 2
+EXT_color_buffer_float   true
+hasFloatTextureSupport() true
+EXT_float_blend          false
+blend into FLOAT target  FAIL (got 0.000, want 0.5)
+  splatting cannot deposit paint on this device
 ```
 
-Two new rows:
+So the app passed its own capability gate, initialised fully, ran its physics,
+and deposited nothing — because `paintTexture` is alpha-blended into and Apple
+does not expose `EXT_float_blend`. The draw was dropped silently.
 
-- **`EXT_float_blend`** — whether the extension is advertised.
-- **`blend into FLOAT target`** — the decisive one. It clears a 1×1 float
-  target, draws white at alpha 0.5 with exactly the blend state `splat()` uses,
-  reads back, and expects 0.5. On FAIL it prints *"splatting cannot deposit
-  paint on this device"*.
+### The fix
 
-The probe was sabotage-verified: it reads 0.5 and passes normally, and reads
-1.0 and fails when blending is suppressed. It can fail, so a pass means
-something.
+**Option 1 from the previous handoff: degrade `paintTexture` to half-float
+where full float will not blend.** Chosen because half-float blending was
+measured to work on the device class, and because it follows the precedent
+`simulationTextureType` already set.
 
-**If it reports FAIL**, the hypothesis is confirmed and the fix is a design
-choice (below). **If it reports PASS**, the hypothesis is wrong and the cause
-is elsewhere — see "If the blend probe passes".
+The choice is made by **capability probe, not by user-agent**:
+`WrappedGL.canBlendIntoTexture(type)` performs the actual blend splat() uses
+and reads the result back. Correct on untested devices, self-correcting when
+WebKit ships the extension, and immune to UA spoofing. A UA switch was
+considered and rejected — it guesses at which devices are affected and is wrong
+in both directions.
 
-### If the blend probe FAILS — the options
+Precedence, in `Simulator`:
 
-None of these is obviously right; it is a real design decision.
+1. float blends → `paintTexture` stays `gl.FLOAT` (every current desktop and
+   Android device; hashes provably unmoved).
+2. float does not blend, half-float does → degrade to half-float, warn on the
+   console. This is the iPhone path.
+3. neither blends → `canDepositPaint = false`, and **the startup gate in
+   `index.html` now shows the unsupported page** instead of a healthy-looking
+   blank canvas. That is option 3's honesty, folded in as the previous handoff
+   asked.
 
-1. **Make `paintTexture` half-float where full float will not blend.** The
-   smallest change, and it follows the precedent already in the file:
-   `simulationTextureType` exists for exactly this reason. Risk: half-float has
-   ~11 bits of mantissa, and pigment accumulates over many splats, so banding
-   or drift in long strokes is plausible. Needs a golden run and a real look.
-2. **Splat without blending — read, combine in the shader, write.** Removes the
-   dependency entirely and keeps full float precision. Costs a ping-pong target
-   and a pass. This is the most robust and the most work.
-3. **Request `EXT_float_blend` explicitly and fail loudly when absent.** Not a
-   fix, but honest: the "float textures unsupported" page already exists for
-   devices that cannot run the app. Worth doing regardless of which fix is
-   chosen, so the failure stops being silent.
+`paint.js` snapshot textures follow `simulator.paintTextureType`, since a
+snapshot holds a copy of `paintTexture` and a format mismatch would break undo.
 
-Whichever is chosen, **option 3's honesty belongs in it** — the current
-behaviour of looking healthy while painting nothing is the worst part of this
-bug, and it cost this session's diagnosis time even with the symptom described
-precisely.
+### Why this is believed to work
 
-### If the blend probe PASSES
+A new GPU profile, **`?gpu=iphone-14`**, reproduces the device: it denies
+`EXT_float_blend` and forces blended draws into 32-bit float targets to deposit
+nothing (by masking colour writes for the duration of the draw), while leaving
+half-float blending intact.
 
-The hypothesis is wrong. Next candidates, roughly in order:
+It was **sabotage-verified**. With the fallback disabled, the profile reproduces
+the reported symptom exactly — `painted=0`, `maxAlpha=0`, no error, on both
+WebGL 1 and 2 — while the desktop profile is unaffected. With the fallback in
+place, all four combinations deposit paint. The harness can fail, so its passes
+mean something.
 
-- **Read back `paintTexture` directly on the device** and see whether it is
-  actually empty, or whether it holds pigment that the *render* path is then
-  failing to show. The golden harness's `readPaintTexture()`
-  (debug/golden-harness.js) is the code to borrow. This splits the problem in
-  half and is the cheapest next step.
-- **`Z_THRESHOLD` / precision.** Splatting only deposits where a bristle
-  crosses `Z_THRESHOLD * brushScale`. The debug view showing contact is a
-  *visual* judgement; the shader's comparison is `highp` float. Check
-  `highp fragment precision` in the diag panel — it is already reported.
-- **The scissor rectangle.** `splat()` restricts drawing to `simulationArea`.
-  If that computes empty or off-target on this device the draw is clipped away
-  entirely, with no error.
+`?diag=1` gained a **`blend into HALF_FLOAT target`** row, shown whenever the
+float row fails, which is what distinguishes "the fallback will work here" from
+"this device cannot paint at all".
+
+### What has NOT been verified
+
+**The fix has not been run on the iPhone 14.** Everything above is a
+reproduction on desktop SwiftShader with blending suppressed by hand, which is
+a model of the device and not the device. Re-test with `?diag=1` and a stroke.
+
+Two things to watch for that the harness cannot see:
+
+- **Banding or drift in long strokes.** Half-float has ~11 bits of mantissa and
+  pigment accumulates over many splats. The reproduction showed a lower peak
+  alpha under half-float (5.19 vs 8.42 on WebGL 2), which is the precision loss
+  showing up in the accumulation — plausible but worth a real look.
+- **`readPaintTexture()` reads with `gl.FLOAT`.** It worked against a
+  half-float target under SwiftShader; a stricter driver may refuse the
+  combination, which would affect the golden harness and undo, not painting.
 
 ## What Phase 2 delivered
 
@@ -174,12 +129,19 @@ ordinary window. `getEffectiveResolutionScale()` now clamps to
 
 ## Things a fresh session will otherwise get wrong
 
-**`paintTexture` is the odd one out.** It is always `gl.FLOAT`; every other
-resolution-sized simulator target can degrade to half-float. Any reasoning
-about float support has to treat it separately.
+**`paintTexture` is the odd one out.** It is the only resolution-sized target
+that is BLENDED into, which is why it needs `paintTextureType` (chosen by
+probe) rather than `simulationTextureType`. Snapshot textures in `paint.js`
+must follow it.
 
 **`hasFloatTextureSupport()` does not test blending.** Renderable ≠ blendable.
-The app passes its own gate on a device where splatting cannot work.
+That gap is why the iPhone passed its own gate and painted nothing; the startup
+gate now asks `canBlendIntoTexture()` as well.
+
+**On WebGL 2, `OES_texture_half_float` is generally NOT exposed** even though
+half-float is core, so asking for the extension object returns null on hardware
+that supports half-float fine. Use `wgl.getHalfFloatType()`. Getting this wrong
+silently disables the iPhone fallback on the exact context the iPhone reports.
 
 **At ratio 1 the Phase 2 code is equivalent to the old by construction.** That
 is why the DPR axis had to exist: without dpr2 rows every Phase 2 commit passes
@@ -207,12 +169,12 @@ Still true from earlier phases: the RYB colour model is protected;
 `hsvToRgb`/`hsvToRyb` being identical is not a bug; hue maps onto RYB channels
 (`0.333` yellow, `0.667` blue); bristles need settling frames after
 pointer-down; splatting is alpha-blended, not additive (**which is precisely
-what the iPhone cannot do**); debug features are on by default and their flags
+what the iPhone cannot do at full float**); debug features are on by default and their flags
 are decomposition, not a visibility switch; the ±5000 depth range is unresolved
 because the harness cannot see the bristle overlay; `debug2.js` (751 lines) is
 dead in the build; both `index.html` and `gulpfile.js` must list any new script.
 
-## Phase 3 — after the iPhone question is settled
+## Phase 3 — the iPhone question is settled
 
 From the plan, §6: move the engine, unchanged, into `fluid-engine/`.
 
@@ -223,8 +185,8 @@ be severed, or the engine is not UI-independent.
 `viewport.screenToSimulation` was written for that seam and currently has no
 caller.
 
-Note the iPhone fix, whichever option is chosen, lands *inside* `splat()` — so
-it is worth settling before Phase 3 moves that code, not after.
+The iPhone fix landed in the `Simulator` constructor rather than inside
+`splat()`, so it does not conflict with moving that code.
 
 ## Environment notes
 
@@ -241,9 +203,12 @@ it is worth settling before Phase 3 moves that code, not after.
 
 ## Open items
 
-- **iPhone 14 paints nothing** — the priority. Run `?diag=1` first.
+- **Re-test the iPhone 14 with the fix** — the priority. `?diag=1` should now
+  show `blend into HALF_FLOAT target PASS`, and a stroke should deposit paint.
+  Look for banding in long strokes.
 - The 1 GB render-target budget is validated on Android, not on iOS.
 - `Simulator.splat()` still takes screen-space coordinates.
 - `debug2.js` — dead in the build; fold in or delete.
 - The ±5000 depth range — unresolved; needs a mid-stroke golden scenario.
-- `docs/image.png` is untracked and not from this work.
+- `docs/image.png` / `docs/image-ui.png` are untracked device screenshots;
+  `image.png` is the `?diag=1` report that confirmed this diagnosis.

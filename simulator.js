@@ -26,6 +26,47 @@ class Simulator {
       ? halfFloatExt.HALF_FLOAT_OES
       : wgl.FLOAT; // use float if half float not available
 
+    // paintTexture is the one resolution-sized target that is alpha-blended
+    // into, by splat(). Blending into a 32-bit float target is gated by
+    // EXT_float_blend, and an implementation without it drops the draw
+    // silently -- the brush moves, the bristles touch the canvas, and nothing
+    // is deposited (iPhone 14 / Apple GPU, 2026-09-07).
+    //
+    // So the type is chosen by capability, not by device: keep full float
+    // where it blends, and degrade to half-float only where it does not.
+    // Half-float costs ~11 bits of mantissa, which matters because pigment
+    // accumulates over many splats -- so it is a fallback, never the default,
+    // and a device that fails both is genuinely unable to run the app.
+    // Not halfFloatExt: on WebGL 2 that extension is absent even though
+    // half-float is core, which is exactly the context the iPhone reports.
+    const halfFloatType = wgl.getHalfFloatType();
+
+    this.canDepositPaint = true;
+
+    if (wgl.canBlendIntoTexture(wgl.FLOAT)) {
+      this.paintTextureType = wgl.FLOAT;
+      this.paintTexturePrecision = 'float';
+    } else if (halfFloatType !== null && wgl.canBlendIntoTexture(halfFloatType)) {
+      this.paintTextureType = halfFloatType;
+      this.paintTexturePrecision = 'half-float';
+      console.warn(
+        'fluid-paint: this device cannot alpha-blend into a float render target ' +
+        '(EXT_float_blend absent or non-functional). paintTexture has been ' +
+        'degraded to half-float so that painting works; long strokes may band ' +
+        'slightly where pigment accumulates.'
+      );
+    } else {
+      // Neither precision blends. Painting cannot work at all here, and
+      // pretending otherwise is what made this bug expensive to find.
+      this.paintTextureType = wgl.FLOAT;
+      this.paintTexturePrecision = 'none';
+      this.canDepositPaint = false;
+      console.error(
+        'fluid-paint: this device cannot alpha-blend into any floating-point ' +
+        'render target. Splatting cannot deposit paint; the canvas will stay blank.'
+      );
+    }
+
     this.resolutionWidth = resolutionWidth;
     this.resolutionHeight = resolutionHeight;
 
@@ -93,7 +134,7 @@ class Simulator {
     // textures
     this.paintTexture = wgl.buildTexture(
       wgl.RGBA,
-      wgl.FLOAT,
+      this.paintTextureType,
       this.resolutionWidth,
       this.resolutionHeight,
       null,
@@ -104,7 +145,7 @@ class Simulator {
     );
     this.paintTextureTemp = wgl.buildTexture(
       wgl.RGBA,
-      wgl.FLOAT,
+      this.paintTextureType,
       this.resolutionWidth,
       this.resolutionHeight,
       null,
@@ -261,7 +302,7 @@ class Simulator {
     wgl.rebuildTexture(
       this.paintTextureTemp,
       wgl.RGBA,
-      wgl.FLOAT,
+      this.paintTextureType,
       newWidth,
       newHeight,
       null,
@@ -289,7 +330,7 @@ class Simulator {
     wgl.rebuildTexture(
       this.paintTextureTemp,
       wgl.RGBA,
-      wgl.FLOAT,
+      this.paintTextureType,
       this.resolutionWidth,
       this.resolutionHeight,
       null,
@@ -379,7 +420,7 @@ class Simulator {
     wgl.rebuildTexture(
       this.paintTextureTemp,
       wgl.RGBA,
-      wgl.FLOAT,
+      this.paintTextureType,
       newWidth,
       newHeight,
       null,
@@ -397,7 +438,7 @@ class Simulator {
     wgl.rebuildTexture(
       this.paintTextureTemp,
       wgl.RGBA,
-      wgl.FLOAT,
+      this.paintTextureType,
       this.resolutionWidth,
       this.resolutionHeight,
       null,

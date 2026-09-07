@@ -165,10 +165,13 @@ class Paint {
 
         this.snapshots = [];
         for (let i = 0; i < HISTORY_SIZE; ++i) {
-            // keep HISTORY_SIZE snapshots to avoid reallocating textures
+            // keep HISTORY_SIZE snapshots to avoid reallocating textures.
+            // A snapshot holds a copy of paintTexture, so it has to use the
+            // same type -- on a device where paintTexture degraded to
+            // half-float, a FLOAT snapshot would be a format mismatch.
             const texture = wgl.buildTexture(
                 wgl.RGBA,
-                wgl.FLOAT,
+                this.simulator.paintTextureType,
                 this.getPaintingResolutionWidth(),
                 this.getPaintingResolutionHeight(),
                 null,
@@ -1375,7 +1378,7 @@ class Paint {
             this.wgl.rebuildTexture(
                 snapshot.texture,
                 this.wgl.RGBA,
-                this.wgl.FLOAT,
+                this.simulator.paintTextureType,
                 this.simulator.resolutionWidth,
                 this.simulator.resolutionHeight,
                 null,

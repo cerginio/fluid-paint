@@ -136,7 +136,18 @@
                 // });
                 // console.table(results);
 
-                if (wgl !== null && wgl.hasFloatTextureSupport()) {
+                // Renderable is not blendable. hasFloatTextureSupport() only
+                // asks whether a float target can be drawn into; splat()
+                // additionally needs to ALPHA-BLEND into one, and a device
+                // that cannot do so at any precision silently deposits
+                // nothing. Ask that question here rather than letting the app
+                // start up and look healthy while painting nothing.
+                const halfFloatType = wgl !== null ? wgl.getHalfFloatType() : null;
+                const canPaint = wgl !== null && wgl.hasFloatTextureSupport() &&
+                    (wgl.canBlendIntoTexture(wgl.FLOAT) ||
+                     (halfFloatType !== null && wgl.canBlendIntoTexture(halfFloatType)));
+
+                if (canPaint) {
 
                     //required features are supported
                     document.getElementById('placeholder').outerHTML = document.getElementById('main').innerHTML;
@@ -155,8 +166,15 @@
 
                     if (wgl === null) {
                         document.getElementById('error').innerHTML = 'Unfortunately, your browser does not support WebGL.';
-                    } else {
+                    } else if (!wgl.hasFloatTextureSupport()) {
                         document.getElementById('error').innerHTML = 'Unfortunately, your browser does not support WebGL floating point textures.';
+                    } else {
+                        // Float textures exist and are renderable, but cannot be
+                        // blended into at any precision, so no stroke could ever
+                        // deposit paint. Say so, rather than showing a canvas
+                        // that looks fine and stays blank forever.
+                        document.getElementById('error').innerHTML =
+                            'Unfortunately, your browser cannot blend into floating point textures, which this app needs in order to paint.';
                     }
                 }
 

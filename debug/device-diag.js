@@ -73,8 +73,26 @@ function showDeviceDiagnostics(wgl) {
             fb.pass ? 'PASS' : ('FAIL' + (fb.value !== null ? ' (got ' + fb.value.toFixed(3) + ', want 0.5)' : '')),
             fb.pass ? 'good' : 'bad');
         if (!fb.pass) {
-          rows.push('<div style="color:#ff5c5c">&nbsp;&nbsp;splatting cannot deposit paint on this device</div>');
+          rows.push('<div style="color:#ff5c5c">&nbsp;&nbsp;splatting cannot deposit paint at full float</div>');
           if (fb.error) rows.push('<div style="color:#ff5c5c;opacity:.8">&nbsp;&nbsp;' + fb.error + '</div>');
+        }
+
+        // When full float cannot blend, the fix is to degrade paintTexture to
+        // half-float -- but only if half-float actually blends here. This row
+        // is what decides that, so report it whenever the float row failed.
+        if (!fb.pass) {
+          const hf = floatBlendRoundTrip(gl, 'half');
+          add('&nbsp;blend into HALF_FLOAT target',
+              hf.pass ? 'PASS' : ('FAIL' + (hf.value !== null ? ' (got ' + hf.value.toFixed(3) + ', want 0.5)' : '')),
+              hf.pass ? 'good' : 'bad');
+          rows.push(
+            '<div style="color:' + (hf.pass ? '#3ddc84' : '#ff5c5c') + '">&nbsp;&nbsp;' +
+            (hf.pass
+              ? 'half-float fallback will work -- paint deposits at reduced precision'
+              : 'half-float will not blend either; the app cannot paint on this device') +
+            '</div>'
+          );
+          if (hf.error) rows.push('<div style="color:#ff5c5c;opacity:.8">&nbsp;&nbsp;' + hf.error + '</div>');
         }
       } catch (e) {
         add('&nbsp;blend into FLOAT target', 'ERROR: ' + e.message, 'bad');
