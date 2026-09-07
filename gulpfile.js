@@ -29,6 +29,7 @@ const paths = {
     // device-emulation harness must load before wrappedgl.js
     'glsl3.js',
     'debug/debug-flags.js',
+    'debug/painting-rect-overlay.js',
     'debug/gpu-profiles.js',
     'debug/texture-selftest.js',
     'debug/device-diag.js',

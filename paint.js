@@ -105,20 +105,6 @@ class Paint {
             { a_position: 0 }
         );
 
-        // Simple fullscreen pass that draws only the border of a given rectangle.
-        // Uses gl_FragCoord in pixel space, so we can set thickness in pixels.
-        this.rectOutlineProgram = wgl.createProgram(
-            shaderSources['shaders/fullscreen.vert'],
-            shaderSources['shaders/rectborder.frag'],
-    
-            { a_position: 0 }
-        );
-
-        // Optional toggles / defaults
-        this.showPaintingRect = true;          // set false if you want to hide
-        this.paintingRectThickness = 2.0;      // pixels
-        // this.paintingRectColor = [1, 1, 1, 0.9]; // [0, 0, 0, 0.9]; // white | black, 90% opacity 
-        this.paintingRectColor = hexToRgba01('#0ea5e9', 1);
         this.interactionState =   InteractionMode.NONE;
 
         this.quadVertexBuffer = wgl.createBuffer();
@@ -128,6 +114,14 @@ class Paint {
             new Float32Array([-1.0, -1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 1.0]),
             wgl.STATIC_DRAW
         );
+
+        // Debug instrumentation, each in its own module and constructed only
+        // when its flag is on -- so a disabled feature compiles no program and
+        // allocates nothing. Enabled by default; ?debug=-paintingRect turns it
+        // off. See debug/debug-flags.js.
+        this.paintingRectOverlay = this.debug.paintingRect
+            ? new PaintingRectOverlay(wgl, shaderSources, this.quadVertexBuffer)
+            : null;
 
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
@@ -676,30 +670,15 @@ class Paint {
         this.drawShadow(PAINTING_SHADOW_ALPHA, clippedPaintingRectangle); // draw painting shadow
 
         // --- draw the paintingRectangle outline (preview-aware) ---
-        if (this.showPaintingRect) {
+        if (this.paintingRectOverlay !== null) {
             // While resizing, show the preview rectangle; otherwise the current one
-            const r = (this.interactionState === InteractionMode.RESIZING && this.newPaintingRectangle)
-                ? this.newPaintingRectangle
-                : this.paintingRectangle;
-
-            const outline = wgl
-                .createDrawState()
-                .viewport(0, 0, this.canvas.width, this.canvas.height)
-                .useProgram(this.rectOutlineProgram)
-                .enable(wgl.BLEND)
-                .blendFunc(wgl.ONE, wgl.ONE_MINUS_SRC_ALPHA)
-                .vertexAttribPointer(this.quadVertexBuffer, 0, 2, wgl.FLOAT, wgl.FALSE, 0, 0)
-                .uniform2f('u_bottomLeft', r.left, r.bottom)
-                .uniform2f('u_topRight', r.getRight(), r.getTop())
-                .uniform1f('u_thickness', this.paintingRectThickness)
-                .uniform4f('u_color',
-                    this.paintingRectColor[0],
-                    this.paintingRectColor[1],
-                    this.paintingRectColor[2],
-                    this.paintingRectColor[3]
-                );
-
-            wgl.drawArrays(outline, wgl.TRIANGLE_STRIP, 0, 4);
+            this.paintingRectOverlay.draw(
+                (this.interactionState === InteractionMode.RESIZING && this.newPaintingRectangle)
+                    ? this.newPaintingRectangle
+                    : this.paintingRectangle,
+                this.canvas.width,
+                this.canvas.height
+            );
         }
 
         // draw brush to screen
