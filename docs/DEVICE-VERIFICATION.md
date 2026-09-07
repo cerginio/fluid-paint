@@ -1,5 +1,31 @@
 # Verifying the fix on a real device
 
+## Results log
+
+| Date | Device | Phase checked | Result |
+|---|---|---|---|
+| earlier | Samsung A56 | WebGL 2 dual path | good |
+| earlier | tablet | WebGL 2 dual path | good |
+| 2026-09-07 | Samsung A56 | Phase 2 (DPR + Viewport) | **good** |
+| 2026-09-07 | Samsung Galaxy Tab S9 | Phase 2 (DPR + Viewport) | **good** |
+| 2026-09-07 | iPhone 14 | Phase 2 (DPR + Viewport) | **FAILS — canvas stays white** |
+
+**iPhone 14, 2026-09-07.** Brush moves correctly, bristles orient correctly,
+the debug view shows them touching the canvas — and the canvas stays white and
+clean, with no error. Physics runs; the splat deposits nothing.
+
+Leading hypothesis: `EXT_float_blend`. `Simulator.splat()` alpha-blends into
+`paintTexture`, which is the one resolution-sized target that is always
+`gl.FLOAT` with no half-float fallback, and the app neither requests nor checks
+that extension. `hasFloatTextureSupport()` does not cover it — renderable is
+not the same question as blendable.
+
+**To settle it, open `?diag=1` on the device** and read the two rows
+`EXT_float_blend` and `blend into FLOAT target`. The second actually performs
+the blend and expects 0.5; it is sabotage-verified, so a pass means something.
+Full analysis and the fix options are in `HANDOFF.md`.
+
+
 The capability-clamp harness reproduces the bug and confirms the fix on a desktop,
 but the physical device is ground truth. This is how to check it.
 

@@ -1,16 +1,16 @@
-# Handoff — state after Phase 2
+# Handoff — Phase 2 verified, one device open
 
-Written 2026-09-07 so the next session can continue without re-deriving
-anything. Read this, then `FLUID-ENGINE-EXTRACTION-PLAN.md`.
+Written 2026-09-07. Read this, then `FLUID-ENGINE-EXTRACTION-PLAN.md`.
 
 ## Where things stand
 
-Branch: **`fluid-engine-v1`**. **Phases 0, 1 and 2 are done in code.**
-
-**Phase 2 is not finished until the device verification happens** — see "The
-one thing outstanding" below. Phase 3 should not start before it.
+Branch: **`fluid-engine-v1`**. **Phases 0, 1 and 2 are done and
+device-verified**, with one device failing — see the next section, which is the
+most important thing in this file.
 
 ```
+ad4c3e3  Add a float-blend probe to the device diagnostics
+05299c8  Update the plan and handoff for the end of Phase 2
 19ef834  Turn devicePixelRatio on, with a render-target memory budget
 fe6f42f  Express the CSS-authored UI metrics in screen pixels
 7dc05bd  Introduce the Viewport module, with DPR still off
@@ -27,27 +27,122 @@ a5eb6ac  Update the handoff and the 3a table for the end of Phase 1
 ```
 
 Working tree clean apart from `docs/image.png` (untracked, not from this work).
+Golden images: **12/12 pass** on both the source and dist paths.
 
-## The one thing outstanding
+### Device verification results (user, 2026-09-07)
 
-**Manual device verification, per `docs/DEVICE-VERIFICATION.md`.** The user has
-a Samsung A56 and a tablet, and previously confirmed the WebGL 2 dual path on
-both.
+| Device | Result |
+|---|---|
+| Samsung A56 | **Good** — Phase 2 works, DPR on |
+| Samsung Galaxy Tab S9 | **Good** |
+| iPhone 14 | **Fails — canvas stays white.** See below |
 
-What needs checking, in order of how likely it is to be wrong:
+Phase 2's DPR change and the 1 GB render-target budget are therefore validated
+on real Android hardware. The budget was never hit on those devices.
 
-1. **Does it still run at all?** DPR is now on, so the phone allocates roughly
-   four times the render-target memory it used to. `?dpr=1` is the escape hatch
-   if it does not — that restores the old behaviour exactly.
-2. **Is the 1 GB budget right?** It was chosen against SwiftShader's limits and
-   arithmetic, not a real phone. If the A56 dies at 1 GB, lower
-   `PaintState.maxRenderTargetBytes`; if it is comfortable, it can rise. Watch
-   the console — the clamp warns once per distinct clamp, saying what was asked
-   for and what it got.
-3. **Is the painting actually sharper?** That is the point of the phase.
-4. **Do the UI hit-targets still line up?** The panel, the colour picker and
-   the edge-grab margins were all converted from CSS to screen pixels. A wrong
-   conversion shows up as "the control is drawn here but responds over there".
+## The iPhone 14 failure — start here
+
+**Symptom, as reported.** The brush moves correctly. The bristles orient
+correctly. The debug view shows them touching the canvas. **The canvas stays
+white and clean.** No error, no crash.
+
+That combination is precise and it rules a lot out. The brush simulation, the
+pointer path, the coordinate transforms and the projection are all working —
+you can see them working. What fails is the step that turns bristle contact
+into pigment: **the splat**.
+
+### The leading hypothesis, and why
+
+`Simulator.splat()` (simulator.js:540-575) enables blending —
+
+```js
+.enable(wgl.BLEND)
+.blendEquation(wgl.FUNC_ADD)
+.blendFuncSeparate(wgl.SRC_ALPHA, wgl.ONE_MINUS_SRC_ALPHA, wgl.ONE, wgl.ONE)
+```
+
+— and renders into `paintTexture`, which is **always `gl.FLOAT`**
+(simulator.js:94). That is not true of the other targets: velocity, divergence
+and pressure all go through `simulationTextureType`, which prefers half-float
+and falls back to float (simulator.js:25-27). `paintTexture` is the one
+resolution-sized target with no fallback.
+
+Blending into a floating-point render target is gated by **`EXT_float_blend`**.
+The app **never requests it and never checks for it** — the only mention in the
+tree is in `debug/gpu-profiles.js`, in a list of extensions to deny. An
+implementation without it is entitled to drop the draw, and dropping it
+silently is exactly the reported symptom.
+
+`hasFloatTextureSupport()` does not catch this. It checks that a float texture
+is *renderable* (`canRenderToTexture`), which is a different question from
+whether it can be *blended into*. So the app passes its own gate, initialises
+fully, runs its physics — and deposits nothing.
+
+This is a hypothesis with strong circumstantial support, **not a confirmed
+diagnosis.** It has not been observed on the device.
+
+### What to do first — one measurement, no code change
+
+`?diag=1` now answers this directly. Open on the iPhone:
+
+```
+http://<host>:8099/index.html?diag=1
+```
+
+Two new rows:
+
+- **`EXT_float_blend`** — whether the extension is advertised.
+- **`blend into FLOAT target`** — the decisive one. It clears a 1×1 float
+  target, draws white at alpha 0.5 with exactly the blend state `splat()` uses,
+  reads back, and expects 0.5. On FAIL it prints *"splatting cannot deposit
+  paint on this device"*.
+
+The probe was sabotage-verified: it reads 0.5 and passes normally, and reads
+1.0 and fails when blending is suppressed. It can fail, so a pass means
+something.
+
+**If it reports FAIL**, the hypothesis is confirmed and the fix is a design
+choice (below). **If it reports PASS**, the hypothesis is wrong and the cause
+is elsewhere — see "If the blend probe passes".
+
+### If the blend probe FAILS — the options
+
+None of these is obviously right; it is a real design decision.
+
+1. **Make `paintTexture` half-float where full float will not blend.** The
+   smallest change, and it follows the precedent already in the file:
+   `simulationTextureType` exists for exactly this reason. Risk: half-float has
+   ~11 bits of mantissa, and pigment accumulates over many splats, so banding
+   or drift in long strokes is plausible. Needs a golden run and a real look.
+2. **Splat without blending — read, combine in the shader, write.** Removes the
+   dependency entirely and keeps full float precision. Costs a ping-pong target
+   and a pass. This is the most robust and the most work.
+3. **Request `EXT_float_blend` explicitly and fail loudly when absent.** Not a
+   fix, but honest: the "float textures unsupported" page already exists for
+   devices that cannot run the app. Worth doing regardless of which fix is
+   chosen, so the failure stops being silent.
+
+Whichever is chosen, **option 3's honesty belongs in it** — the current
+behaviour of looking healthy while painting nothing is the worst part of this
+bug, and it cost this session's diagnosis time even with the symptom described
+precisely.
+
+### If the blend probe PASSES
+
+The hypothesis is wrong. Next candidates, roughly in order:
+
+- **Read back `paintTexture` directly on the device** and see whether it is
+  actually empty, or whether it holds pigment that the *render* path is then
+  failing to show. The golden harness's `readPaintTexture()`
+  (debug/golden-harness.js) is the code to borrow. This splits the problem in
+  half and is the cheapest next step.
+- **`Z_THRESHOLD` / precision.** Splatting only deposits where a bristle
+  crosses `Z_THRESHOLD * brushScale`. The debug view showing contact is a
+  *visual* judgement; the shader's comparison is `highp` float. Check
+  `highp fragment precision` in the diag panel — it is already reported.
+- **The scissor rectangle.** `splat()` restricts drawing to `simulationArea`.
+  If that computes empty or off-target on this device the draw is clipped away
+  entirely, with no error.
 
 ## What Phase 2 delivered
 
@@ -56,101 +151,98 @@ coordinate spaces: `eventToScreen`, `cssToScreen`, `screenToCss`,
 `cssLengthToScreen`, `screenToPainting`, `paintingToSimulation`,
 `screenToSimulation`.
 
-All four open-coded Y-flips are gone. The CSS-authored UI metrics go through
-the viewport; `RESIZING_RADIUS` is renamed `RESIZING_RADIUS_CSS` so the unit is
-in the name. `ColorPicker` carries one `scale` rather than a dozen converted
+All four open-coded Y-flips are gone. CSS-authored UI metrics go through the
+viewport; `RESIZING_RADIUS` is renamed `RESIZING_RADIUS_CSS` so the unit is in
+the name. `ColorPicker` carries one `scale` rather than a dozen converted
 constants.
 
 DPR is on, clamped to 2. `?dpr=1` restores the old behaviour; `?dpr=N` raises
 the cap.
 
-**The golden harness gained a DPR axis** — 6 entries to 12, keyed
+The golden harness gained a **DPR axis** — 6 entries to 12, keyed
 `webgl{1,2}/dpr{1,2}/{scenario}`. The dpr1 hashes are byte-identical to the
-Phase 0 baseline, so the old path demonstrably did not move; the dpr2 rows are
-new, simulating at 2220x1375 rather than 1860x1140.
+Phase 0 baseline, so the old path demonstrably did not move.
 
-## What turning DPR on uncovered
-
-**An unbounded memory defect that predates DPR.** `maxPaintingWidth` clamps
-each *dimension* against `MAX_TEXTURE_SIZE`, but nothing clamped total memory —
-and the app holds **22 float RGBA render targets** at the painting resolution:
-7 simulator buffers plus `HISTORY_SIZE` = 15 undo snapshots, at 16 bytes a
-texel. A 1280x800 window at ratio 2 asks for 2969 MB, the driver answers
-`GL_OUT_OF_MEMORY` and drops the context. That is a black canvas, not a slow
-one.
-
-**DPR did not create this.** A 2560x1440 window at quality High asks for 2.6 GB
-today with no DPR at all. DPR only made it reachable on an ordinary window.
-
-`getEffectiveResolutionScale()` clamps to `PaintState.maxRenderTargetBytes`
-(1 GB) and warns once per distinct clamp. Per the user's decision the budget
-covers **all** targets including the undo history: the painting keeps its size,
-undo keeps its depth, and simulation fidelity is what degrades — the one of the
-three that degrades gracefully.
+**Turning DPR on uncovered an unbounded memory defect that predates it.**
+Nothing clamped total render-target memory, only each dimension, and the app
+holds 22 float RGBA targets at painting resolution (7 simulator buffers + 15
+undo snapshots, 16 bytes a texel). A 1280×800 window at ratio 2 asks for
+2969 MB and the driver drops the context. A 2560×1440 window at quality High
+asks for 2.6 GB *today, with no DPR at all* — DPR only made it reachable on an
+ordinary window. `getEffectiveResolutionScale()` now clamps to
+`PaintState.maxRenderTargetBytes` (1 GB) and warns once per distinct clamp.
 
 ## Things a fresh session will otherwise get wrong
 
-**At ratio 1 the new code is equivalent to the old by construction.** This is
-why the DPR axis had to be added to the harness: without dpr2 rows, every
-Phase 2 commit passes 6/6 while the entire feature is untested. If a future
-phase adds a mode that is off by default, it needs its own axis for the same
-reason.
+**`paintTexture` is the odd one out.** It is always `gl.FLOAT`; every other
+resolution-sized simulator target can degrade to half-float. Any reasoning
+about float support has to treat it separately.
 
-**The harness had the very bug the Viewport exists to prevent.**
-`paintingFractionToClient` mixed screen pixels into a CSS-pixel result and its
-panel guard compared the two units. Invisible while the units were equal;
-at ratio 2 it aimed every stroke at twice its intended offset, so the strokes
-deposited nothing and all three dpr2 scenarios returned an identical empty
-`paintHash`. **An identical hash across different scenarios means nothing was
-drawn, not that the renderer is stable.**
+**`hasFloatTextureSupport()` does not test blending.** Renderable ≠ blendable.
+The app passes its own gate on a device where splatting cannot work.
 
-**A first attempt at the budget was wrong by 4x** — it counted 4 bytes a texel
-instead of 16, and ignored the 15 undo snapshots entirely, so a "180 MB"
-estimate was really 2.2 GB. If you touch the budget, recompute it from
-`BYTES_PER_TEXEL` and `SIMULATION_TARGETS + HISTORY_SIZE` rather than trusting
-a remembered figure.
+**At ratio 1 the Phase 2 code is equivalent to the old by construction.** That
+is why the DPR axis had to exist: without dpr2 rows every Phase 2 commit passes
+while the whole feature is untested. A future feature that is off by default
+needs the same treatment.
 
-**A time-driven scripted stroke is not a measurement.** Counting painted texels
-over the same unchanged code returned 76080, 99735 and 77917 across three runs.
-It is fine for "did any paint land"; it cannot detect a regression. The golden
-hashes are what does that.
+**An identical hash across different scenarios means nothing was drawn**, not
+that the renderer is stable. That is how the harness's own coordinate bug was
+caught.
 
-Everything from the earlier handoffs still applies: the RYB colour model is
-protected; `hsvToRgb`/`hsvToRyb` being identical is not a bug; hue maps onto
-RYB channels (`0.333` yellow, `0.667` blue); bristles need settling frames
-after pointer-down; splatting is alpha-blended, not additive; debug features
-are on by default and their flags are decomposition, not a visibility switch;
-the ±5000 depth range is still unresolved because the harness cannot see the
-bristle overlay; `debug2.js` (751 lines) is dead in the build; and both
-`index.html` and `gulpfile.js` must list any new script.
+**The harness had the very bug Viewport exists to prevent** —
+`paintingFractionToClient` mixed screen pixels into a CSS-pixel result.
+Invisible while the units were equal; at ratio 2 it aimed every stroke at twice
+its intended offset.
 
-## Phase 3 — what comes after the device check
+**Budget arithmetic was wrong by 4× on the first attempt** — 4 bytes a texel
+instead of 16, and the 15 undo snapshots ignored entirely. Recompute from
+`BYTES_PER_TEXEL` and `SIMULATION_TARGETS + HISTORY_SIZE`, never from memory.
+
+**A time-driven scripted stroke is not a measurement.** Painted-texel counts
+over identical code returned 76080, 99735 and 77917. Fine for "did any paint
+land"; useless for regressions.
+
+Still true from earlier phases: the RYB colour model is protected;
+`hsvToRgb`/`hsvToRyb` being identical is not a bug; hue maps onto RYB channels
+(`0.333` yellow, `0.667` blue); bristles need settling frames after
+pointer-down; splatting is alpha-blended, not additive (**which is precisely
+what the iPhone cannot do**); debug features are on by default and their flags
+are decomposition, not a visibility switch; the ±5000 depth range is unresolved
+because the harness cannot see the bristle overlay; `debug2.js` (751 lines) is
+dead in the build; both `index.html` and `gulpfile.js` must list any new script.
+
+## Phase 3 — after the iPhone question is settled
 
 From the plan, §6: move the engine, unchanged, into `fluid-engine/`.
 
-The last §2 defect is still open and belongs to this work:
-**`Simulator.splat()` takes a screen-space `paintingRectangle`** and does the
-screen-to-simulation transform itself (simulator.js:525-531). The engine knows
-about the screen, and that must be severed or the engine is not UI-independent.
-`viewport.screenToSimulation` exists for exactly this and currently has no
-caller — it was written for that seam.
+The last §2 defect belongs to that work: **`Simulator.splat()` takes a
+screen-space `paintingRectangle`** and does the screen-to-simulation transform
+itself (simulator.js:525-531). The engine knows about the screen and that must
+be severed, or the engine is not UI-independent.
+`viewport.screenToSimulation` was written for that seam and currently has no
+caller.
+
+Note the iPhone fix, whichever option is chosen, lands *inside* `splat()` — so
+it is worth settling before Phase 3 moves that code, not after.
 
 ## Environment notes
 
-- Playwright chromium is installed. Headless uses SwiftShader via ANGLE, so
-  hashes are a local regression tripwire only. Its memory limits are also not a
-  phone's, which is why the budget needs a real device.
-- Browser launch flags matter: `--use-gl=angle --use-angle=swiftshader
-  --enable-unsafe-swiftshader`. The wrong flags fail to compile shaders and
-  report a clean result that means nothing.
+- Playwright chromium is installed. Headless uses SwiftShader via ANGLE:
+  a local regression tripwire only, and **its float-blend behaviour is not
+  Apple's** — it passes the probe, which is why the iPhone needs a real check.
+- Launch flags matter: `--use-gl=angle --use-angle=swiftshader
+  --enable-unsafe-swiftshader`. Wrong flags fail to compile shaders and report
+  a clean result that means nothing.
 - One-off probes go in `debug/` (not the scratchpad) because Node resolves
   `playwright` from the script's own path; delete them after use.
-- The golden run is now twice as long (12 checks). Allow several minutes.
+- The golden run is 12 checks now. Allow several minutes.
+- A dev server was previously run on `192.168.1.224:8099` for device testing.
 
 ## Open items
 
-- **Device verification for Phase 2** — the gate before Phase 3.
-- The 1 GB render-target budget is unvalidated on real hardware.
+- **iPhone 14 paints nothing** — the priority. Run `?diag=1` first.
+- The 1 GB render-target budget is validated on Android, not on iOS.
 - `Simulator.splat()` still takes screen-space coordinates.
 - `debug2.js` — dead in the build; fold in or delete.
 - The ±5000 depth range — unresolved; needs a mid-stroke golden scenario.
