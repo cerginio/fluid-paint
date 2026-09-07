@@ -186,21 +186,10 @@ async function runStroke(painter, stroke, opts) {
  * Phases 6-8.
  */
 function readPaintTexture(painter) {
-  const wgl = painter.wgl;
-  const sim = painter.simulator;
-  const width = sim.resolutionWidth;
-  const height = sim.resolutionHeight;
-
-  const framebuffer = wgl.createFramebuffer();
-  wgl.framebufferTexture2D(framebuffer, wgl.FRAMEBUFFER, wgl.COLOR_ATTACHMENT0,
-    wgl.TEXTURE_2D, sim.paintTexture, 0);
-
-  const pixels = new Float32Array(width * height * 4);
-  wgl.readPixels(wgl.createReadState().bindFramebuffer(framebuffer),
-    0, 0, width, height, wgl.RGBA, wgl.FLOAT, pixels);
-
-  wgl.deleteFramebuffer(framebuffer);
-  return { width, height, pixels };
+  // Through the engine's API rather than reaching for simulator.paintTexture.
+  // The harness is a host like any other: if it needs something the API does
+  // not offer, that is a finding about the API, not a reason to go around it.
+  return painter.engine.readPaintTexture();
 }
 
 /*
@@ -485,7 +474,7 @@ function scheduleGoldenSuite(getPainter, which) {
   const started = Date.now();
   (function poll() {
     const painter = getPainter();
-    if (painter && painter.simulator && painter.brush && painter.paintingRectangle) {
+    if (painter && painter.engine && painter.paintingRectangle) {
       runGoldenSuite(painter, which);
       return;
     }

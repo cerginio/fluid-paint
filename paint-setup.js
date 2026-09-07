@@ -25,9 +25,10 @@ const PaintState = {
     // but nothing clamped total memory -- and everything here scales with the
     // painting's AREA, so a ratio of 2 costs four times as much, not twice.
     //
-    // At this resolution the app holds SIMULATION_TARGETS + HISTORY_SIZE float
-    // RGBA textures: 7 simulator buffers and 15 undo snapshots, 22 in all, at
-    // 16 bytes a texel. A 1280x800 window at ratio 2 gives a 2520x1560
+    // At this resolution the app holds 7 simulator buffers plus HISTORY_SIZE
+    // undo snapshots -- 22 float RGBA textures in all, at 16 bytes a texel.
+    // The engine owns that arithmetic now; see
+    // FluidEngine.estimateRenderTargetBytes(). A 1280x800 window at ratio 2 gives a 2520x1560
     // painting, which is 3.93 Mtexels, so even at quality Low that is ~1.3 GB.
     // The driver answers GL_OUT_OF_MEMORY and drops the context -- a black
     // canvas, not a slow one -- which is why this is a hard limit rather than
@@ -47,11 +48,10 @@ const PaintState = {
     maxRenderTargetBytes: 1024 * 1024 * 1024,
 };
 
-// Float RGBA: 4 channels x 4 bytes.
-const BYTES_PER_TEXEL = 16;
-// Simulator render targets that scale with the painting resolution: paint,
-// paintTemp, velocity, velocityTemp, divergence, pressure, pressureTemp.
-const SIMULATION_TARGETS = 7;
+// The render-target budget arithmetic moved into the engine in Phase 5 --
+// BYTES_PER_TEXEL and the count of resolution-sized simulator targets are
+// facts about the simulation, and the app had to read simulation.js to know
+// the second one. See FluidEngine.maxResolutionScaleForBudget().
 
 (function parsePixelRatioOverride() {
     if (typeof window === 'undefined') return;

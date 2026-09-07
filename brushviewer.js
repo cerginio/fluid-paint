@@ -104,7 +104,10 @@ class BrushViewer {
         );
     }
 
-    draw(brushX, brushY, brush, color) {
+    // `bristles` is the engine's bristle geometry (see
+    // FluidEngine.getBristleGeometry) rather than the Brush itself: this is a
+    // chrome overlay, and it needs six GL objects, not the simulation.
+    draw(brushX, brushY, bristles, color) {
         const wgl = this.wgl;
 
         const xRotationMatrix = new Float32Array(16);
@@ -141,19 +144,19 @@ class BrushViewer {
             .createDrawState()
             .bindFramebuffer(null)
             .viewport(this.left, this.bottom, this.width, this.height)
-            .vertexAttribPointer(brush.brushTextureCoordinatesBuffer, 0, 2, wgl.FLOAT, wgl.FALSE, 0, 0)
+            .vertexAttribPointer(bristles.coordinatesBuffer, 0, 2, wgl.FLOAT, wgl.FALSE, 0, 0)
             .useProgram(this.brushProgram)
-            .bindIndexBuffer(brush.brushIndexBuffer)
+            .bindIndexBuffer(bristles.indexBuffer)
             // .uniform4f('u_color', 0, 0, 1, 1.0)
             .uniform4f('u_color', color[0], color[1], color[2], 1.0)
             .uniformMatrix4fv('u_projectionViewMatrix', false, projectionViewMatrix)
             .enable(wgl.DEPTH_TEST)
-            .uniformTexture('u_positionsTexture', 0, wgl.TEXTURE_2D, brush.positionsTexture);
+            .uniformTexture('u_positionsTexture', 0, wgl.TEXTURE_2D, bristles.positionsTexture);
 
         wgl.drawElements(
             brushDrawState,
             wgl.LINES,
-            (brush.indexCount * brush.bristleCount) / brush.maxBristleCount,
+            (bristles.indexCount * bristles.bristleCount) / bristles.maxBristleCount,
             wgl.UNSIGNED_SHORT,
             0
         );

@@ -48,11 +48,9 @@ class Paint {
 
         this.framebuffer = wgl.createFramebuffer();
 
-        // The painting render lives in the engine (Phase 4). It owns every
-        // painting.vert/painting.frag variant, the fullscreen blit that puts
-        // the result on screen, and the lighting constants that go with them.
-        // What stays here is the chrome below.
-        this.renderer = new PaintingRenderer(wgl, shaderSources);
+        // The engine (Phase 5). Simulation, brush and painting render behind
+        // one surface; this app owns no simulation state. Constructed after
+        // the painting rectangle below, which sizes it.
 
         this.brushProgram = wgl.createProgram(
             shaderSources['shaders/brush.vert'],
@@ -129,47 +127,30 @@ class Paint {
         // simulation resolution = painting resolution * resolution scale
         this.resolutionScale = QUALITIES[INITIAL_QUALITY].resolutionScale;
 
-        this.simulator = new Simulator(
-            wgl,
-            shaderSources,
-            this.getPaintingResolutionWidth(),
-            this.getPaintingResolutionHeight()
-        );
+        // Drawn before the engine is constructed, and that ordering is
+        // load-bearing under ?seed=. Brush's constructor fills a randoms
+        // texture from Math.random(), so with the deterministic RNG installed
+        // its bristles depend on how many draws came first. This one used to
+        // happen before `new Brush(...)`; the engine now owns the Brush, so the
+        // draw has to move up here to keep the sequence -- otherwise every
+        // golden hash shifts for no reason anyone could see in the diff.
+        this.brushColorHSVA = [Math.random(), 1, 1, 0.8];
 
+        this.engine = new FluidEngine(wgl, shaderSources, {
+            resolutionWidth: this.getPaintingResolutionWidth(),
+            resolutionHeight: this.getPaintingResolutionHeight(),
+            maxBristleCount: MAX_BRISTLE_COUNT,
+        });
+
+        // The undo ring. Depth is this app's decision, not the engine's -- the
+        // engine only knows how to fill a snapshot and reload one. It does
+        // allocate them, because the texture has to match the paint texture
+        // type the capability probe chose, and a host that guessed gl.FLOAT
+        // would break undo on exactly the devices the probe exists for.
         this.snapshots = [];
         for (let i = 0; i < HISTORY_SIZE; ++i) {
-            // keep HISTORY_SIZE snapshots to avoid reallocating textures.
-            // A snapshot holds a copy of paintTexture, so it has to use the
-            // same type -- on a device where paintTexture degraded to
-            // half-float, a FLOAT snapshot would be a format mismatch.
-            const texture = wgl.buildTexture(
-                wgl.RGBA,
-                this.simulator.paintTextureType,
-                this.getPaintingResolutionWidth(),
-                this.getPaintingResolutionHeight(),
-                null,
-                wgl.CLAMP_TO_EDGE,
-                wgl.CLAMP_TO_EDGE,
-                wgl.NEAREST,
-                wgl.NEAREST
-            );
-
-            wgl.framebufferTexture2D(
-                this.framebuffer,
-                wgl.FRAMEBUFFER,
-                wgl.COLOR_ATTACHMENT0,
-                wgl.TEXTURE_2D,
-                texture,
-                0
-            );
-            wgl.clear(
-                wgl.createClearState().bindFramebuffer(this.framebuffer),
-                wgl.COLOR_BUFFER_BIT
-            );
-
             this.snapshots.push(
-                new Snapshot(
-                    texture,
+                this.engine.createSnapshot(
                     this.paintingRectangle.width,
                     this.paintingRectangle.height,
                     this.resolutionScale
@@ -185,22 +166,20 @@ class Paint {
         this.brushX = 0;
         this.brushY = 0;
         this.brushScale = 50;
-        this.brushColorHSVA = [Math.random(), 1, 1, 0.8];
         this.colorModel = ColorModel.RYB;
 
         this.needsRedraw = true; // whether we need to redraw the painting
 
         document.getElementById('ui').style.display = PaintState.showPanel ? '' : 'none';
 
-        this.brush = new Brush(wgl, shaderSources, MAX_BRISTLE_COUNT);
 
         this.fluiditySlider = new Slider(
             document.getElementById('fluidity-slider'),
-            this.simulator.fluidity,
+            this.engine.fluidity,
             0.6,
             0.9,
             (fluidity) => {
-                this.simulator.fluidity = fluidity;
+                this.engine.setSimulation({ fluidity });
             }
         );
 
@@ -215,7 +194,7 @@ class Paint {
                 const bristleCount = Math.floor(
                     MIN_BRISTLE_COUNT + t * (MAX_BRISTLE_COUNT - MIN_BRISTLE_COUNT)
                 );
-                this.brush.setBristleCount(bristleCount);
+                this.engine.setBrush({ bristleCount });
             }
         );
 
@@ -236,7 +215,7 @@ class Paint {
             (index) => {
                 this.saveSnapshot();
                 this.resolutionScale = QUALITIES[index].resolutionScale;
-                this.simulator.changeResolution(
+                this.engine.changeResolution(
                     this.getPaintingResolutionWidth(),
                     this.getPaintingResolutionHeight()
                 );
@@ -466,10 +445,15 @@ class Paint {
         const area = this.paintingRectangle.width * this.paintingRectangle.height;
         if (!budget || area <= 0) return this.resolutionScale;
 
-        // bytes = area * scale^2 * BYTES_PER_TEXEL * targets, so the scale that
-        // exactly spends the budget is sqrt(budget / (area * bytesPerTexel * targets)).
-        const targets = SIMULATION_TARGETS + HISTORY_SIZE;
-        const maxScale = Math.sqrt(budget / (area * BYTES_PER_TEXEL * targets));
+        // How many render targets the simulation holds is the engine's to know,
+        // so the arithmetic lives there. Static, because this runs before the
+        // engine exists -- its answer is what sizes the engine.
+        const maxScale = FluidEngine.maxResolutionScaleForBudget(
+            this.paintingRectangle.width,
+            this.paintingRectangle.height,
+            HISTORY_SIZE,
+            budget
+        );
 
         if (maxScale < this.resolutionScale) {
             // Report it once per distinct clamp: a painting quietly simulating
@@ -483,9 +467,12 @@ class Paint {
                     'from', this.resolutionScale,
                     '-- painting', Math.round(this.paintingRectangle.width) + 'x' +
                         Math.round(this.paintingRectangle.height),
-                    'would need', (area * this.resolutionScale * this.resolutionScale *
-                        BYTES_PER_TEXEL * targets / 1048576).toFixed(0) + 'MB',
-                    'across', targets, 'render targets'
+                    'would need', (FluidEngine.estimateRenderTargetBytes(
+                        this.paintingRectangle.width,
+                        this.paintingRectangle.height,
+                        this.resolutionScale,
+                        HISTORY_SIZE
+                    ) / 1048576).toFixed(0) + 'MB'
                 );
             }
         }
@@ -568,7 +555,7 @@ class Paint {
 
         // update brush
         if (this.brushInitialized) {
-            this.brush.update(
+            this.engine.positionBrush(
                 this.brushX,
                 this.brushY,
                 BRUSH_HEIGHT * this.brushScale,
@@ -588,7 +575,7 @@ class Paint {
 
             // scale alpha based on the number of bristles
             const bristleT =
-                (this.brush.bristleCount - MIN_BRISTLE_COUNT) /
+                (this.engine.bristleCount - MIN_BRISTLE_COUNT) /
                 (MAX_BRISTLE_COUNT - MIN_BRISTLE_COUNT);
             const minAlpha = mix(THIN_MIN_ALPHA, THICK_MIN_ALPHA, bristleT);
             const maxAlpha = mix(THIN_MAX_ALPHA, THICK_MAX_ALPHA, bristleT);
@@ -602,17 +589,15 @@ class Paint {
             // painting rectangle is handed over in that same space -- the
             // engine transforms brush space to simulation space and knows
             // nothing about the screen.
-            this.simulator.splat(
-                this.brush,
-                Z_THRESHOLD * this.brushScale,
-                this.paintingRectangle,
-                splatColor,
-                splatRadius,
-                splatVelocityScale
-            );
+            this.engine.splat(this.paintingRectangle, {
+                zThreshold: Z_THRESHOLD * this.brushScale,
+                color: splatColor,
+                radius: splatRadius,
+                velocityScale: splatVelocityScale,
+            });
         }
 
-        const simulationUpdated = this.simulator.simulate();
+        const simulationUpdated = this.engine.frame();
         if (simulationUpdated) this.needsRedraw = true;
 
         // the rectangle we end up drawing the painting into
@@ -625,8 +610,7 @@ class Paint {
             .intersectRectangle(new Rectangle(0, 0, this.canvas.width, this.canvas.height));
 
         if (this.needsRedraw) {
-            this.renderer.renderToTexture({
-                simulator: this.simulator,
+            this.engine.renderToTexture({
                 framebuffer: this.framebuffer,
                 targetTexture: this.canvasTexture,
                 paintingRectangle: this.paintingRectangle,
@@ -642,7 +626,7 @@ class Paint {
         // The painting is redrawn only when it changed, but it has to be
         // presented every frame -- the chrome below is drawn over it and is
         // not part of the painting texture.
-        this.renderer.present(this.canvasTexture, this.canvas.width, this.canvas.height);
+        this.engine.present(this.canvasTexture, this.canvas.width, this.canvas.height);
 
         // --- everything below here is UI chrome, and belongs to the app ---
 
@@ -667,12 +651,19 @@ class Paint {
                 this.interactionState === InteractionMode.NONE &&
                 this.desiredInteractionMode(this.mouseX, this.mouseY) === InteractionMode.PAINTING)
         ) {
+            // The bristle preview is chrome, but it is drawn from the engine's
+            // own geometry, with this app's program and projection. That is the
+            // one place chrome legitimately needs engine GL objects, so they
+            // come through a single named accessor rather than four public
+            // fields -- a second caller for these would be visible in review.
+            const bristles = this.engine.getBristleGeometry();
+
             const brushDrawState = wgl
                 .createDrawState()
                 .bindFramebuffer(null)
                 .viewport(0, 0, this.canvas.width, this.canvas.height)
                 .vertexAttribPointer(
-                    this.brush.brushTextureCoordinatesBuffer,
+                    bristles.coordinatesBuffer,
                     0,
                     2,
                     wgl.FLOAT,
@@ -681,18 +672,18 @@ class Paint {
                     0
                 )
                 .useProgram(this.brushProgram)
-                .bindIndexBuffer(this.brush.brushIndexBuffer)
+                .bindIndexBuffer(bristles.indexBuffer)
                 .uniform4f('u_color', 0.6, 0.6, 0.6, 1.0)
                 .uniformMatrix4fv('u_projectionViewMatrix', false, this.mainProjectionMatrix)
                 .enable(wgl.DEPTH_TEST)
                 .enable(wgl.BLEND)
                 .blendFunc(wgl.DST_COLOR, wgl.ZERO)
-                .uniformTexture('u_positionsTexture', 0, wgl.TEXTURE_2D, this.brush.positionsTexture);
+                .uniformTexture('u_positionsTexture', 0, wgl.TEXTURE_2D, bristles.positionsTexture);
 
             wgl.drawElements(
                 brushDrawState,
                 wgl.LINES,
-                (this.brush.indexCount * this.brush.bristleCount) / this.brush.maxBristleCount,
+                (bristles.indexCount * bristles.bristleCount) / bristles.maxBristleCount,
                 wgl.UNSIGNED_SHORT,
                 0
             );
@@ -810,7 +801,7 @@ class Paint {
             const H = fixHueForPreview(hsva[0]);
             const rgb = hsvToRgb(H, hsva[1], hsva[2]);
 
-            this.brushViewer.draw(this.brushX, this.brushY, this.brush, rgb);
+            this.brushViewer.draw(this.brushX, this.brushY, this.engine.getBristleGeometry(), rgb);
         }
     }
 
@@ -826,8 +817,7 @@ class Paint {
 
         // The engine renders and reads back; the app only knows what to do with
         // the bytes afterwards.
-        const savePixels = this.renderer.renderToPixels({
-            simulator: this.simulator,
+        const savePixels = this.engine.exportPixels({
             width: saveWidth,
             height: saveHeight,
             resolutionScale: this.resolutionScale,
@@ -1012,7 +1002,7 @@ class Paint {
 
         // Initialize brush at first contact if needed
         if (!this.brushInitialized) {
-            this.brush.initialize(
+            this.engine.initializeBrush(
                 this.brushX,
                 this.brushY,
                 BRUSH_HEIGHT * this.brushScale,
@@ -1042,7 +1032,7 @@ class Paint {
         }
 
         if (!this.brushInitialized) {
-            this.brush.initialize(
+            this.engine.initializeBrush(
                 this.brushX,
                 this.brushY,
                 BRUSH_HEIGHT * this.brushScale,// TODO: x pen pressure 
@@ -1171,12 +1161,13 @@ class Paint {
 
             this.paintingRectangle = this.newPaintingRectangle;
 
-            this.simulator.resize(
+            // The feather width is the engine's -- it must match the width the
+            // resize preview drew with, or the painting jumps on release.
+            this.engine.resizePainting(
                 this.getPaintingResolutionWidth(),
                 this.getPaintingResolutionHeight(),
                 offsetX,
-                offsetY,
-                PaintingRenderer.RESIZING_FEATHER_SIZE
+                offsetY
             );
 
             this.needsRedraw = true;
@@ -1218,7 +1209,7 @@ class Paint {
         this.brushX = mouseX;
         this.brushY = mouseY;
 
-        this.brush.initialize(
+        this.engine.initializeBrush(
             this.brushX,
             this.brushY,
             BRUSH_HEIGHT * this.brushScale,
@@ -1241,7 +1232,7 @@ class Paint {
 
     // --- Editing & history ---
     clear() {
-        this.simulator.clear();
+        this.engine.clear();
         this.needsRedraw = true;
     }
 
@@ -1255,38 +1246,24 @@ class Paint {
 
         this.undoing = false;
 
-        const snapshot = this.snapshots[this.snapshotIndex];
-
-        // ensure snapshot texture matches current sim resolution
-        if (
-            snapshot.getTextureWidth() !== this.simulator.resolutionWidth ||
-            snapshot.getTextureHeight() !== this.simulator.resolutionHeight
-        ) {
-            this.wgl.rebuildTexture(
-                snapshot.texture,
-                this.wgl.RGBA,
-                this.simulator.paintTextureType,
-                this.simulator.resolutionWidth,
-                this.simulator.resolutionHeight,
-                null,
-                this.wgl.CLAMP_TO_EDGE,
-                this.wgl.CLAMP_TO_EDGE,
-                this.wgl.NEAREST,
-                this.wgl.NEAREST
-            );
-        }
-
-        this.simulator.copyPaintTexture(snapshot.texture);
-
-        snapshot.paintingWidth = this.paintingRectangle.width;
-        snapshot.paintingHeight = this.paintingRectangle.height;
-        snapshot.resolutionScale = this.resolutionScale;
+        // The ring, its depth and when to rotate are this app's policy. Filling
+        // the snapshot -- including re-allocating its texture if the simulation
+        // resolution moved, at the paint texture type the probe chose -- is the
+        // engine's, because only it knows those.
+        this.engine.saveSnapshot(
+            this.snapshots[this.snapshotIndex],
+            this.paintingRectangle.width,
+            this.paintingRectangle.height,
+            this.resolutionScale
+        );
 
         this.snapshotIndex += 1;
         this.refreshDoButtons();
     }
 
     applySnapshot(snapshot) {
+        // The painting rectangle and the quality button are this app's state,
+        // so it restores them; the engine restores the paint.
         this.paintingRectangle.width = snapshot.paintingWidth;
         this.paintingRectangle.height = snapshot.paintingHeight;
 
@@ -1299,17 +1276,11 @@ class Paint {
             this.resolutionScale = snapshot.resolutionScale;
         }
 
-        if (
-            this.simulator.resolutionWidth !== this.getPaintingResolutionWidth() ||
-            this.simulator.resolutionHeight !== this.getPaintingResolutionHeight()
-        ) {
-            this.simulator.changeResolution(
-                this.getPaintingResolutionWidth(),
-                this.getPaintingResolutionHeight()
-            );
-        }
-
-        this.simulator.applyPaintTexture(snapshot.texture);
+        this.engine.restoreSnapshot(
+            snapshot,
+            this.getPaintingResolutionWidth(),
+            this.getPaintingResolutionHeight()
+        );
     }
 
     canUndo() {

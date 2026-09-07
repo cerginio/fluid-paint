@@ -121,22 +121,10 @@ function mix(a, b, t) {
   return (1.0 - t) * a + t * b;
 }
 
-//the texture is always updated to be (paintingWidth x paintingHeight) x resolutionScale
-function Snapshot(texture, paintingWidth, paintingHeight, resolutionScale) {
-  this.texture = texture;
-  this.paintingWidth = paintingWidth;
-  this.paintingHeight = paintingHeight;
-  this.resolutionScale = resolutionScale;
-}
-
-// Keep Snapshot helpers prototype-based
-Snapshot.prototype.getTextureWidth = function () {
-  return Math.ceil(this.paintingWidth * this.resolutionScale);
-};
-Snapshot.prototype.getTextureHeight = function () {
-  return Math.ceil(this.paintingHeight * this.resolutionScale);
-};
-
+// Snapshot moved into the engine as PaintSnapshot in Phase 5: the host holds
+// the handles and decides how many, but only the engine can allocate one, since
+// the texture must match the paint texture type the capability probe chose.
+// See fluid-engine/index.js.
 
 function cursorForResizingSide(side) {
   if (side === ResizingSide.LEFT || side === ResizingSide.RIGHT) {

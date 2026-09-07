@@ -45,6 +45,8 @@ const paths = {
     'fluid-engine/brush.js',
     'fluid-engine/simulation.js',
     'fluid-engine/renderer.js',
+    // The facade: must load after the three modules it composes.
+    'fluid-engine/index.js',
     'colorpicker.js',
     'slider.js',
     'buttons.js',
