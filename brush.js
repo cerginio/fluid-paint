@@ -1,14 +1,14 @@
 // ES6 class version of Brush
 
 const N_PREVIOUS_SPEEDS = 15; // how many previous speeds we store
-const SPLATS_PER_SEGMENT = 18;
+const SPLATS_PER_SEGMENT = 8;
 
 const VERTICES_PER_BRISTLE = 10;
 const BRISTLE_LENGTH = 4.5; // relative to a scale of 1
 const BRISTLE_JITTER = 0.5;
 
 const ITERATIONS = 20;
-const GRAVITY = 10.0;
+const GRAVITY = 30.0;
 const BRUSH_DAMPING = 0.75;
 const STIFFNESS_VARIATION = 0.3;
 
