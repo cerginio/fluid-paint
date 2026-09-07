@@ -322,6 +322,16 @@ class Paint {
                 5000.0
             );
 
+            // Release the previous frame-sized textures before rebuilding them.
+            // Without this every resize (a phone rotation, a desktop drag) leaked
+            // three full-canvas RGBA textures for the lifetime of the context.
+            for (const name of ['canvasTexture', 'tempCanvasTexture', 'blurredCanvasTexture']) {
+                if (this[name]) {
+                    wgl.deleteTexture(this[name]);
+                    this[name] = null;
+                }
+            }
+
             this.canvasTexture = wgl.buildTexture(
                 wgl.RGBA,
                 wgl.UNSIGNED_BYTE,
