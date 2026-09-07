@@ -26,12 +26,13 @@ class Paint {
             // See docs/MOBILE-GPU-BRISTLE-COLLAPSE-SPEC.md
         }
 
-        // Load shader sources then complete async setup. The shaders moved
-        // into fluid-engine/ in Phase 3; the keys are unchanged, so only this
-        // base path knows where they now live.
-        WrappedGL.loadTextFiles(shaderFiles, (shaderSources) => {
+        // Load both shader trees -- the engine's and the app chrome's -- and
+        // merge them into one flat sources object. The keys are unchanged from
+        // when there was a single tree; only the base paths know where the
+        // files actually live. See SHADER_TREES in common.js.
+        loadShaderTrees(SHADER_TREES, (shaderSources) => {
             this._start(shaderSources);
-        }, SHADER_BASE_PATH);
+        });
     }
 
     // --- Private-ish init step that used to be an inner function ---

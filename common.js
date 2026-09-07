@@ -154,12 +154,18 @@ function cursorForResizingSide(side) {
   }
 }
 
-// Where the shader tree lives. The names in shaderFiles stay the keys that
-// every shaderSources[...] lookup uses, so moving the files is a change here
-// and nowhere else.
-const SHADER_BASE_PATH = 'fluid-engine/';
+// Two shader trees, each with its own base path. The names below stay the keys
+// that every shaderSources[...] lookup uses, so a tree can be relocated by
+// editing a base path and nothing else.
+//
+// The split is the Phase 4 engine/app boundary made visible: ENGINE_SHADERS are
+// what the simulation and the painting render need, APP_SHADERS are the UI
+// chrome that a different host would not want. fullscreen.vert is deliberately
+// on the engine side and used by both -- the app hosts the engine, so depending
+// on an engine asset is the right direction for that arrow.
+const ENGINE_SHADER_BASE_PATH = 'fluid-engine/';
 
-const shaderFiles = [
+const ENGINE_SHADERS = [
   'shaders/splat.vert', 'shaders/splat.frag',
   'shaders/fullscreen.vert',
   'shaders/advect.frag',
@@ -167,8 +173,6 @@ const shaderFiles = [
   'shaders/jacobi.frag',
   'shaders/subtract.frag',
   'shaders/resize.frag',
-  
-  'shaders/rectborder.frag',
 
   'shaders/project.frag',
   'shaders/distanceconstraint.frag',
@@ -179,11 +183,37 @@ const shaderFiles = [
 
   'shaders/brush.vert', 'shaders/brush.frag',
   'shaders/painting.vert', 'shaders/painting.frag',
+  'shaders/output.frag',
+];
+
+const APP_SHADER_BASE_PATH = 'app/';
+
+const APP_SHADERS = [
   'shaders/picker.vert', 'shaders/picker.frag',
   'shaders/panel.frag',
-  'shaders/output.frag',
   'shaders/shadow.frag',
-]
+  'shaders/rectborder.frag',
+];
+
+// Load both trees and merge them into the single flat shaderSources object the
+// rest of the code expects. Keys collide across trees only if a name is
+// duplicated, which SHADER_TREES makes visible in one place.
+const SHADER_TREES = [
+  { files: ENGINE_SHADERS, basePath: ENGINE_SHADER_BASE_PATH },
+  { files: APP_SHADERS, basePath: APP_SHADER_BASE_PATH },
+];
+
+function loadShaderTrees(trees, onLoaded) {
+  const merged = {};
+  let remaining = trees.length;
+  for (const tree of trees) {
+    WrappedGL.loadTextFiles(tree.files, (sources) => {
+      Object.assign(merged, sources);
+      remaining -= 1;
+      if (remaining === 0) onLoaded(merged);
+    }, tree.basePath);
+  }
+}
 
 const CONSTANT_NAMES = [
   'ACTIVE_ATTRIBUTES',

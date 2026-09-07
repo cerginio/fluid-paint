@@ -52,7 +52,11 @@ const paths = {
     'paint.js'
 
   ],
-  shaders: 'fluid-engine/shaders/**/*.{glsl,frag,vert}',
+  // Two shader trees since Phase 4. Each is copied to the same relative place
+  // in dist as it sits in the source, because the base paths in common.js are
+  // literal fetch prefixes -- a flattened dist would 404 every request.
+  engineShaders: 'fluid-engine/shaders/**/*.{glsl,frag,vert}',
+  appShaders: 'app/shaders/**/*.{glsl,frag,vert}',
   html: 'index.html',
   static: ['LICENSE']
 };
@@ -87,12 +91,20 @@ function styles() {
 }
 
 // ---------- SHADERS ----------
-// Mirror the source layout: the shaders moved under fluid-engine/ in Phase 3
-// and SHADER_BASE_PATH points there, so dist has to match or every fetch 404s.
-function shaders() {
-  return src(paths.shaders, { allowEmpty: true })
+// Mirror the source layout. The engine tree moved under fluid-engine/ in Phase
+// 3 and the chrome tree split off into app/ in Phase 4; the base paths in
+// common.js point at both, so dist has to match or every fetch 404s.
+function engineShaders() {
+  return src(paths.engineShaders, { allowEmpty: true })
     .pipe(dest(path.join(paths.dist, 'fluid-engine', 'shaders')));
 }
+
+function appShaders() {
+  return src(paths.appShaders, { allowEmpty: true })
+    .pipe(dest(path.join(paths.dist, 'app', 'shaders')));
+}
+
+const shaders = parallel(engineShaders, appShaders);
 
 // ---------- HTML ----------
 // Remove all local <script src="*.js"> tags and inject a single bundle.js.
@@ -176,7 +188,8 @@ function startServer(done) {
 
   watch(paths.html, html);
   watch(paths.css, styles);
-  watch(paths.shaders, shaders);
+  watch(paths.engineShaders, engineShaders);
+  watch(paths.appShaders, appShaders);
   watch(paths.js, scripts);
 }
 
