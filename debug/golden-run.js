@@ -30,6 +30,11 @@ const ROOT = process.env.GOLDEN_ROOT
   : path.resolve(__dirname, '..');
 const BASELINE = path.join(__dirname, 'golden-baseline.json');
 const SCENARIOS = ['basic', 'colorMix', 'wetBlend'];
+// The devicePixelRatio axis. dpr1 is the historical baseline; dpr2 covers the
+// path Phase 2 turned on, which dpr1 cannot see at all -- at ratio 1 the new
+// code is equivalent to the old by construction, so without this axis the
+// headline change of the phase would ship untested.
+const DPRS = [1, 2];
 const SEED = 20260907;
 
 const MIME = {
@@ -54,8 +59,11 @@ function serve(root) {
   });
 }
 
-async function runOne(browser, port, scenario, webglVersion) {
-  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+async function runOne(browser, port, scenario, webglVersion, dpr) {
+  const page = await browser.newPage({
+    viewport: { width: 1280, height: 800 },
+    deviceScaleFactor: dpr,
+  });
   const logs = [];
   page.on('console', (m) => logs.push(m.text()));
   page.on('pageerror', (e) => logs.push('PAGEERROR: ' + e.message));
@@ -73,7 +81,7 @@ async function runOne(browser, port, scenario, webglVersion) {
     results = [{ scenario, error: 'timeout: ' + err.message, logs: logs.slice(-12) }];
   }
   await page.close();
-  return results.map((r) => Object.assign({ webglRequested: webglVersion }, r));
+  return results.map((r) => Object.assign({ webglRequested: webglVersion, dpr }, r));
 }
 
 async function main() {
@@ -88,10 +96,11 @@ async function main() {
   });
 
   const rows = [];
-  for (const webglVersion of [2, 1]) {
+  for (const dpr of DPRS) {
+   for (const webglVersion of [2, 1]) {
     for (const scenario of scenarios) {
-      process.stdout.write(`  running ${scenario} on WebGL ${webglVersion} ... `);
-      const out = await runOne(browser, port, scenario, webglVersion);
+      process.stdout.write(`  running ${scenario} on WebGL ${webglVersion} @dpr${dpr} ... `);
+      const out = await runOne(browser, port, scenario, webglVersion, dpr);
       for (const r of out) {
         rows.push(r);
         if (r.error) {
@@ -109,12 +118,13 @@ async function main() {
         }
       }
     }
+   }
   }
 
   await browser.close();
   server.close();
 
-  const key = (r) => `webgl${r.webglRequested}/${r.scenario}`;
+  const key = (r) => `webgl${r.webglRequested}/dpr${r.dpr}/${r.scenario}`;
   const failed = rows.filter((r) => r.error || r.greenCheck === 'FAIL');
 
   if (record) {
@@ -129,7 +139,7 @@ async function main() {
       note: 'headless SwiftShader; not comparable to real-GPU hashes',
       entries: Object.fromEntries(rows.map((r) => [key(r), {
         paintHash: r.paintHash, screenHash: r.screenHash,
-        resolution: r.resolution, webgl: r.webgl, description: r.description,
+        resolution: r.resolution, webgl: r.webgl, dpr: r.dpr, description: r.description,
       }])),
     };
     fs.writeFileSync(BASELINE, JSON.stringify(baseline, null, 2) + '\n');

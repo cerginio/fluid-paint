@@ -112,18 +112,20 @@ async function settle(frames) {
 /* --- geometry ------------------------------------------------------------ */
 
 /*
- * Painting-space fraction -> canvas client coordinates.
+ * Painting-space fraction -> canvas client (CSS) coordinates.
  *
- * The painting rect is in GL coordinates (origin bottom-left); pointer events
- * are in DOM coordinates (origin top-left), hence the Y inversion. This is the
- * same flip that paint.js open-codes in four places -- the Viewport module in
- * Phase 2 is what removes the duplication.
+ * The painting rect is in screen pixels with the origin bottom-left; pointer
+ * events are in CSS pixels with the origin top-left. Both the Y inversion AND
+ * the devicePixelRatio divide are the viewport's job -- this used to do the
+ * flip by hand and ignore the ratio, which was invisible while the two units
+ * were equal and silently aimed every stroke at twice its intended offset the
+ * moment DPR was turned on.
  */
 function paintingFractionToClient(painter, fx, fy) {
   const rect = painter.paintingRectangle;
   const glX = rect.left + fx * rect.width;
   const glY = rect.bottom + fy * rect.height;
-  return { x: glX, y: painter.canvas.height - glY };
+  return painter.viewport.screenToCss(glX, glY);
 }
 
 /* --- running a scenario -------------------------------------------------- */
@@ -141,8 +143,11 @@ async function runStroke(painter, stroke, opts) {
    * cost real debugging time to find. Fail loudly instead. Phase 7 moves the
    * chrome to DOM and this check becomes unnecessary. */
   const start = pts[0];
-  const startGlY = canvas.height - start.y;
-  if (PaintState.showPanel && start.x < PANEL_WIDTH && startGlY > canvas.height - PANEL_HEIGHT) {
+  // pts are CSS pixels now, and PANEL_* are authored in CSS pixels, so this
+  // comparison is finally in one unit rather than two that happened to match.
+  if (PaintState.showPanel &&
+      start.x < PANEL_WIDTH &&
+      start.y > painter.viewport.cssHeight - PANEL_HEIGHT) {
     throw new Error(
       `stroke starts under the UI panel (client ${start.x.toFixed(0)},${start.y.toFixed(0)}); ` +
       'it would deposit nothing -- move the scenario clear of the panel rect');

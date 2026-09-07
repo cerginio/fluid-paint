@@ -1,48 +1,102 @@
 {
-  "recorded": "2026-09-07T09:16:30.558Z",
+  "recorded": "2026-09-07T11:42:09.400Z",
   "seed": 20260907,
   "note": "headless SwiftShader; not comparable to real-GPU hashes",
   "entries": {
-    "webgl2/basic": {
+    "webgl2/dpr1/basic": {
       "paintHash": "1de870d1",
       "screenHash": "6bf3ad4b",
       "resolution": "1860x1140",
       "webgl": 2,
+      "dpr": 1,
       "description": "single diagonal stroke, default brush"
     },
-    "webgl2/colorMix": {
+    "webgl2/dpr1/colorMix": {
       "paintHash": "8fe5c7ab",
       "screenHash": "9573739d",
       "resolution": "1860x1140",
       "webgl": 2,
+      "dpr": 1,
       "description": "yellow over blue -- the Y+B cube corner must yield green"
     },
-    "webgl2/wetBlend": {
+    "webgl2/dpr1/wetBlend": {
       "paintHash": "06ace8f7",
       "screenHash": "3bb1f42d",
       "resolution": "1860x1140",
       "webgl": 2,
+      "dpr": 1,
       "description": "overlapping strokes, heavy paint load"
     },
-    "webgl1/basic": {
+    "webgl1/dpr1/basic": {
       "paintHash": "65e76ea0",
       "screenHash": "d4a73b34",
       "resolution": "1860x1140",
       "webgl": 1,
+      "dpr": 1,
       "description": "single diagonal stroke, default brush"
     },
-    "webgl1/colorMix": {
+    "webgl1/dpr1/colorMix": {
       "paintHash": "80e13791",
       "screenHash": "236927c9",
       "resolution": "1860x1140",
       "webgl": 1,
+      "dpr": 1,
       "description": "yellow over blue -- the Y+B cube corner must yield green"
     },
-    "webgl1/wetBlend": {
+    "webgl1/dpr1/wetBlend": {
       "paintHash": "b25c5a04",
       "screenHash": "36207149",
       "resolution": "1860x1140",
       "webgl": 1,
+      "dpr": 1,
+      "description": "overlapping strokes, heavy paint load"
+    },
+    "webgl2/dpr2/basic": {
+      "paintHash": "ddb43f43",
+      "screenHash": "404a5149",
+      "resolution": "2220x1375",
+      "webgl": 2,
+      "dpr": 2,
+      "description": "single diagonal stroke, default brush"
+    },
+    "webgl2/dpr2/colorMix": {
+      "paintHash": "9676d0b9",
+      "screenHash": "dc15e6ee",
+      "resolution": "2220x1375",
+      "webgl": 2,
+      "dpr": 2,
+      "description": "yellow over blue -- the Y+B cube corner must yield green"
+    },
+    "webgl2/dpr2/wetBlend": {
+      "paintHash": "407e7e73",
+      "screenHash": "df2dcf44",
+      "resolution": "2220x1375",
+      "webgl": 2,
+      "dpr": 2,
+      "description": "overlapping strokes, heavy paint load"
+    },
+    "webgl1/dpr2/basic": {
+      "paintHash": "14531823",
+      "screenHash": "c099dd83",
+      "resolution": "2220x1375",
+      "webgl": 1,
+      "dpr": 2,
+      "description": "single diagonal stroke, default brush"
+    },
+    "webgl1/dpr2/colorMix": {
+      "paintHash": "0b4f40c0",
+      "screenHash": "66cf680b",
+      "resolution": "2220x1375",
+      "webgl": 1,
+      "dpr": 2,
+      "description": "yellow over blue -- the Y+B cube corner must yield green"
+    },
+    "webgl1/dpr2/wetBlend": {
+      "paintHash": "1399e585",
+      "screenHash": "62672c7b",
+      "resolution": "2220x1375",
+      "webgl": 1,
+      "dpr": 2,
       "description": "overlapping strokes, heavy paint load"
     }
   }

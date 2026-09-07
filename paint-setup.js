@@ -7,7 +7,70 @@ const InteractionMode = {
 
 const PaintState = {
     showPanel: true,
+
+    // devicePixelRatio handling, overridable from the URL so a device can be
+    // checked both ways without a rebuild:
+    //
+    //   ?dpr=1     pin the ratio to 1 -- the pre-Phase-2 behaviour
+    //   ?dpr=3     raise the clamp (the default cap is 2)
+    //
+    // The cap exists because the simulation is fill-rate bound and its cost
+    // scales with the square of the ratio.
+    pixelRatioEnabled: true,
+    maxPixelRatio: 2,
+
+    // Hard ceiling on GPU memory for the resolution-dependent render targets.
+    //
+    // maxPaintingWidth already clamps each DIMENSION against MAX_TEXTURE_SIZE,
+    // but nothing clamped total memory -- and everything here scales with the
+    // painting's AREA, so a ratio of 2 costs four times as much, not twice.
+    //
+    // At this resolution the app holds SIMULATION_TARGETS + HISTORY_SIZE float
+    // RGBA textures: 7 simulator buffers and 15 undo snapshots, 22 in all, at
+    // 16 bytes a texel. A 1280x800 window at ratio 2 gives a 2520x1560
+    // painting, which is 3.93 Mtexels, so even at quality Low that is ~1.3 GB.
+    // The driver answers GL_OUT_OF_MEMORY and drops the context -- a black
+    // canvas, not a slow one -- which is why this is a hard limit rather than
+    // something to profile later.
+    //
+    // When the budget binds, the simulation scale degrades (below quality Low
+    // if it has to). The painting keeps the size the user asked for and the
+    // undo history keeps its depth; what gives is simulation fidelity, which
+    // is the one of the three that degrades gracefully.
+    //
+    // 1 GB is chosen so that the pre-DPR behaviour is untouched -- a 1280x800
+    // window at quality High needs 712 MB and stays exactly as it was -- while
+    // a ratio-2 window degrades instead of losing the context. Note this limit
+    // was always reachable without DPR: a 2560x1440 window at quality High
+    // asks for 2.6 GB today. DPR did not create the defect, it made it
+    // reachable on an ordinary window.
+    maxRenderTargetBytes: 1024 * 1024 * 1024,
 };
+
+// Float RGBA: 4 channels x 4 bytes.
+const BYTES_PER_TEXEL = 16;
+// Simulator render targets that scale with the painting resolution: paint,
+// paintTemp, velocity, velocityTemp, divergence, pressure, pressureTemp.
+const SIMULATION_TARGETS = 7;
+
+(function parsePixelRatioOverride() {
+    if (typeof window === 'undefined') return;
+    const raw = new URLSearchParams(window.location.search).get('dpr');
+    if (raw === null) return;
+
+    const value = Number.parseFloat(raw);
+    if (!Number.isFinite(value) || value <= 0) {
+        console.warn('[viewport] ignoring non-numeric dpr:', raw);
+        return;
+    }
+
+    if (value === 1) {
+        PaintState.pixelRatioEnabled = false;
+    } else {
+        PaintState.maxPixelRatio = value;
+    }
+    console.log('[viewport] dpr override:', raw);
+})();
 
 const ResizingSide = {
     NONE: 0,

@@ -126,10 +126,16 @@ class Paint {
         // The single owner of canvas sizing, devicePixelRatio, the Y-flip and
         // all three coordinate spaces. See viewport.js.
         //
-        // DPR stays OFF in this commit so that introducing the module is a pure
-        // refactor with the golden images to prove it; it is turned on in its
-        // own commit, which is the one allowed to move the baseline.
-        this.viewport = new Viewport(canvas, { pixelRatioEnabled: false });
+        // devicePixelRatio is honoured, clamped to 2. It was previously never
+        // read anywhere, so the backing store equalled CSS pixels and a DPR-3
+        // phone drew the painting at a third of its real resolution. The clamp
+        // is because simulation cost scales with the square of the ratio: an
+        // uncapped DPR-3 device would ask for 9x the fill rate, which is not a
+        // trade a paint simulation can absorb. ?dpr=1 forces the old behaviour.
+        this.viewport = new Viewport(canvas, {
+            pixelRatioEnabled: PaintState.pixelRatioEnabled,
+            maxPixelRatio: PaintState.maxPixelRatio,
+        });
 
         // position of painting on screen, and its dimensions (pixels)
         this.paintingRectangle = new Rectangle(
@@ -471,12 +477,53 @@ class Paint {
         update();
     }
 
+    /**
+     * The resolution scale actually used, after clamping total render-target
+     * memory to the budget.
+     *
+     * Everything resolution-dependent scales with the painting's AREA, so a
+     * device pixel ratio of 2 costs four times as much, not twice. See
+     * PaintState.maxRenderTargetBytes for why exceeding it loses the context
+     * outright rather than merely running slowly.
+     */
+    getEffectiveResolutionScale() {
+        const budget = PaintState.maxRenderTargetBytes;
+        const area = this.paintingRectangle.width * this.paintingRectangle.height;
+        if (!budget || area <= 0) return this.resolutionScale;
+
+        // bytes = area * scale^2 * BYTES_PER_TEXEL * targets, so the scale that
+        // exactly spends the budget is sqrt(budget / (area * bytesPerTexel * targets)).
+        const targets = SIMULATION_TARGETS + HISTORY_SIZE;
+        const maxScale = Math.sqrt(budget / (area * BYTES_PER_TEXEL * targets));
+
+        if (maxScale < this.resolutionScale) {
+            // Report it once per distinct clamp: a painting quietly simulating
+            // below the quality the UI claims is exactly the kind of thing that
+            // should not be silent.
+            const key = area.toFixed(0) + '@' + this.resolutionScale;
+            if (this._scaleClampKey !== key) {
+                this._scaleClampKey = key;
+                console.warn(
+                    '[viewport] simulation scale clamped to', maxScale.toFixed(3),
+                    'from', this.resolutionScale,
+                    '-- painting', Math.round(this.paintingRectangle.width) + 'x' +
+                        Math.round(this.paintingRectangle.height),
+                    'would need', (area * this.resolutionScale * this.resolutionScale *
+                        BYTES_PER_TEXEL * targets / 1048576).toFixed(0) + 'MB',
+                    'across', targets, 'render targets'
+                );
+            }
+        }
+
+        return Math.min(this.resolutionScale, maxScale);
+    }
+
     getPaintingResolutionWidth() {
-        return Math.ceil(this.paintingRectangle.width * this.resolutionScale);
+        return Math.ceil(this.paintingRectangle.width * this.getEffectiveResolutionScale());
     }
 
     getPaintingResolutionHeight() {
-        return Math.ceil(this.paintingRectangle.height * this.resolutionScale);
+        return Math.ceil(this.paintingRectangle.height * this.getEffectiveResolutionScale());
     }
 
     drawShadow(alpha, rectangle) {
