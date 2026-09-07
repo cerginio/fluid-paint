@@ -1,4 +1,4 @@
-# Handoff — Phases 0-4 done, iPhone fix still not device-tested
+# Handoff — Phases 0-4 done, iPhone fix confirmed on the device
 
 Written 2026-09-07. Read this, then `FLUID-ENGINE-EXTRACTION-PLAN.md`.
 
@@ -30,7 +30,7 @@ The two commits from `da591b8` up are this session's work.
 |---|---|
 | Samsung A56 | **Good** — Phase 2 works, DPR on |
 | Samsung Galaxy Tab S9 | **Good** |
-| iPhone 14 | **Was blank; fixed in code, still awaiting re-test on the device** |
+| iPhone 14 | **Was blank; fixed in `96f051f` and confirmed on the device** |
 
 ### Current tree
 
@@ -271,9 +271,10 @@ Useful query parameters: `?diag=1` (on-device capability panel), `?gpu=<profile>
 
 ## Open items
 
-- **Re-test the iPhone 14 with the fix** — still the priority, and now two
-  phases stale. `?diag=1` should show `blend into HALF_FLOAT target PASS`, and
-  a stroke should deposit paint. Look for banding in long strokes.
+- ~~Re-test the iPhone 14~~ — **done, 2026-09-07. It paints.** No banding
+  reported in long strokes, and `readPaintTexture()`'s `gl.FLOAT` read against
+  a half-float target is accepted by WebKit's driver. See
+  `docs/DEVICE-VERIFICATION.md`.
 - The 1 GB render-target budget is validated on Android, not on iOS.
 - The +/-5000 depth range — unresolved; needs a mid-stroke golden scenario.
 - `viewport.screenToSimulation` still has no caller.

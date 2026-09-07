@@ -8,22 +8,35 @@
 | earlier | tablet | WebGL 2 dual path | good |
 | 2026-09-07 | Samsung A56 | Phase 2 (DPR + Viewport) | **good** |
 | 2026-09-07 | Samsung Galaxy Tab S9 | Phase 2 (DPR + Viewport) | **good** |
-| 2026-09-07 | iPhone 14 | Phase 2 (DPR + Viewport) | **FAILS — canvas stays white** |
+| 2026-09-07 | iPhone 14 | Phase 2 (DPR + Viewport) | **FAILED — canvas stayed white** |
+| 2026-09-07 | iPhone 14 | half-float fallback (96f051f) | **good — fixed, confirmed on device** |
 
-**iPhone 14, 2026-09-07.** Brush moves correctly, bristles orient correctly,
-the debug view shows them touching the canvas — and the canvas stays white and
-clean, with no error. Physics runs; the splat deposits nothing.
+### iPhone 14 — diagnosed, fixed, and confirmed
 
-Leading hypothesis: `EXT_float_blend`. `Simulator.splat()` alpha-blends into
-`paintTexture`, which is the one resolution-sized target that is always
-`gl.FLOAT` with no half-float fallback, and the app neither requests nor checks
-that extension. `hasFloatTextureSupport()` does not cover it — renderable is
-not the same question as blendable.
+**The failure.** Brush moved correctly, bristles oriented correctly, the debug
+view showed them touching the canvas — and the canvas stayed white and clean,
+with no error. Physics ran; the splat deposited nothing.
 
-**To settle it, open `?diag=1` on the device** and read the two rows
-`EXT_float_blend` and `blend into FLOAT target`. The second actually performs
-the blend and expects 0.5; it is sabotage-verified, so a pass means something.
-Full analysis and the fix options are in `HANDOFF.md`.
+**The cause**, settled with `?diag=1` on the device: `EXT_float_blend` is
+absent. `Simulator.splat()` alpha-blends into `paintTexture`, which was always
+`gl.FLOAT`, and an implementation without that extension is entitled to drop
+the draw silently. The app passed its own capability gate because
+`hasFloatTextureSupport()` does not cover blending — renderable is not the same
+question as blendable. That gap is the whole bug.
+
+**The fix** (`96f051f`): `paintTexture`'s type is chosen by capability probe,
+not user-agent. `WrappedGL.canBlendIntoTexture(type)` performs the exact blend
+`splat()` uses and reads the result back; float that blends stays float, float
+that does not falls back to half-float, and neither blending disables painting
+outright rather than showing a healthy-looking blank canvas.
+
+**Confirmed on the physical device (2026-09-07).** Painting works. The
+desktop reproduction was only ever a model of the device; this closes it.
+
+Two things the harness could not see, now also settled on the device: no
+banding or drift was reported in long strokes despite half-float's ~11-bit
+mantissa, and `readPaintTexture()`'s `gl.FLOAT` read against a half-float
+target was accepted by WebKit's driver, not just SwiftShader's.
 
 
 The capability-clamp harness reproduces the bug and confirms the fix on a desktop,
