@@ -281,7 +281,12 @@ class Paint {
             0
         );
 
-        this.brushViewer = new BrushViewer(wgl, this.brushProgram, canvas.width - 250, 20, 250, 150);
+        // Live bristle preview -- constructed only when its flag is on, so with
+        // ?debug=-brushViewer nothing is allocated and the per-frame draw below
+        // is skipped outright. Enabled by default.
+        this.brushViewer = this.debug.brushViewer
+            ? new BrushViewer(wgl, this.brushProgram, canvas.width - 250, 20, 250, 150)
+            : null;
 
         this.rebuildProjectionMatrix();
 
@@ -301,7 +306,7 @@ class Paint {
             );
 
             this.colorPicker.bottom = this.canvas.height - COLOR_PICKER_TOP;
-            this.brushViewer.bottom = this.canvas.height - 150;
+            if (this.brushViewer !== null) this.brushViewer.bottom = this.canvas.height - 150;
 
             this.rebuildProjectionMatrix();
 
@@ -821,11 +826,13 @@ class Paint {
             this.colorPicker.draw(this.colorModel === ColorModel.RGB);
 
         }
-        const hsva = this.brushColorHSVA;
-        const H = fixHueForPreview(hsva[0]);
-        const rgb = hsvToRgb(H, hsva[1], hsva[2]);
+        if (this.brushViewer !== null) {
+            const hsva = this.brushColorHSVA;
+            const H = fixHueForPreview(hsva[0]);
+            const rgb = hsvToRgb(H, hsva[1], hsva[2]);
 
-        this.brushViewer.draw(this.brushX, this.brushY, this.brush, rgb);
+            this.brushViewer.draw(this.brushX, this.brushY, this.brush, rgb);
+        }
     }
 
     // Renders the painting to an offscreen texture and arms the save button
