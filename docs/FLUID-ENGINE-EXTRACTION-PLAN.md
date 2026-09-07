@@ -64,24 +64,44 @@ coordinate bug.
 (paint.js:585) — a ~60-line closure allocated 60 times a second, in the hot
 loop, for a value that never changes. Hoist it in Phase 1.
 
-## 3a. Debugging sediment — cleared for removal
+## 3a. Debugging instrumentation — decomposed, not removed
 
-The author has confirmed that a number of parameters and properties in `Paint`
-are residue from attempts to fix what turned out to be the mobile shader bug
-(see `MOBILE-GPU-BRISTLE-COLLAPSE-SPEC.md`), not deliberate design.
+A number of parameters and properties in `Paint` originated in attempts to fix
+what turned out to be the mobile shader bug (see
+`MOBILE-GPU-BRISTLE-COLLAPSE-SPEC.md`) rather than as deliberate design.
 
-**These are not deleted — they are demoted behind feature flags.** The
-distinction matters: they were built to make an invisible problem visible, and
-that problem class is not gone. The next GPU quirk will want the same tools.
-What is wrong with them today is only that they are always-on and mixed into
-production code paths, not that they exist.
+**These are not deleted, and — amended during Phase 1 — they are not switched
+off either.** The author's decision: every debug feature stays **on by
+default**. What is wrong with them today is not that they run, and not that
+they exist; it is that they are *entangled with* `Paint`, which makes them a
+drag on extracting the engine and defining its API.
+
+So the goal of the flag work is **architectural decomposition, not visibility
+control**:
+
+- each feature moves out of `Paint` into its own module, reached through one
+  seam;
+- each gets a flag so it *can* be switched off, and so the engine has a
+  declared surface for it;
+- the flag **defaults to on**, so the default configuration looks and behaves
+  exactly as it does today.
+
+The practical consequence for Phase 1: the golden images must **not** move for
+any of these commits, which restores the original Phase 1 rule. A moved hash
+means the decomposition changed behaviour and the commit is wrong — not that
+the feature was load-bearing.
+
+The off path still has to be real: a flag that is off must be structurally
+absent (no compiled programs, no allocated textures, no per-frame branches), so
+that turning a feature off later is a supported operation rather than a
+discovery.
 
 | Item | Location | Disposition |
 |---|---|---|
-| Painting-rect outline (`showPaintingRect`, `paintingRectThickness`, `paintingRectColor`, `rectOutlineProgram`) | paint.js:105-116 | Flag `debug.paintingRect`, default off |
+| Painting-rect outline (`showPaintingRect`, `paintingRectThickness`, `paintingRectColor`, `rectOutlineProgram`) | paint.js:105-116 | Extract to its own module behind `debug.paintingRect`, **default on** |
 | Ortho near/far ±5000 probe | `rebuildProjectionMatrix()` | **Left at ±5000 — unresolved, see note below.** Deduplicated in Phase 1; the value is untouched |
 | `debug.js`, `debug2.js`, `debug/` | — | Fold into the engine's debug module |
-| `brushviewer.js` live bristle preview | — | Flag `debug.brushViewer` |
+| `brushviewer.js` live bristle preview | — | Extract behind `debug.brushViewer`, **default on** |
 | Texture self-test, GPU profiles, shader lint | `debug/` | Keep; already flag-gated via `?selftest=1` / `?gpu=` |
 
 **The ±5000 depth range could not be resolved against the golden images.** The
