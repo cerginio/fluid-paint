@@ -18,8 +18,12 @@ const isProd = process.env.NODE_ENV === 'production';
 const paths = {
   src: '.',
   dist: 'dist',
-  // Keep CSS filename the same so we don't need to rewrite <link> href
-  css: ['paint.css'],
+  // Phase 7: the stylesheet is app/layout.css and it is copied WITH its
+  // directory (see styles(), which passes `base`), because index.html links it
+  // as app/layout.css. Copying it flat to dist/layout.css would 404 in the
+  // built output while working perfectly from source -- a break only the dist
+  // golden run would catch.
+  css: ['app/layout.css'],
   // Order matters because the project uses globals (no module system).
   // Adjust if you add/remove files.
   js: [
@@ -54,6 +58,8 @@ const paths = {
     // Vendored from tilecraft with one local patch; see docs/UI-COMPONENTS.md.
     // Reports Y-down CSS-relative coords, so paint.js adapts them via viewport.
     'app/ui/pointer-dispatcher.js',
+    // The floating tool panel (Phase 7). After the dispatcher, before paint.js.
+    'app/ui/panel.js',
     'paint-setup.js',
     'paint.js'
 
@@ -87,7 +93,9 @@ function scripts() {
 
 // ---------- STYLES ----------
 function styles() {
-  return src(paths.css, { allowEmpty: true })
+  // `base: '.'` keeps app/ in the output path; without it gulp flattens the
+  // file to the root of dist/ and the <link href="app/layout.css"> breaks.
+  return src(paths.css, { allowEmpty: true, base: '.' })
     .pipe(plumber())
     .pipe(postcss([
       autoprefixer(),

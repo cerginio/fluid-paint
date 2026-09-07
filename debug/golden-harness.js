@@ -138,20 +138,21 @@ async function runStroke(painter, stroke, opts) {
 
   const pts = stroke.points.map((p) => paintingFractionToClient(painter, p[0], p[1]));
 
-  /* The UI panel swallows pointer-downs in its rect (desiredInteractionMode,
-   * paint.js:919) and the stroke then lays no paint at all -- silently, which
-   * cost real debugging time to find. Fail loudly instead. Phase 7 moves the
-   * chrome to DOM and this check becomes unnecessary. */
-  const start = pts[0];
-  // pts are CSS pixels now, and PANEL_* are authored in CSS pixels, so this
-  // comparison is finally in one unit rather than two that happened to match.
-  if (PaintState.showPanel &&
-      start.x < PANEL_WIDTH &&
-      start.y > painter.viewport.cssHeight - PANEL_HEIGHT) {
-    throw new Error(
-      `stroke starts under the UI panel (client ${start.x.toFixed(0)},${start.y.toFixed(0)}); ` +
-      'it would deposit nothing -- move the scenario clear of the panel rect');
-  }
+  /* The "does this stroke start under the UI panel?" guard was removed in
+   * Phase 7, as the comment that used to sit here predicted it would be.
+   *
+   * It existed because the panel was drawn INTO the canvas, so the canvas
+   * received pointer-downs that visually landed on chrome and rejected them
+   * geometrically (the old desiredInteractionMode test) -- the stroke then laid
+   * no paint at all, silently. This guard turned that into a loud failure.
+   *
+   * The panel is a real DOM element now and sits BESIDE the canvas, so the
+   * browser's hit testing keeps those events off the canvas entirely and the
+   * canvas has no dead rectangle left to fall into. Keeping the check would
+   * mean keeping PANEL_WIDTH/PANEL_HEIGHT alive purely for the harness, which
+   * is the duplicated-geometry problem Phase 7 exists to remove. Verified
+   * directly in debug/phase7-probe.js: dragging a slider deposits no paint
+   * while the same drag on the canvas does. */
 
   dispatchPointer(canvas, 'pointerdown', pts[0].x, pts[0].y);
   /* The bristles are placed by Brush.initialize but still have to fall to the

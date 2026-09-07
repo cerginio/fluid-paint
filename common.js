@@ -1,51 +1,9 @@
-function pascalRow(n) {
-  var line = [1];
-  for (var k = 0; k < n; ++k) {
-    line.push(line[k] * (n - k) / (k + 1));
-  }
-  return line;
-}
-
-//width should be an odd number
-function makeBlurShader(width) {
-  var coefficients = pascalRow(width - 1 + 2);
-
-  //take the 1s off the ends
-  coefficients.shift();
-  coefficients.pop();
-
-  var normalizationFactor = 0;
-  for (var i = 0; i < coefficients.length; ++i) {
-    normalizationFactor += coefficients[i];
-  }
-
-  var shader = [
-    'precision highp float;',
-
-    'uniform sampler2D u_input;',
-
-    'uniform vec2 u_step;',
-    'uniform vec2 u_resolution;',
-
-    'void main () {',
-    'vec4 total = vec4(0.0);',
-
-    'vec2 coordinates = gl_FragCoord.xy / u_resolution;',
-    'vec2 delta = u_step / u_resolution;',
-  ].join('\n');
-
-  shader += '\n';
-
-  for (var i = 0; i < width; ++i) {
-    var offset = i - (width - 1) / 2;
-
-    shader += 'total += texture2D(u_input, coordinates + delta * ' + offset.toFixed(1) + ') * ' + coefficients[i].toFixed(1) + '; \n';
-  }
-
-  shader += 'gl_FragColor = total / ' + normalizationFactor.toFixed(1) + ';\n }';
-
-  return shader;
-}
+// pascalRow() and makeBlurShader() were removed in Phase 7.
+//
+// They generated the separable Gaussian used to frost the canvas behind the
+// tool panel. The panel is a DOM element now and its blur is a CSS
+// backdrop-filter, so the generator, its two GL passes and the shader it built
+// at startup all have no caller. Nothing else used either function.
 
 
 function hexToRgba01(hex, a = 1) {
@@ -178,7 +136,7 @@ const APP_SHADER_BASE_PATH = 'app/';
 
 const APP_SHADERS = [
   'shaders/picker.vert', 'shaders/picker.frag',
-  'shaders/panel.frag',
+  // 'shaders/panel.frag' was here until Phase 7; the panel is DOM now.
   'shaders/shadow.frag',
   'shaders/rectborder.frag',
 ];

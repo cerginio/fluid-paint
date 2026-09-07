@@ -146,12 +146,15 @@ const THICK_MIN_ALPHA = 0.002;
 const THICK_MAX_ALPHA = 0.025;
 
 
-//panel is aligned with the top left
-const PANEL_WIDTH = 300;
-const PANEL_HEIGHT = 580;
-const PANEL_BLUR_SAMPLES = 13;
-const PANEL_BLUR_STRIDE = 8;
-
+// PANEL_WIDTH/PANEL_HEIGHT/PANEL_BLUR_* are gone (Phase 7). The panel is a DOM
+// element laid out by app/layout.css, so its size is a CSS property and there
+// is nothing left here to keep in sync with it -- which is the point: two
+// declarations of one dimension is how the old layout drifted.
+//
+// COLOR_PICKER_LEFT/TOP survive only as the fallback placement for a host with
+// no #color-picker-slot in its markup. The normal path reads the slot's rect
+// (Paint._positionColorPicker), so the picker follows the layout instead of
+// sitting at a fixed offset from a window-sized canvas.
 const COLOR_PICKER_LEFT = 20;
 const COLOR_PICKER_TOP = 523;
 
@@ -160,8 +163,10 @@ const RESIZING_RADIUS_CSS = 20;   // CSS pixels -- convert with viewport.cssLeng
 //box shadow parameters
 const BOX_SHADOW_SIGMA = 5.0;
 const BOX_SHADOW_WIDTH = 10.0;
+// The PAINTING's shadow, still drawn by GL: it sits on the canvas background
+// under the painting, which is presentation of the painting rather than chrome.
+// PANEL_SHADOW_ALPHA went with the panel -- that shadow is a CSS box-shadow.
 const PAINTING_SHADOW_ALPHA = 0.5;
-const PANEL_SHADOW_ALPHA = 1.0;
 
 // The painting's rendering parameters -- background grey, normal scale,
 // roughness, F0, specular/diffuse scale, light direction and the resize

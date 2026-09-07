@@ -1,6 +1,6 @@
 # Fluid Engine Extraction Plan
 
-Status: Phases 0-5 complete -- see HANDOFF.md
+Status: Phases 0-7 complete -- see HANDOFF.md
 Branch: `fluid-engine-v1` (from df884cc on webgl2_migration)
 Decisions taken: keep the david.li UI working as the reference harness; fix the
 coordinate/DPR problem as part of the move; build extension *points* but only
@@ -587,15 +587,36 @@ of the backing store, while this app's screen space is **Y-up** and `Viewport`
 owns the DPR. That is adapted at the boundary (`_toScreen` / `_deltaToScreen`)
 rather than by editing the vendored file.
 
-### Phase 7 — Responsive HTML layout
-- `app/index.html` + `layout.css`: the canvas becomes one grid cell; chrome
-  becomes DOM around it.
-- Breakpoints: phone portrait (collapsed drawer), phone landscape (side rail),
-  tablet, desktop (persistent panel).
+### Phase 7 — Responsive HTML layout — DONE, with one deliberate departure
+- `app/layout.css` + the `#canvas-cell` / `#ui` markup: chrome became DOM.
+  `paint.css` deleted.
+- **The panel FLOATS over the canvas; it does not take a grid column.** The
+  docked-column version in the bullet below was built first, then changed after
+  seeing it: a 300px column costs a phone a third of its painting permanently,
+  and the Phase 6 retest had just scored phones 3.7/5 against the tablet's 5/5
+  on exactly that axis. The canvas now keeps the whole window at every
+  breakpoint. Decided by the user against a working implementation.
+- The panel collapses to a compact bar carrying the two controls a painter
+  changes mid-stroke — brush size and a hue stripe — with a grip that drags the
+  panel and, on a tap, toggles the collapse. `app/ui/panel.js`.
+- Breakpoints: phone (narrow, starts collapsed), tablet, desktop. There is no
+  drawer/rail/dock switch any more — one positioning model everywhere, which is
+  what keeps the drag code honest.
 - Canvas sizing driven by `ResizeObserver` on its container, not
-  `window.innerWidth` — this is what finally kills the pinned-to-window
-  assumption at paint.js:298.
-- Delete `panelProgram`, `blurProgram`, `shadowProgram` and their shaders.
+  `window.innerWidth` — this is what finally killed the pinned-to-window
+  assumption at paint.js:298. **The container is opt-in**: defaulting it to
+  `canvas.parentElement` makes a canvas appended to `<body>` size itself from a
+  box that is sized by the canvas, which cost all six dpr2 goldens.
+- Deleted `panelProgram`, `blurProgram`, `makeBlurShader()`, `pascalRow()`,
+  `app/shaders/panel.frag`, the `PANEL_*` constants and the two full-canvas
+  scratch textures the blur ping-ponged through.
+- **`shadowProgram` was NOT deleted, though this plan said to.** It has a second
+  caller: the *painting's* own drop shadow, which is presentation of the
+  painting rather than panel chrome.
+- Verified by `debug/phase7-probe.js` (30/30) — the goldens cannot see any of
+  it. `paint` hashes byte-identical on all 12; `screen` hashes moved on all 12
+  because `readScreen()` hashes the painting rectangle and the old panel
+  overlapped it. Baseline deliberately not re-recorded; see HANDOFF Open items.
 
 ### Phase 8 — Controls
 - `app/ui/sliders.js` — the scoped fork per §5a. Brush scale, bristle count,
@@ -603,15 +624,122 @@ rather than by editing the vendored file.
 - `app/ui/color.js` — iro.js wheel, HSVA -> RYB at the boundary. The natural
   colour model stays the default; the RGB toggle is a control, not a setting
   buried in code.
+- The slot is already reserved: Phase 7 draws the GL picker over
+  `#color-picker-slot`'s rect, so this is "fill the slot and delete the GL
+  draw", not "find where the picker lives".
+- The Phase 7 hue stripe stays. It is a compact mid-stroke control, not a
+  colour editor: it sets hue only and is verified to leave saturation, value
+  and alpha untouched. Do not fold it into the wheel.
 - Delete `colorpicker.js`, `slider.js`, `buttons.js`.
 - `brushviewer.js` already moved to `fluid-engine/debug/` in Phase 1; nothing
   to do here.
+
+### Phase 8a — Bristle re-seeding: identical stamps on repeated taps
+
+**The bug.** `docs/bug-reports/non-random-wristles-brush-hits.png`: a page of
+single taps in one colour, and every stamp is visibly the *same* star — the same
+bristle splay, the same spokes, only translated. Real paint does not do this.
+
+**The cause, read from the code rather than guessed.** `Brush`'s randoms texture
+is filled once in the constructor (brush.js:102-110) and never refilled.
+`initialize()` then lays the bristles out with a fixed "jittered sunflower"
+formula in `setbristles.frag`:
+
+```
+theta = (bristleIndex + (randoms.z - 0.5) * u_jitter) * 2PI / PHI^2
+r     = sqrt(bristleIndex + (randoms.w - 0.5) * u_jitter) / sqrt(u_bristleCount)
+```
+
+Every term is constant for the life of the brush: `bristleIndex`, `PHI`,
+`u_jitter` (`BRISTLE_JITTER = 0.5`), and the randoms texel. So a jitter *does*
+already exist — it is simply the **same** jitter every time. The stamp is
+deterministic by construction.
+
+**What to do.** The user's framing is the design constraint and it is correct:
+a real brush is not rotated between monotonous strokes of one colour, so the fix
+must not read as the brush being spun. Something small and per-press:
+
+- A per-stroke rotation offset added to `theta` — one uniform, seeded when
+  `initialize()` runs. Physically this is the brush being set down at a slightly
+  different angle, which is what actually happens; it is not a spin.
+- And/or a per-stroke offset into the randoms texture, so a different row of
+  randoms feeds the jitter each press.
+
+Prefer whichever is smaller. Both are a uniform plus a line of shader maths;
+neither needs a new texture upload per press, which would cost a stall.
+
+**Constraints, and they are strict.**
+
+- **The new value must come from the engine's own seedable source, not bare
+  `Math.random()`.** Under `?seed=` the goldens must stay reproducible. This is
+  the same class of trap that shifted all 12 hashes in Phase 5 when `Brush`'s
+  construction moved: RNG ordering is load-bearing here.
+- The default must keep a *stroke* looking continuous. The offset is per press
+  (`initialize()`), not per frame and not per splat — re-rolling inside a stroke
+  would make a single drag shimmer.
+- Expect all 12 golden hashes to move. That is correct for this change and must
+  be re-recorded deliberately, with the probe below proving the difference is
+  the intended one.
+
+**How to verify.** The goldens cannot see this: they hash one settled stroke, and
+"different stamps" is a statement about *repeated* strokes. Write a probe that
+taps N times at N positions with identical parameters and compares the stamps to
+each other — today they are near-identical, and the check is that they stop
+being so while a single continuous drag is unchanged. Sabotage it by fixing the
+offset to a constant; the probe must fail.
 
 ### Phase 9 — Prove reuse
 - A minimal second host: a bare canvas, `new FluidEngine(canvas)`, three
   controls. No panel, no picker.
 - If this host needs anything the API does not expose, the API is wrong —
   and that is the point of building it.
+
+### Phase 9a — A named stroke API: `beginStroke` / `strokeTo` / `endStroke`
+
+**Why.** The primitives are already public and already sufficient —
+`initializeBrush`, `positionBrush`, `splat`, `frame`; `debug/golden-harness.js`
+drives scripted strokes with them today. What is missing is that three
+non-obvious rules are the *caller's* to get right, and getting them wrong is
+silent rather than loud:
+
+1. **Bristles need settling frames after a press.** `initializeBrush()` places
+   them; they must fall before any crosses `Z_THRESHOLD` and deposits. The
+   harness settles 10 frames. Painting immediately lays nothing at all.
+2. **Point spacing IS the stroke dynamics.** `Brush.update()` derives bristle
+   speed from the delta it is handed, not from elapsed time — so feeding A then
+   B paints differently from feeding 20 interpolated points between them. In
+   Phase 6 a one-frame-stale position changed deposition ~2% and read as noise.
+3. **Colour must arrive as RYB.** Hex -> HSVA -> `hsvToRyb` at the boundary.
+   Handing RGB straight in produces plausible-looking wrong mixing (§3b).
+
+**The surface.**
+
+```js
+engine.beginStroke({x, y, pressure, color});  // press + settle, internally
+engine.strokeTo({x, y, pressure});            // interpolates at the engine's spacing
+engine.endStroke();
+```
+
+The settling frame count and the interpolation spacing move *into* the engine,
+where they are verified once, instead of being re-derived per host.
+
+**The motivating use case** is tilecraft tracing vector art in real time
+(`docs/api-usecases.md`, and the model at
+`D:/work/js-games/ua-dream/docs/spec/story-model-spec-min-render.json`). That
+model already carries stroke structure, which is why it maps cleanly:
+`g` = group id, one group per stroke; `b` > 0 = polyline break, so lift and
+re-press; `gz` = close back to the group's first tile; `s` = relative size,
+documented as "brush-dependent scale factor, or stylus pressure if applicable",
+which feeds the `height` argument; `c` = hex, converted at the boundary.
+
+**Rules.**
+- Do **not** implement this by exposing `engine.simulator` or `engine.brush`.
+  The Phase 5 rule stands: add methods, never an escape hatch.
+- It sits next to Phase 9 deliberately: a second host needing something the API
+  lacks is a *finding about the API*. This is that finding, recorded before the
+  host exists — so build the host first if the two disagree about the shape.
+- Interacts with Phase 8a: per-press bristle re-seeding must happen inside
+  `beginStroke()`, so a scripted trace gets the same variation a hand does.
 
 ### Phase 10 — Documentation
 - `docs/FLUID-ENGINE-API.md`: commands, events, capabilities, coordinate spaces,

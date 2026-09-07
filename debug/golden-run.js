@@ -24,6 +24,11 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright');
+const { acquireBrowserLock } = require('./browser-lock');
+
+// Refuse to be the second concurrent Playwright run on this machine.
+// See debug/browser-lock.js for why this is enforced in code.
+acquireBrowserLock('golden run');
 
 const ROOT = process.env.GOLDEN_ROOT
   ? path.resolve(process.env.GOLDEN_ROOT)
@@ -92,7 +97,21 @@ async function main() {
 
   const { server, port } = await serve(ROOT);
   const browser = await chromium.launch({
-    args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
+    args: [
+      '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
+      // SwiftShader rasterises on the CPU, so without a cap a run takes every
+      // core and freezes the desktop -- measured at 91% CPU with the mouse
+      // stalling for seconds. These cap the damage:
+      //   renderer-process-limit  one renderer, not one per tab
+      //   max-old-space-size      the JS heap, which the readbacks can grow
+      //   disable-dev-shm-usage   avoids a second copy of every framebuffer
+      // Raising any of them does not make the hashes more correct, only the
+      // machine less usable while they run.
+      '--renderer-process-limit=1',
+      '--js-flags=--max-old-space-size=512',
+      '--disable-dev-shm-usage',
+      '--disable-background-timer-throttling',
+    ],
   });
 
   const rows = [];

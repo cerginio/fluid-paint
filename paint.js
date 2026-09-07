@@ -5,10 +5,16 @@ class Paint {
     /**
      * @param {HTMLCanvasElement} canvas
      * @param {WrappedGL} wgl
+     * @param {Object} [options]
+     * @param {HTMLElement} [options.container]  the element whose CSS box sizes
+     *   the canvas (Phase 7). Omitting it keeps the pre-Phase-7 behaviour of
+     *   sizing to the window, which is what the golden harness and any host
+     *   that has not adopted the layout rely on.
      */
-    constructor(canvas, wgl) {
+    constructor(canvas, wgl, options) {
         this.canvas = canvas;
         this.wgl = wgl;
+        this.container = (options && options.container) || null;
 
         // Debug instrumentation flags, read once from ?debug= (see
         // debug/debug-flags.js). Read here and branched on at construction so a
@@ -58,18 +64,22 @@ class Paint {
             { a_position: 0 }
         );
 
-        this.panelProgram = wgl.createProgram(
-            shaderSources['shaders/fullscreen.vert'],
-            shaderSources['shaders/panel.frag'],
-            { a_position: 0 }
-        );
-
-        this.blurProgram = wgl.createProgram(
-            shaderSources['shaders/fullscreen.vert'],
-            makeBlurShader(PANEL_BLUR_SAMPLES),
-            { a_position: 0 }
-        );
-
+        // panelProgram and blurProgram are GONE (Phase 7).
+        //
+        // They drew the panel background and the frosted blur behind it INTO
+        // the canvas, which is why the chrome could not be laid out: it was
+        // pixels in the drawing surface, not boxes in the document. The panel
+        // is now a real element and the blur is a CSS backdrop-filter, so both
+        // programs, the makeBlurShader() generator, and the two full-canvas
+        // RGBA scratch textures they ping-ponged through (tempCanvasTexture and
+        // blurredCanvasTexture) are deleted rather than merely unused.
+        //
+        // shadowProgram STAYS, and that is not an oversight: it also draws the
+        // PAINTING's drop shadow (see update()), which is part of presenting
+        // the painting on its background, not part of the panel chrome. The
+        // plan's "delete shadowProgram" was written before that second caller
+        // was noticed; deleting it would have removed the painting's shadow
+        // along with the panel's.
         this.shadowProgram = wgl.createProgram(
             shaderSources['shaders/fullscreen.vert'],
             shaderSources['shaders/shadow.frag'],
@@ -106,6 +116,7 @@ class Paint {
         this.viewport = new Viewport(canvas, {
             pixelRatioEnabled: PaintState.pixelRatioEnabled,
             maxPixelRatio: PaintState.maxPixelRatio,
+            container: this.container,
         });
 
         // position of painting on screen, and its dimensions (pixels)
@@ -178,8 +189,6 @@ class Paint {
 
         this.needsRedraw = true; // whether we need to redraw the painting
 
-        document.getElementById('ui').style.display = PaintState.showPanel ? '' : 'none';
-
 
         this.fluiditySlider = new Slider(
             document.getElementById('fluidity-slider'),
@@ -213,6 +222,10 @@ class Paint {
             MAX_BRUSH_SCALE,
             (size) => {
                 this.brushScale = size;
+                // Push the compact bar's handle. The two sliders edit one
+                // value, so whichever is not being dragged has to follow or
+                // they disagree the moment the panel is collapsed or expanded.
+                if (this.barSizeSlider) this.barSizeSlider.setValue(size);
             }
         );
 
@@ -278,20 +291,24 @@ class Paint {
             );
 
             this.colorPicker.scale = this.viewport.pixelRatio;
-            this.colorPicker.bottom = this.canvas.height - this.viewport.cssLengthToScreen(COLOR_PICKER_TOP);
-            this.colorPicker.left = this.viewport.cssLengthToScreen(COLOR_PICKER_LEFT);
+            this._positionColorPicker();
             if (this.brushViewer !== null) this.brushViewer.bottom = this.canvas.height - 150;
 
             this.rebuildProjectionMatrix();
 
-            // Release the previous frame-sized textures before rebuilding them.
-            // Without this every resize (a phone rotation, a desktop drag) leaked
-            // three full-canvas RGBA textures for the lifetime of the context.
-            for (const name of ['canvasTexture', 'tempCanvasTexture', 'blurredCanvasTexture']) {
-                if (this[name]) {
-                    wgl.deleteTexture(this[name]);
-                    this[name] = null;
-                }
+            // Release the previous frame-sized texture before rebuilding it.
+            // Without this every resize (a phone rotation, a desktop drag)
+            // leaked a full-canvas RGBA texture for the lifetime of the
+            // context.
+            //
+            // This was a list of three until Phase 7. tempCanvasTexture and
+            // blurredCanvasTexture were the ping-pong pair the panel blur drew
+            // through; the blur is a CSS backdrop-filter now, so two thirds of
+            // this allocation is gone -- on a DPR-2 phone that is two fewer
+            // full-screen RGBA textures rebuilt on every rotation.
+            if (this.canvasTexture) {
+                wgl.deleteTexture(this.canvasTexture);
+                this.canvasTexture = null;
             }
 
             this.canvasTexture = wgl.buildTexture(
@@ -305,34 +322,27 @@ class Paint {
                 wgl.NEAREST,
                 wgl.NEAREST
             );
-            this.tempCanvasTexture = wgl.buildTexture(
-                wgl.RGBA,
-                wgl.UNSIGNED_BYTE,
-                this.canvas.width,
-                this.canvas.height,
-                null,
-                wgl.CLAMP_TO_EDGE,
-                wgl.CLAMP_TO_EDGE,
-                wgl.NEAREST,
-                wgl.NEAREST
-            );
-            this.blurredCanvasTexture = wgl.buildTexture(
-                wgl.RGBA,
-                wgl.UNSIGNED_BYTE,
-                this.canvas.width,
-                this.canvas.height,
-                null,
-                wgl.CLAMP_TO_EDGE,
-                wgl.CLAMP_TO_EDGE,
-                wgl.NEAREST,
-                wgl.NEAREST
-            );
+
+            // The dispatcher caches the canvas's bounding rect for a frame and
+            // only drops that cache on scroll, resize and pointerdown. A layout
+            // change moves the canvas without any of those -- opening the panel
+            // shifts it by the panel's width -- and a stale rect offsets every
+            // subsequent coordinate by exactly that much. Telling it here is
+            // the alternative to a second local patch in the vendored file.
+            if (this.pointerDispatcher) this.pointerDispatcher.invalidateRect();
 
             this.needsRedraw = true;
         };
 
         this.onResize();
-        window.addEventListener('resize', this.onResize);
+
+        // The container's box drives resizes now, not the window's (Phase 7).
+        // A ResizeObserver sees what the window event cannot: the panel opening
+        // or a breakpoint reflowing the grid changes the canvas's size while
+        // the window itself never moves. Viewport keeps a window listener
+        // alongside it for the devicePixelRatio case, which is the reverse --
+        // the ratio changes without the box changing.
+        this.unobserveResize = this.viewport.observeResize(this.onResize);
 
         this.mouseX = 0;
         this.mouseY = 0;
@@ -434,14 +444,46 @@ class Paint {
             });
         }
 
-        this.panelButton = document.getElementById('panel-button');
-        if (this.panelButton) {
-            this.panelButton.addEventListener('pointerdown', (event) => {
-                event.preventDefault();
-                PaintState.showPanel = !PaintState.showPanel;
-                document.getElementById('ui').style.display = PaintState.showPanel ? '' : 'none';
-            });
-        }
+        // The floating panel: drag by the grip, tap the grip to collapse to the
+        // compact bar. Replaces the old #panel-button, which could only toggle
+        // a panel that was drawn at a fixed place in the canvas.
+        const panelRoot = document.getElementById('ui');
+        this.toolPanel = panelRoot
+            ? new ToolPanel({
+                root: panelRoot,
+                grip: document.getElementById('panel-grip'),
+                hueStripe: document.getElementById('bar-hue-stripe'),
+                onHue: (hue) => {
+                    // Hue only. Saturation, value and alpha are left alone, so
+                    // the stripe cannot silently reset a colour the user mixed
+                    // in the full picker.
+                    this.brushColorHSVA[0] = hue;
+                    this.needsRedraw = true;
+                },
+                onLayoutChange: () => this._syncPanelState(),
+            })
+            : null;
+
+        if (this.toolPanel) this.toolPanel.setHue(this.brushColorHSVA[0]);
+
+        // The compact bar's brush-size slider. It and the one in the expanded
+        // body edit the SAME value, so each has to push the other's handle or
+        // the two disagree the moment either is touched.
+        const barSizeElement = document.getElementById('bar-size-slider');
+        this.barSizeSlider = barSizeElement
+            ? new Slider(
+                barSizeElement,
+                this.brushScale,
+                MIN_BRUSH_SCALE,
+                MAX_BRUSH_SCALE,
+                (size) => {
+                    this.brushScale = size;
+                    if (this.brushSizeSlider) this.brushSizeSlider.setValue(size);
+                }
+            )
+            : null;
+
+        this._syncPanelState();
 
         this.refreshDoButtons && this.refreshDoButtons();
 
@@ -752,78 +794,25 @@ class Paint {
             this.canvas.style.cursor = desiredCursor;
         }
 
-        // The panel is authored in CSS pixels but drawn in the backing store, so
-        // its size has to scale with the ratio or it renders at half size on a
-        // DPR-2 screen while the HTML UI over it stays full size.
-        const panelWidth = this.viewport.cssLengthToScreen(PANEL_WIDTH);
-        const panelHeight = this.viewport.cssLengthToScreen(PANEL_HEIGHT);
-        const panelBottom = this.canvas.height - panelHeight;
+        // The panel, its frosted blur and its drop shadow are no longer drawn
+        // here at all (Phase 7): the panel is a DOM element laid out beside the
+        // canvas, its blur is a CSS backdrop-filter, and its shadow is a CSS
+        // box-shadow. What used to be ~50 lines of GL, two scratch textures and
+        // two programs is now three declarations in app/layout.css.
+        //
+        // needsRedraw is cleared HERE rather than inside a `showPanel` branch.
+        // It used to be cleared only when the panel was drawn, so hiding the
+        // panel left the flag permanently set and the painting re-rendered
+        // every frame instead of only when it changed -- the panel-hidden path
+        // silently cost the most work. Clearing it next to the render that
+        // consumed it is what makes that impossible to reintroduce.
+        this.needsRedraw = false;
 
-        if (this.needsRedraw) {
-            // blur the canvas for the panel
-            const BLUR_FEATHER = ((PANEL_BLUR_SAMPLES - 1) / 2) * PANEL_BLUR_STRIDE;
-
-            const blurDrawState = wgl
-                .createDrawState()
-                .useProgram(this.blurProgram)
-                .viewport(
-                    0,
-                    Utilities.clamp(panelBottom - BLUR_FEATHER, 0, this.canvas.height),
-                    panelWidth + BLUR_FEATHER,
-                    panelHeight + BLUR_FEATHER
-                )
-                .bindFramebuffer(this.framebuffer)
-                .uniform2f('u_resolution', this.canvas.width, this.canvas.height)
-                .vertexAttribPointer(this.quadVertexBuffer, 0, 2, wgl.FLOAT, wgl.FALSE, 0, 0);
-
-            wgl.framebufferTexture2D(
-                this.framebuffer,
-                wgl.FRAMEBUFFER,
-                wgl.COLOR_ATTACHMENT0,
-                wgl.TEXTURE_2D,
-                this.tempCanvasTexture,
-                0
-            );
-            blurDrawState
-                .uniformTexture('u_input', 0, wgl.TEXTURE_2D, this.canvasTexture)
-                .uniform2f('u_step', PANEL_BLUR_STRIDE, 0);
-            wgl.drawArrays(blurDrawState, wgl.TRIANGLE_STRIP, 0, 4);
-
-            wgl.framebufferTexture2D(
-                this.framebuffer,
-                wgl.FRAMEBUFFER,
-                wgl.COLOR_ATTACHMENT0,
-                wgl.TEXTURE_2D,
-                this.blurredCanvasTexture,
-                0
-            );
-            blurDrawState
-                .uniformTexture('u_input', 0, wgl.TEXTURE_2D, this.tempCanvasTexture)
-                .uniform2f('u_step', 0, PANEL_BLUR_STRIDE);
-            wgl.drawArrays(blurDrawState, wgl.TRIANGLE_STRIP, 0, 4);
-        }
         if (PaintState.showPanel) {
-            // draw panel to screen
-            const panelDrawState = wgl
-                .createDrawState()
-                .viewport(0, panelBottom, panelWidth, panelHeight)
-                .uniformTexture('u_canvasTexture', 0, wgl.TEXTURE_2D, this.blurredCanvasTexture)
-                .uniform2f('u_canvasResolution', this.canvas.width, this.canvas.height)
-                .uniform2f('u_panelResolution', panelWidth, panelHeight)
-                .useProgram(this.panelProgram)
-                .vertexAttribPointer(this.quadVertexBuffer, 0, 2, wgl.FLOAT, wgl.FALSE, 0, 0);
-            wgl.drawArrays(panelDrawState, wgl.TRIANGLE_STRIP, 0, 4);
-
-            this.drawShadow(
-                PANEL_SHADOW_ALPHA,
-                new Rectangle(0, panelBottom, panelWidth, panelHeight)
-            ); // shadow for panel
-
-
-            this.needsRedraw = false;
-
+            // The colour picker is still GL-drawn into this canvas -- iro.js
+            // replaces it in Phase 8 -- but it is positioned from its DOM slot
+            // now, so it follows the layout instead of a hardcoded offset.
             this.colorPicker.draw(this.colorModel === ColorModel.RGB);
-
         }
         if (this.brushViewer !== null) {
             const hsva = this.brushColorHSVA;
@@ -889,17 +878,94 @@ class Paint {
         );
     }
 
+    /**
+     * Mirror the panel's collapsed state into PaintState.showPanel.
+     *
+     * `showPanel` no longer means "is the panel element visible" -- the bar is
+     * always visible now. It means "is the expanded BODY showing", and the only
+     * thing that still turns on is whether the GL colour picker draws, since
+     * the picker is drawn into the canvas over its slot and a hidden slot must
+     * not leave a picker floating on the painting.
+     *
+     * Kept as a named method rather than an inline assignment because that
+     * meaning is not obvious from the flag's name, and this is the one place to
+     * explain it.
+     */
+    _syncPanelState() {
+        PaintState.showPanel = this.toolPanel ? !this.toolPanel.isCollapsed() : true;
+        // The picker follows the panel, so a move or a collapse has to reposition
+        // it before the next draw.
+        if (this.colorPicker) this._positionColorPicker();
+        this.needsRedraw = true;
+    }
+
+    /**
+     * Place the GL colour picker over its DOM slot.
+     *
+     * The picker is still drawn into the main canvas by GL (iro.js replaces it
+     * in Phase 8), so it cannot simply BE the slot -- but it can be positioned
+     * from it. Before Phase 7 it sat at COLOR_PICKER_LEFT/COLOR_PICKER_TOP,
+     * fixed CSS offsets from the top-left of a window-sized canvas, which is
+     * exactly the kind of hardcoded geometry that made the layout unresponsive:
+     * at any breakpoint that moved the panel, the picker stayed put.
+     *
+     * Reading the slot's rect each resize means the picker follows the layout
+     * for free -- including the phone-portrait drawer, where the panel is at
+     * the BOTTOM of the screen and the old constants would have drawn the
+     * picker off the top of the canvas entirely.
+     *
+     * The rect is relative to the canvas, because that is the surface the
+     * picker draws into; the canvas no longer starts at the window origin, so
+     * clientX/clientY offsets alone would be wrong by the panel's width.
+     */
+    _positionColorPicker() {
+        const slot = document.getElementById('color-picker-slot');
+
+        if (slot === null) {
+            // No slot: keep the pre-Phase-7 placement so a host that uses its
+            // own markup (or the no-support page) still gets a usable picker
+            // rather than one at the origin.
+            this.colorPicker.bottom =
+                this.canvas.height - this.viewport.cssLengthToScreen(COLOR_PICKER_TOP);
+            this.colorPicker.left = this.viewport.cssLengthToScreen(COLOR_PICKER_LEFT);
+            return;
+        }
+
+        const slotRect = slot.getBoundingClientRect();
+        const canvasRect = this.canvas.getBoundingClientRect();
+
+        // CSS pixels relative to the canvas's top-left...
+        const cssLeft = slotRect.left - canvasRect.left;
+        const cssTop = slotRect.top - canvasRect.top;
+
+        // ...converted to the picker's space, which is screen pixels measured
+        // from the BOTTOM. cssToScreen() would be the natural call, but it
+        // returns the flip of a POINT and the picker wants the bottom edge of a
+        // box, so the box height has to come off after the flip.
+        const screen = this.viewport.cssToScreen(cssLeft, cssTop);
+        this.colorPicker.left = screen.x;
+        this.colorPicker.bottom = screen.y - this.viewport.cssLengthToScreen(slotRect.height);
+    }
+
     // what interaction mode would be triggered if we clicked with given mouse position
     desiredInteractionMode(mouseX, mouseY) {
-        // PANEL_* are CSS pixels; mouseX/mouseY are screen pixels.
-        const panelWidth = this.viewport.cssLengthToScreen(PANEL_WIDTH);
-        const panelHeight = this.viewport.cssLengthToScreen(PANEL_HEIGHT);
+        // The "is the pointer over the panel?" test is GONE (Phase 7).
+        //
+        // It existed because the panel was painted into the canvas, so the
+        // canvas received presses that visually landed on chrome and had to
+        // reject them geometrically -- against PANEL_WIDTH/PANEL_HEIGHT, two
+        // constants that had to be kept in sync with the CSS by hand.
+        //
+        // The panel is a real element now, so the browser's own hit testing
+        // stops those events before the canvas ever sees them. Keeping the test
+        // would be worse than redundant: it would carve a dead rectangle out of
+        // the CANVAS at whatever size the constants happened to say, and on the
+        // phone-portrait drawer -- where the panel really does overlap the
+        // canvas -- that rectangle would be in the wrong place and the wrong
+        // size, blocking paint in the middle of the picture.
         const resizingRadius = this.viewport.cssLengthToScreen(RESIZING_RADIUS_CSS);
-        const mouseOverPanel = PaintState.showPanel && mouseX < panelWidth && mouseY > this.canvas.height - panelHeight;
 
-        if (mouseOverPanel) {
-            return InteractionMode.NONE;
-        } else if (
+        if (
             this.spaceDown ||
             this.mouseX < this.paintingRectangle.left - resizingRadius ||
             this.mouseX > this.paintingRectangle.left + this.paintingRectangle.width + resizingRadius ||
@@ -1030,10 +1096,12 @@ class Paint {
     }
 
     onGestureStart = (event) => {
-        // Right-click toggles the panel; it never starts a stroke.
+        // Right-click collapses/expands the panel; it never starts a stroke.
+        // It goes through the panel rather than setting showPanel directly, so
+        // the flag stays a MIRROR of the panel's state -- setting it here too
+        // would let the two disagree the first time the grip is tapped.
         if (event.pointerType === 'mouse' && event.button !== 0) {
-            PaintState.showPanel = !PaintState.showPanel;
-            document.getElementById('ui').style.display = PaintState.showPanel ? '' : 'none';
+            if (this.toolPanel) this.toolPanel.toggleCollapsed();
             return;
         }
 
@@ -1374,6 +1442,7 @@ class Paint {
             MAX_BRUSH_SCALE
         );
         this.brushSizeSlider.setValue(this.brushScale);
+        if (this.barSizeSlider) this.barSizeSlider.setValue(this.brushScale);
     }
 
     // --- Editing & history ---

@@ -1,0 +1,437 @@
+/*
+ * Phase 7 -- the responsive layout.
+ *
+ * Before this, the canvas was pinned to window.innerWidth/innerHeight and the
+ * chrome was drawn INTO it by GL (a blurred panel, a drop shadow), with the
+ * HTML controls positioned absolutely on top. That is why the layout could not
+ * be responsive: the panel geometry was hardcoded in pixels (PANEL_WIDTH 300,
+ * PANEL_HEIGHT 580, COLOR_PICKER_TOP 523) against a canvas that always filled
+ * the window, so there was no box for CSS to lay out.
+ *
+ * Now CSS owns the boxes and the canvas fills whatever cell it is given, via a
+ * ResizeObserver on #canvas-cell (viewport.js), while the panel FLOATS over the
+ * canvas and is dragged where the user wants it. The canvas keeps the full
+ * window, so the painting never loses width to chrome -- which is what the
+ * Phase 6 device retest asked for on phones.
+ *
+ * The rule that keeps this honest: no dimension here is duplicated in JS. The
+ * panel's own geometry is never read by the pointer path at all now, because
+ * the panel is a real element and the browser hit-tests it.
+ */
+
+:root {
+  /* Authored here and nowhere else. Nothing in JS reads it: the panel is a real
+     element, so the browser decides what it covers. */
+  --panel-width: 300px;
+  --panel-bg: rgba(32, 32, 36, 0.82);
+  --panel-border: rgba(255, 255, 255, 0.14);
+  --edge-pad: 30px;
+}
+
+* {
+  font-family: 'Open Sans', Helvetica, sans-serif;
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+
+  user-select: none;
+  -moz-user-select: none;
+  -webkit-user-select: none;
+  -ms-user-select: none;
+}
+
+/* ---- The shell -----------------------------------------------------------
+ *
+ * The canvas fills the window; the panel FLOATS over it and is dragged wherever
+ * the user wants. That is the model chosen after the Phase 6 device retest: a
+ * docked column costs the painting a third of a phone's width, and on a phone
+ * the painting is the scarce thing.
+ *
+ * The canvas is still sized from #canvas-cell by a ResizeObserver rather than
+ * from the window, and that is not redundant just because the cell currently
+ * fills the window. It is what lets a host embed the engine in a smaller box,
+ * and it is why the pinned-to-window assumption at the old paint.js:298 is
+ * really gone rather than merely relocated.
+ *
+ * On the "canvas sizes the cell that sizes the canvas" feedback loop: it is a
+ * real failure mode for container-sized canvases, but what rules it out here is
+ * that #canvas-cell is window-bounded (html/body are height:100%). The
+ * min-width/min-height/overflow/position guards below are defence in depth for
+ * a future layout that gives the cell an auto track -- verified by removing all
+ * four at once and watching the size stay stable, so do not read their presence
+ * as proof they are what is holding.
+ */
+#app {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  background: #b0b0b0;
+}
+
+#canvas-cell {
+  position: absolute;
+  inset: 0;
+  min-width: 0;
+  min-height: 0;
+  /* This box sizes the canvas, so it must never be sized by it. */
+  overflow: hidden;
+}
+
+#canvas-cell > canvas {
+  /* display:block kills the inline baseline gap, which would otherwise make the
+     cell a few pixels taller than the canvas -- a slow grow, one frame at a
+     time. */
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  touch-action: none;
+}
+
+/* ---- The floating panel --------------------------------------------------
+ *
+ * Replaces panelProgram + blurProgram: the blur is a backdrop-filter, which is
+ * what those two GL passes and their two full-canvas RGBA scratch textures
+ * existed to fake.
+ *
+ * `left`/`top` are set from JS while dragging, so they are authored here only
+ * as the initial position. `touch-action: none` on the drag handle is what lets
+ * a finger drag the panel instead of scrolling it.
+ */
+#ui {
+  position: absolute;
+  z-index: 2;
+  left: 16px;
+  top: 16px;
+  width: var(--panel-width);
+  max-height: calc(100% - 32px);
+
+  display: flex;
+  flex-direction: column;
+
+  border-radius: 12px;
+  background: var(--panel-bg);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+  border: 1px solid var(--panel-border);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+
+  /* The panel itself never scrolls as a whole -- #panel-body does. Otherwise
+     the collapsed bar would scroll out of reach. */
+  overflow: hidden;
+}
+
+/* ---- The collapsed bar ---------------------------------------------------
+ *
+ * The compact control strip, always visible:
+ *
+ *   [-----*------]  :::  :::  :::  [ |||||||||||||| ]
+ *    size slider    drag handle      hue stripe
+ *
+ * It is the whole UI when collapsed, so both controls on it have to be usable
+ * one-handed: the two things a painter changes mid-stroke are brush size and
+ * colour, which is exactly what it carries.
+ */
+#panel-bar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  flex: none;
+}
+
+/* The bar's slider carries .slider for the Slider class's own styling, so it
+   also inherits that rule's fixed `width: 240px` and `margin-left`. Both must
+   be overridden here or the slider overflows its grid track and squeezes the
+   hue stripe down to a couple of pixels -- measured at 2px before this. */
+#bar-size-slider {
+  position: relative;
+  height: 18px;
+  width: auto;
+  margin: 0;
+  min-width: 0;
+  cursor: ew-resize;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+/* The drag handle -- the ::: in the sketch. Dragging anywhere on it moves the
+   panel; tapping it toggles collapsed/expanded. */
+#panel-grip {
+  width: 44px;
+  height: 24px;
+  cursor: grab;
+  touch-action: none;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+}
+
+#panel-grip:active { cursor: grabbing; }
+
+#panel-grip span {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.55);
+  box-shadow: 0 5px 0 rgba(255, 255, 255, 0.55), 0 -5px 0 rgba(255, 255, 255, 0.55);
+}
+
+/* The hue stripe: a full-spectrum gradient, tap or drag to set hue.
+ *
+ * The gradient is authored in RGB because that is what CSS can express, and it
+ * is only an INDICATOR -- the hue it reports is fed through the app's existing
+ * HSVA -> RYB path, so the subtractive colour model is untouched. Do not be
+ * tempted to read colour back out of this gradient. */
+#bar-hue-stripe {
+  position: relative;
+  height: 18px;
+  border-radius: 9px;
+  cursor: pointer;
+  touch-action: none;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: linear-gradient(
+    to right,
+    #ff0000 0%, #ffff00 16.66%, #00ff00 33.33%,
+    #00ffff 50%, #0000ff 66.66%, #ff00ff 83.33%, #ff0000 100%
+  );
+}
+
+#bar-hue-stripe .handle {
+  position: absolute;
+  top: 50%;
+  width: 4px;
+  height: 22px;
+  margin-top: -11px;
+  margin-left: -2px;
+  border-radius: 2px;
+  background: white;
+  border: 1px solid rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+/* ---- The expanded body --------------------------------------------------- */
+
+#panel-body {
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-bottom: 20px;
+  border-top: 1px solid var(--panel-border);
+}
+
+#ui[data-collapsed="true"] #panel-body {
+  display: none;
+}
+
+/* ---- Controls ------------------------------------------------------------
+ * Visually as they were; only the positioning model changed.
+ */
+.button {
+  display: inline-block;
+  margin-top: 24px;
+  width: 115px;
+  height: 30px;
+  line-height: 30px;
+  text-align: center;
+  font-size: 12px;
+  color: white;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+#clear-button {
+  margin-left: var(--edge-pad);
+  background: rgb(220, 0, 40);
+}
+#clear-button:hover  { background: rgb(210, 0, 30); }
+#clear-button:active { background: rgb(200, 0, 20); }
+
+#save-button {
+  background: rgb(0, 170, 50);
+  margin-left: 10px;
+}
+#save-button:hover  { background: rgb(0, 160, 40); }
+#save-button:active { background: rgb(0, 150, 30); }
+
+.control-label {
+  margin-left: var(--edge-pad);
+  margin-top: 9px;
+  color: white;
+  font-size: 12px;
+}
+
+.slider {
+  margin-top: 3px;
+  margin-left: var(--edge-pad);
+  position: relative;
+  width: 240px;
+  height: 15px;
+  cursor: ew-resize;
+  pointer-events: auto;
+
+  user-select: none;
+  -moz-user-select: none;
+  -webkit-user-select: none;
+  -ms-user-select: none;
+}
+
+.buttons {
+  margin-top: 7px;
+  margin-left: var(--edge-pad);
+  height: 26px;
+}
+
+.buttons div {
+  box-sizing: border-box;
+  float: left;
+  width: 80px;
+  padding: 3px 0px;
+  border-top: 1px solid white;
+  border-bottom: 1px solid white;
+  border-left: 1px solid white;
+  font-size: 11px;
+  text-align: center;
+  pointer-events: auto;
+}
+
+.buttons div:first-child { border-left: 1px solid white; }
+.buttons div:last-child  { border-right: 1px solid white; }
+
+#qualities div { width: 80px; }
+#models div    { width: 120px; }
+
+.button-selected {
+  background: white;
+  color: black;
+  cursor: default;
+}
+
+.button-unselected {
+  color: white;
+  cursor: pointer;
+}
+
+/* The colour picker host.
+ *
+ * The picker is still GL-drawn into the main canvas -- replacing it with iro.js
+ * is Phase 8 -- so this is a reserved BOX, not the widget. paint.js reads this
+ * element's rect and draws the picker there, which is what lets the picker
+ * follow the layout instead of sitting at the hardcoded COLOR_PICKER_TOP 523.
+ */
+#color-picker-slot {
+  margin-left: 20px;
+  margin-top: 6px;
+  width: 260px;
+  height: 200px;
+  pointer-events: auto;
+}
+
+#undo-button { margin-left: var(--edge-pad); }
+#redo-button { margin-left: 10px; }
+
+.do-button-active { background: rgb(30, 100, 130); }
+.do-button-active:hover  { background: rgb(20, 90, 120); }
+.do-button-active:active { background: rgb(10, 80, 110); }
+
+.do-button-inactive {
+  cursor: default;
+  background: #666666;
+}
+
+/* ---- Toggle + footer ----------------------------------------------------- */
+
+#panel-button {
+  position: absolute;
+  z-index: 3;
+  bottom: 4px;
+  left: 10px;
+  margin-top: 0;
+  background: rgb(0, 111, 170);
+}
+
+#footer {
+  position: absolute;
+  z-index: 3;
+  bottom: 4px;
+  right: var(--edge-pad);
+  color: #111111;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+#footer a { color: #111111; }
+
+/* ---- The no-support message ---------------------------------------------- */
+
+#no-support-container {
+  position: absolute;
+  width: 100%;
+  height: 30px;
+  top: 50%;
+  margin-top: -15px;
+  text-align: center;
+  font-size: 16px;
+  color: #333333;
+}
+
+#no-support-container a { color: #333333; }
+#backlink { margin-top: 20px; }
+
+/* ---- Breakpoints ---------------------------------------------------------
+ *
+ * Per the plan: phone portrait (collapsed drawer), phone landscape (side rail),
+ * tablet, desktop (persistent panel). Desktop and tablet are the rules above;
+ * the two phone cases are overrides.
+ *
+ * The panel floats at every size; what the breakpoints change is how wide it is
+ * and, on a phone, that it starts collapsed. There is no dock/undock switch --
+ * one positioning model everywhere is what keeps the drag code honest.
+ */
+
+/* Tablet: a narrower persistent panel. */
+@media (max-width: 1024px) {
+  :root { --panel-width: 260px; --edge-pad: 20px; }
+  .slider { width: 210px; }
+  #color-picker-slot { width: 220px; margin-left: 16px; }
+  #models div { width: 100px; }
+}
+
+/* Phone landscape: a side rail. The panel stays beside the canvas because
+   horizontal space is what this orientation has; vertical space is what is
+   scarce, so the panel scrolls. */
+@media (max-height: 520px) and (orientation: landscape) {
+  :root { --panel-width: 240px; --edge-pad: 14px; }
+  .button { margin-top: 12px; }
+  .control-label { margin-top: 6px; }
+  .slider { width: 200px; }
+  #color-picker-slot { width: 190px; height: 150px; margin-left: 12px; }
+  #models div { width: 92px; }
+  #qualities div { width: 62px; }
+}
+
+/* Phone portrait. The panel floats here too -- there is no drawer/dock switch
+   any more, which removes the one case where the old layout let chrome overlay
+   the canvas by a DIFFERENT mechanism than everywhere else. What changes at
+   this size is only that the panel is narrower and starts collapsed, so the
+   painting is unobstructed until the user asks for controls. */
+@media (max-width: 640px) {
+  :root { --panel-width: calc(100% - 24px); --edge-pad: 16px; }
+
+  #ui {
+    left: 12px;
+    top: 12px;
+    max-height: calc(100% - 24px);
+  }
+
+  .slider { width: calc(100% - 2 * var(--edge-pad)); }
+  #color-picker-slot { width: 200px; height: 160px; margin-left: var(--edge-pad); }
+  #models div { width: 100px; }
+}

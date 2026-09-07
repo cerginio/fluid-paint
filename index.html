@@ -8,41 +8,71 @@
     <meta name="description" content="Fluid paint simulation">
 
     <link href='https://fonts.googleapis.com/css?family=Open+Sans:400,300,600,700,800' rel='stylesheet' type='text/css'>
-    <link rel="stylesheet" href="paint.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+
+    <link rel="stylesheet" href="app/layout.css">
 </head>
 
 <body>
+    <!--
+      Phase 7: the chrome is real DOM rather than pixels drawn into the canvas.
+      The canvas fills #canvas-cell (sized by a ResizeObserver, not by the
+      window), and #ui floats OVER it and is dragged where the user wants -- so
+      the painting never loses width to chrome.
+    -->
     <script type="text/template" id="main">
-    <div id="ui">
-        <div id="clear-button" class="button">Clear</div>
-        <a id="save-button" class="button">Save</a>
-        <div class="control-label">Quality</div>
-        <div class="buttons" id="qualities"></div>
-        <div style="clear:both"></div>
-        <div class="control-label">Color Mode</div>
-        <div class="buttons" id="models"></div>
-        <div style="clear:both"></div>
-        <div class="control-label">Paint Fluidity</div>
-        <div id="fluidity-slider" class="slider"></div>
-        <div class="control-label">Bristle Count</div>
-        <div id="bristles-slider" class="slider"></div>
-        <div class="control-label">Brush Size</div>
-        <div id="size-slider" class="slider"></div>
-        <div class="control-label">Paint Color</div>
-        <div id="undo-button" class="button">Undo</div>
-        <div id="redo-button" class="button">Redo</div>
+    <div id="canvas-cell"></div>
+
+    <!--
+      The floating tool panel. It sits OVER the canvas and is dragged by its
+      grip, so the painting never loses width to chrome -- the Phase 6 retest
+      found a docked column costs a phone too much of the picture.
+
+      #panel-bar is always visible and is the entire UI when collapsed:
+
+          [-----*------]  :::  [ |||||||||||| ]
+           brush size   grip     hue stripe
+
+      Those are the two controls a painter changes mid-stroke. Everything else
+      lives in #panel-body, which the grip toggles.
+    -->
+    <div id="ui" data-collapsed="false">
+        <div id="panel-bar">
+            <div id="bar-size-slider" class="slider"></div>
+            <div id="panel-grip" title="Drag to move, tap to collapse">
+                <span></span><span></span><span></span>
+            </div>
+            <div id="bar-hue-stripe"><div class="handle"></div></div>
+        </div>
+
+        <div id="panel-body">
+            <div id="clear-button" class="button">Clear</div>
+            <a id="save-button" class="button">Save</a>
+            <div class="control-label">Quality</div>
+            <div class="buttons" id="qualities"></div>
+            <div style="clear:both"></div>
+            <div class="control-label">Color Mode</div>
+            <div class="buttons" id="models"></div>
+            <div style="clear:both"></div>
+            <div class="control-label">Paint Fluidity</div>
+            <div id="fluidity-slider" class="slider"></div>
+            <div class="control-label">Bristle Count</div>
+            <div id="bristles-slider" class="slider"></div>
+            <div class="control-label">Brush Size</div>
+            <div id="size-slider" class="slider"></div>
+            <div class="control-label">Paint Color</div>
+            <!-- A reserved box, not the widget: the picker is still GL-drawn
+                 into the main canvas until Phase 8 replaces it. paint.js reads
+                 this element's rect so the picker follows the panel. -->
+            <div id="color-picker-slot"></div>
+            <div id="undo-button" class="button">Undo</div>
+            <div id="redo-button" class="button">Redo</div>
+        </div>
     </div>
-    <!-- <div id="instructions">
-        <span>Click and hold</span> to paint <br/>
-        <span>Scroll</span> to change brush size<br/>
-        <span>Space + drag</span> to pan<br/>
-        <span>Drag edges</span> to resize canvas
-    </div> -->
+
     <div id="footer">
         <a href="http://david.li">david.li</a> | <a href="http://github.com/dli/paint">Origin code</a>
     </div>
-        
-    <div id="panel-button" class="button">Panel</div>
 
     </script>
     <script type="text/template" id="no-support">
@@ -52,7 +82,9 @@
         </div>
     </script>
 
-    <div id="placeholder"></div>
+    <div id="app">
+        <div id="placeholder"></div>
+    </div>
 
     <script src="debug/deterministic-rng.js"></script>
     <script src="fluid-engine/gl/glsl3.js"></script>
@@ -77,6 +109,7 @@
     <script src="buttons.js"></script>
     <script src="brushviewer.js"></script>
     <script src="app/ui/pointer-dispatcher.js"></script>
+    <script src="app/ui/panel.js"></script>
     <script src="paint-setup.js"></script>
     <script src="paint.js"></script>
 
@@ -87,8 +120,14 @@
         let debugCtx2d;            // (optional) its 2D context
 
         document.addEventListener('DOMContentLoaded', () => {
-            // main app canvas
+            // The main app canvas. It is created and given a GL context BEFORE
+            // the layout template is injected, because the capability probes
+            // below decide whether the app renders at all -- and their answer
+            // decides which template gets injected. It is moved into
+            // #canvas-cell once that element exists (Phase 7); until then it
+            // stays out of the document flow so it cannot size <body>.
             const canvas = document.createElement('canvas');
+            canvas.style.position = 'absolute';
             document.body.appendChild(canvas);
 
             // ---- device-emulation harness (see docs/MOBILE-GPU-BRISTLE-COLLAPSE-SPEC.md) ----
@@ -141,7 +180,17 @@
 
                     //required features are supported
                     document.getElementById('placeholder').outerHTML = document.getElementById('main').innerHTML;
-                    const painter = new Paint(canvas, wgl);
+
+                    // Move the canvas into its grid cell now that the layout
+                    // exists, and drop the absolute positioning the bootstrap
+                    // used to keep it from sizing <body>: inside the cell the
+                    // stylesheet positions it. Paint's Viewport then sizes the
+                    // canvas from this element rather than from the window.
+                    const canvasCell = document.getElementById('canvas-cell');
+                    canvas.style.position = '';
+                    canvasCell.appendChild(canvas);
+
+                    const painter = new Paint(canvas, wgl, { container: canvasCell });
                     window.__painter = painter;   // handle for the golden harness
 
                     // ?golden=basic|colorMix|wetBlend|all -- scripted stroke, hashed readback
