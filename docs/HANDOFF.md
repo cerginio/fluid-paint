@@ -237,5 +237,9 @@ chrome and the painting render are currently interleaved in one `update()` body.
   Look for banding in long strokes.
 - The 1 GB render-target budget is validated on Android, not on iOS.
 - The ±5000 depth range — unresolved; needs a mid-stroke golden scenario.
+- `simulator.md` is misnamed: it is not simulator documentation but a saved
+  `runWebGLSelfTest()` output dump from an Adreno 642L device. That function
+  went with `debug2.js`, so the file is an orphaned artifact. Keep as a device
+  record under a better name, or delete.
 - `docs/image.png` / `docs/image-ui.png` are untracked device screenshots;
   `image.png` is the `?diag=1` report that confirmed this diagnosis.
