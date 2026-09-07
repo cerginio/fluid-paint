@@ -154,6 +154,11 @@ function cursorForResizingSide(side) {
   }
 }
 
+// Where the shader tree lives. The names in shaderFiles stay the keys that
+// every shaderSources[...] lookup uses, so moving the files is a change here
+// and nowhere else.
+const SHADER_BASE_PATH = 'fluid-engine/';
+
 const shaderFiles = [
   'shaders/splat.vert', 'shaders/splat.frag',
   'shaders/fullscreen.vert',

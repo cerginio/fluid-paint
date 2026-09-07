@@ -852,7 +852,16 @@ function arraysEqual(a, b) {
     }
   
     // async file loading utilities
-    static loadTextFiles(filenames, onLoaded) {
+    /*
+     * Load each file and key the results by the name given.
+     *
+     * `basePath` is prepended to fetch the file but is NOT part of the key, so
+     * moving the shader tree changes one string here instead of every
+     * shaderSources['shaders/...'] lookup in the app. The key is the shader's
+     * logical name; where it lives on disk is the loader's business.
+     */
+    static loadTextFiles(filenames, onLoaded, basePath) {
+      const prefix = basePath || '';
       let loadedSoFar = 0;
       const results = {};
       for (let i = 0; i < filenames.length; ++i) {
@@ -865,7 +874,7 @@ function arraysEqual(a, b) {
             if (loadedSoFar === filenames.length) onLoaded(results);
           }
         };
-        request.open('GET', name, true);
+        request.open('GET', prefix + name, true);
         request.send();
       }
     }

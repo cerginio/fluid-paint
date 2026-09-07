@@ -27,7 +27,7 @@ const paths = {
     // sees it. Inert unless ?seed= is present.
     'debug/deterministic-rng.js',
     // device-emulation harness must load before wrappedgl.js
-    'glsl3.js',
+    'fluid-engine/gl/glsl3.js',
     'debug/debug-flags.js',
     'debug/painting-rect-overlay.js',
     'debug/gpu-profiles.js',
@@ -38,12 +38,12 @@ const paths = {
     'debug/golden-harness.js',
     'common.js',
     'debug.js',
-    'wrappedgl.js',
+    'fluid-engine/gl/wrappedgl.js',
     'utilities.js',
     'rectangle.js',
     'viewport.js',
-    'brush.js',
-    'simulator.js',
+    'fluid-engine/brush.js',
+    'fluid-engine/simulation.js',
     'colorpicker.js',
     'slider.js',
     'buttons.js',
@@ -52,7 +52,7 @@ const paths = {
     'paint.js'
 
   ],
-  shaders: 'shaders/**/*.{glsl,frag,vert}',
+  shaders: 'fluid-engine/shaders/**/*.{glsl,frag,vert}',
   html: 'index.html',
   static: ['LICENSE']
 };
@@ -87,9 +87,11 @@ function styles() {
 }
 
 // ---------- SHADERS ----------
+// Mirror the source layout: the shaders moved under fluid-engine/ in Phase 3
+// and SHADER_BASE_PATH points there, so dist has to match or every fetch 404s.
 function shaders() {
   return src(paths.shaders, { allowEmpty: true })
-    .pipe(dest(path.join(paths.dist, 'shaders')));
+    .pipe(dest(path.join(paths.dist, 'fluid-engine', 'shaders')));
 }
 
 // ---------- HTML ----------

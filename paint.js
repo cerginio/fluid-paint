@@ -26,10 +26,12 @@ class Paint {
             // See docs/MOBILE-GPU-BRISTLE-COLLAPSE-SPEC.md
         }
 
-        // Load shader sources then complete async setup
+        // Load shader sources then complete async setup. The shaders moved
+        // into fluid-engine/ in Phase 3; the keys are unchanged, so only this
+        // base path knows where they now live.
         WrappedGL.loadTextFiles(shaderFiles, (shaderSources) => {
             this._start(shaderSources);
-        });
+        }, SHADER_BASE_PATH);
     }
 
     // --- Private-ish init step that used to be an inner function ---
