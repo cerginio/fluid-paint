@@ -1,6 +1,6 @@
 # Fluid Engine Extraction Plan
 
-Status: Phases 0-3 complete -- see HANDOFF.md
+Status: Phases 0-4 complete -- see HANDOFF.md
 Branch: `fluid-engine-v1` (from df884cc on webgl2_migration)
 Decisions taken: keep the david.li UI working as the reference harness; fix the
 coordinate/DPR problem as part of the move; build extension *points* but only
@@ -478,10 +478,40 @@ not engine, but separating them is the renderer extraction in Phase 4 — doing 
 during a move would mix a relocation with a redesign, and the golden images
 could not tell the two apart.
 
-### Phase 4 — Extract the renderer
-- Lift the painting draw out of `Paint.update()` into `renderer.js`.
-- What stays behind in `Paint.update()` is exactly the UI chrome. After this
-  phase the boundary is visible in the file structure.
+### Phase 4 — Extract the renderer — DONE
+
+- The painting draw is lifted out of `Paint.update()` into
+  `fluid-engine/renderer.js` as `PaintingRenderer`. What stays behind in
+  `update()` is exactly the UI chrome, marked by a comment where the boundary
+  falls. `paint.js` went 1480 -> 1363 lines.
+- The renderer owns all six `painting.vert`/`painting.frag` programs (four
+  screen, two SAVE), the `output.frag` blit, and its own quad buffer. It does
+  **not** own the target texture or framebuffer — those are per-call arguments,
+  which is what lets `renderToTexture()` serve the screen and
+  `renderToPixels()` serve the save path from one implementation.
+- The lighting constants (`NORMAL_SCALE`, `ROUGHNESS`, `F0`, `SPECULAR_SCALE`,
+  `DIFFUSE_SCALE`, `LIGHT_DIRECTION`, `BACKGROUND_GRAY`) moved out of
+  `paint-setup.js` into the renderer. They describe how the engine's paint
+  reflects light; they lived in the app only because the draw call did.
+- **`RESIZING_FEATHER_SIZE` is shared, and now defined once.** It reaches both
+  `painting.frag`'s preview and `simulator.resize()`, which must agree or the
+  painting visibly jumps when a resize handle is released. It lives in the
+  renderer and is exposed as `PaintingRenderer.RESIZING_FEATHER_SIZE` for the
+  host to pass to the simulator.
+- The screen and save paths had separately open-coded the same material
+  uniforms and **had already drifted** — only one of them set `u_featherSize`.
+  `_applyMaterialUniforms()` makes that class of drift impossible.
+- The chrome shaders split out of the engine tree into `app/shaders/`:
+  `panel.frag`, `picker.vert`/`picker.frag`, `shadow.frag`, `rectborder.frag`.
+  `fullscreen.vert` deliberately stays engine-side and is used by both — the
+  app hosts the engine, so app -> engine is the right direction for that arrow.
+- Two trees need two base paths, since `loadTextFiles` applies one prefix to
+  every name. `SHADER_TREES` in `common.js` pairs each manifest with its path
+  and `loadShaderTrees()` merges the results into the one flat `shaderSources`
+  object every lookup already expects. **The ~24 keys are still unchanged**,
+  exactly as in Phase 3.
+- Still no public API — `paint.js` constructs `PaintingRenderer` directly.
+  That is Phase 5.
 
 ### Phase 5 — The FluidEngine facade
 - Add `fluid-engine/index.js` with the command API above.
