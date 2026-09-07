@@ -98,10 +98,11 @@ discovery.
 
 | Item | Location | Disposition |
 |---|---|---|
-| Painting-rect outline (`showPaintingRect`, `paintingRectThickness`, `paintingRectColor`, `rectOutlineProgram`) | paint.js:105-116 | Extract to its own module behind `debug.paintingRect`, **default on** |
+| Painting-rect outline | `debug/painting-rect-overlay.js` | **Done** — extracted, flag `debug.paintingRect`, default on |
 | Ortho near/far ±5000 probe | `rebuildProjectionMatrix()` | **Left at ±5000 — unresolved, see note below.** Deduplicated in Phase 1; the value is untouched |
-| `debug.js`, `debug2.js`, `debug/` | — | Fold into the engine's debug module |
-| `brushviewer.js` live bristle preview | — | Extract behind `debug.brushViewer`, **default on** |
+| `debug.js` per-frame texture readback | `index.html` seam + brush.js:535 | **Done** — flag `debug.textureProbe`, default on. Was a 256×256 readPixels + 4 getParameter per frame while painting |
+| `debug2.js` (751 lines) | — | **Not loaded by any page** — dead in the build. Decide: fold into the debug module, or delete |
+| `brushviewer.js` live bristle preview | `brushviewer.js` | **Done** — flag `debug.brushViewer`, default on. Already its own module; allocates no GPU resources of its own |
 | Texture self-test, GPU profiles, shader lint | `debug/` | Keep; already flag-gated via `?selftest=1` / `?gpu=` |
 
 **The ±5000 depth range could not be resolved against the golden images.** The

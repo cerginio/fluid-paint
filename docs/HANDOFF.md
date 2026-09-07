@@ -1,133 +1,144 @@
-# Handoff — state after Phase 0
+# Handoff — state after Phase 1
 
-Written 2026-09-07 so the next session can start on Phase 1 without re-deriving
+Written 2026-09-07 so the next session can start on Phase 2 without re-deriving
 anything. Read this, then `FLUID-ENGINE-EXTRACTION-PLAN.md`.
 
 ## Where things stand
 
-Branch: **`fluid-engine-v1`** (note: the plan's header still says
-`webgl2_migration` — that is stale, fix it when convenient).
+Branch: **`fluid-engine-v1`**. **Phases 0 and 1 are done.** Phase 2 is next and
+has not been started.
 
 ```
-e08b253  Restore david.li's original brush and simulation constants
-58e7d74  Add golden-image harness for the engine extraction
-df884cc  Report the active context and its real float gate in the diag panel
+85292c9  Gate the per-frame texture readback probe behind debug.textureProbe
+43e7d6d  Gate the live bristle preview behind debug.brushViewer
+57f033e  Extract the painting-rect outline into its own module
+599c125  Amend §3a: the debug work is decomposition, not removal
+142567a  Introduce the engine.debug flag object and ?debug= parsing
+7f5176d  Record why the +/-5000 depth range could not be resolved
+1355353  Build the main projection matrix in one place
+7b48c01  Release the canvas-sized textures before rebuilding them on resize
+43681b8  Hoist save() out of the per-frame update loop
 ```
 
-Working tree clean apart from `docs/image.png` (untracked, not mine).
+Working tree clean apart from `docs/image.png` (untracked, not from this work).
+Every commit above was verified with `npm run test:golden`; the ones that touch
+the build were also checked with `npm run test:golden:dist`. No baseline was
+re-recorded — the hashes are the same as they were after Phase 0.
 
-**Phase 0 is done.** Phase 1 is next and has not been started.
+## The one decision that changed the plan
 
-## What Phase 0 delivered
+§3a called the debug instrumentation "sediment cleared for removal", with each
+item demoted behind a flag **defaulting to off**. That reading was wrong, and
+the first item proved it: the painting-rect outline is switched on today and
+visibly drawn, and turning it off moved `screenHash` 6/6.
 
-A golden-image harness that makes "the refactor changed nothing" checkable.
+**The author's decision: every debug feature stays ON by default.** The problem
+was never that they run — it is that they were entangled with `Paint`, which is
+a drag on extracting the engine and defining its API. So the flag work is
+**architectural decomposition, not visibility control**. §3a has been rewritten
+to say this.
 
-```
-npm run test:golden          verify (non-zero exit on drift)
-npm run test:golden:record   re-record
-npm run test:golden:dist     verify the production bundle
-```
+Two consequences worth carrying forward:
 
-Three scenarios × two WebGL paths = six checks. Full detail in
-`docs/GOLDEN-IMAGES.md` — **read it before touching the harness**, it records
-several traps that cost real time to find.
+1. Phase 1's "golden images must not move" rule applies in its strict original
+   form. A moved hash means the decomposition changed behaviour and the commit
+   is wrong.
+2. Because defaults are on, `?debug=` had to express both directions. It takes
+   `-flag` / `!flag`, `none`|`off`, `all`|`on`, and `only:flag`.
 
-The three things worth knowing up front:
+## What Phase 1 delivered
 
-1. **Two hashes per run.** `paintHash` is the simulator's RYB texture;
-   `screenHash` is the composited canvas after `rybToRgb` and lighting. Which
-   one moves tells you *where* a regression is. A colour-model change moves only
-   `screenHash`.
+**Three cheap fixes.**
 
-2. **It was verified by sabotage.** Breaking `rybToRgb` and breaking
-   `DELTA_TIME` were both caught 6/6, and each was correctly classified as a
-   rendering vs a simulation change. A test that has never failed proves nothing.
+- `save()` is a method, not a ~60-line closure rebuilt 60×/second.
+- `onResize` deletes the three canvas-sized textures before rebuilding them.
+  Measured: 18 leaked over 6 resizes before, 0 after.
+- The ortho matrix is built in one place, `rebuildProjectionMatrix()`. The
+  constructor's copy was dead — startup calls `onResize()` right after, which
+  overwrote it.
 
-3. **The green assertion is not the tripwire.** It *passed* under the
-   `rybToRgb` sabotage that `screenHash` caught. It exists to explain a moved
-   hash in words. Do not rely on it alone; do not delete it either.
+**The flag mechanism**, in `debug/debug-flags.js`. Current flags, all default
+on: `paintingRect`, `brushViewer`, `textureProbe`.
 
-## Also done: david.li's constants restored
+**Three items decomposed**, one per commit, each with its off path measured in
+a real page rather than assumed:
 
-Four values had drifted during earlier debugging and are now back to upstream:
+| Flag | What turning it off actually saves |
+|---|---|
+| `paintingRect` | Module never constructed, 1 fewer GL program (29 to 28) |
+| `brushViewer` | Object and its per-frame draw. **No allocation saved** — it borrows Paint's `brushProgram` and holds only matrices |
+| `textureProbe` | Per stroke: 137 `readPixels` and 548 `getParameter` calls, down to 0 |
 
-| Constant | Was | Now | File |
-|---|---|---|---|
-| `SPLATS_PER_SEGMENT` | 18 | **8** | brush.js |
-| `GRAVITY` | 10.0 | **30.0** | brush.js |
-| `BRUSH_HEIGHT` | 3.0 | **2.0** | paint-setup.js |
-| `SPLAT_PADDING` | 3.5 (working tree) | **4.5** | simulator.js |
-
-Everything else was checked against david.li's published sources and already
-matched. `SPLAT_PADDING` is tied to `BRUSH_HEIGHT` by its own comment
-(`sqrt(BRISTLE_LENGTH² - BRUSH_HEIGHT²)`) — the two must move together.
-
-Baselines were re-recorded after this, so the current baseline reflects the
-david.li tuning.
-
-## Phase 1 — what to do next
-
-From the plan, §6. Nothing here has been started.
-
-- Hoist `this.save` out of `update()` — it is reassigned every frame at
-  [paint.js:585](../paint.js#L585), a ~60-line closure allocated 60×/second.
-- Delete textures in `onResize` before rebuilding
-  ([paint.js:318-355](../paint.js#L318)) — GPU leak on every rotate.
-- Build the ortho matrix in one place (currently
-  [:289](../paint.js#L289) and [:314](../paint.js#L314)).
-- Introduce `engine.debug` + `?debug=` parsing.
-- Move each §3a debug item behind its flag, **one per commit**, each verified
-  with `npm run test:golden` (flag off — hashes must not move).
-
-The user's instruction on debug features is explicit and worth repeating: they
-are **demoted behind flags, never deleted**. They were built to make invisible
-GPU problems visible, and that problem class recurs. Requirement: a flag that is
-off must be *structurally* absent — no compiled GL programs, no allocated
-textures, no per-frame branches.
+`textureProbe` is the one that mattered. `brush.js:535` called `debugTexture()`
+on every simulation step unconditionally, and that is a 256×256 GPU-to-CPU sync
+plus four pipeline stalls, in the hot loop.
 
 ## Things a fresh session will otherwise get wrong
 
-**The RYB colour model is protected.** `rybToRgb` in `shaders/painting.frag` is
-david.li's subtractive pigment cube — eight corners, trilinear, no branching.
-Yellow+blue must give green (RGB would give grey); all three give muddy brown,
-not black; the blue corner is ultramarine, not `(0,0,1)`. Never "simplify" it
-toward a standard colour space. Plan §3b has the full table.
+**Measure the off path during a stroke, not at idle.** The first `textureProbe`
+measurement showed `readPixels=0` both with and without the flag and looked
+like the probe was free. It is not — `brush.js` only simulates while painting.
+A scripted stroke was needed before the number meant anything. Any future
+measurement of simulation-path work has the same trap.
 
-**`hsvToRgb` and `hsvToRyb` are behaviourally identical** (common.js:60, :76) —
-both plain HSV→RGB. The RYB interpretation happens entirely in the shader. This
-looks like a bug and is not. Comment it; do not "fix" it.
+**The golden harness cannot see the bristle overlay.** The projection matrix
+feeds exactly one draw, which renders only mid-stroke and only to the screen,
+never to the paint texture — and the scenarios capture after the stroke ends.
+Verified by sabotage: ±1 moved nothing, and so did ±0.0001, a range that must
+clip every bristle. **This is why the ±5000 depth range is still unresolved and
+untouched.** Settling it needs a mid-stroke golden scenario or manual device
+verification. A baseline that cannot fail is not evidence.
 
-**Hue maps onto RYB channels, not RGB.** `0.333` is yellow, `0.667` is blue. An
-RGB-minded `0.15` for "yellow" actually paints orange.
+**`debug2.js` (751 lines) is not loaded by any page** — not in `index.html`,
+not in the gulpfile's bundle list. It is dead in the build. Left alone this
+session because deleting 751 lines is not a decision to make silently; §3a now
+records the choice as open.
 
-**The UI panel silently swallows strokes.** `desiredInteractionMode`
-([paint.js:919](../paint.js#L919)) returns `NONE` inside the panel rect and the
-stroke deposits nothing — no error. The harness now throws instead. Phase 7
-removes the cause.
+**Two script lists, not one.** `index.html` and `gulpfile.js` each enumerate
+the scripts. A new file must be added to both, or the source path works and the
+bundle silently does not. `npm run test:golden:dist` is what catches this.
 
-**Bristles need settling frames after pointer-down** before any cross
-`Z_THRESHOLD`. A short scripted stroke without them lays nothing.
+**Watch backticks and apostrophes in shell heredocs.** Editing the plan through
+a `python -c "..."` double-quoted string let the shell eat every backtick in
+the markdown table rows, and the replacement silently no-opped. Use a quoted
+heredoc for anything containing backticks, or the Write tool for prose.
 
-**Splatting is alpha-blended**, not additive
-([simulator.js:548](../simulator.js#L548)). A denser second stroke *covers* the
-first rather than mixing with it — measured ~4:1 displacement toward whichever
-pigment lands second, in both orders. This is physically right and constrains
-what colour-mixing tests can assert.
+Everything from the Phase 0 handoff still applies and is not repeated here: the
+RYB colour model is protected; `hsvToRgb`/`hsvToRyb` being identical is not a
+bug; hue maps onto RYB channels (`0.333` yellow, `0.667` blue); the UI panel
+swallows strokes via `desiredInteractionMode`; bristles need settling frames
+after pointer-down; splatting is alpha-blended, not additive.
+
+## Phase 2 — what to do next
+
+From the plan, §6. Nothing here has been started.
+
+- Introduce `Viewport`: owns canvas sizing, `devicePixelRatio`, the Y-flip and
+  all three coordinate spaces, with explicit conversions (`screenToPainting`,
+  `paintingToSimulation`, ...).
+- Replace all four open-coded Y-flips and every ad-hoc scale with calls into it.
+- **DPR is turned on here.**
+
+Phase 2 is the one phase expected to move hashes **on purpose**. Re-record then,
+and say in the commit which moved and why. Re-recording to silence an
+unexplained drift defeats the baseline.
+
+`rebuildProjectionMatrix()` is the natural first thing for `Viewport` to
+absorb — it already is the single place the projection is built.
 
 ## Environment notes
 
-- Playwright chromium was installed this session (`npx playwright install
-  chromium`). Headless uses SwiftShader, so hashes are **not** comparable to a
-  real GPU's — they are a local regression tripwire only.
-- Device verification stays manual: `docs/DEVICE-VERIFICATION.md`. The user
-  confirmed the WebGL 2 dual path works on their Samsung A56 and tablet.
-- A dev server was running on `192.168.1.224:8099` for device testing.
+- Playwright chromium is installed. Headless uses SwiftShader via ANGLE, so
+  hashes are a local regression tripwire only, not comparable to a real GPU.
+- Browser launch flags matter: `--use-gl=angle --use-angle=swiftshader
+  --enable-unsafe-swiftshader`. A throwaway probe written with the wrong flags
+  failed to compile shaders and reported a clean result that meant nothing.
+- One-off probes were written into `debug/` (not the scratchpad) because Node
+  resolves `playwright` from the script's own path, then deleted after use.
+- Device verification stays manual: `docs/DEVICE-VERIFICATION.md`.
 
 ## Open items
 
-- Plan header says branch `webgl2_migration`; actual branch is
-  `fluid-engine-v1`.
+- `debug2.js` — dead in the build; fold in or delete.
+- The ±5000 depth range — unresolved, see above.
 - `docs/image.png` is untracked and not from this work.
-- Phase 2 (device-pixel-ratio) is the one phase expected to move hashes on
-  purpose. Re-record then, and say in the commit which moved and why.
-  Re-recording to silence an unexplained drift defeats the baseline.
