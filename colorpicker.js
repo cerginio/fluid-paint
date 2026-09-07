@@ -21,21 +21,26 @@ const SQUARE_WIDTH = INNER_RADIUS * Math.sqrt(2);
 
 class ColorPicker {
   /**
-   * @param {Object} painter - object holding the HSVA array
-   * @param {string} parameterName - key in painter for the HSVA array
+   * @param {function(): number[]} getHSVA - returns the HSVA array to edit
    * @param {Object} wgl - wrapper around WebGL utilities
    * @param {HTMLCanvasElement} canvas - target canvas
    * @param {Object} shaderSources - shader source map
    * @param {number} left - x offset of picker origin
    * @param {number} bottom - y offset of picker origin
    */
-  constructor(painter, parameterName, wgl, canvas, shaderSources, left, bottom) {
+  constructor(getHSVA, wgl, canvas, shaderSources, left, bottom) {
     this.wgl = wgl;
     this.canvas = canvas;
 
-    // painter[parameterName] points to the HSVA array this picker edits
-    this.painter = painter;
-    this.parameterName = parameterName;
+    // How the picker reaches the colour it edits. Previously this was an object
+    // plus the *name* of a property on it, so the picker could reach into any
+    // field of its owner and the coupling was invisible to a reader of either
+    // file. A single accessor names exactly what is shared.
+    //
+    // It returns the live array and the picker mutates it in place, which is
+    // what the owner's other readers already assume -- a setter that replaced
+    // the array would silently break anything holding a reference to it.
+    this.getHSVA = getHSVA;
 
     this.left = left;
     this.bottom = bottom;
@@ -76,7 +81,7 @@ class ColorPicker {
 
   draw(rgbModel) {
     const wgl = this.wgl;
-    const hsva = this.painter[this.parameterName];
+    const hsva = this.getHSVA();
 
     const pickerDrawState = wgl
       .createDrawState()
@@ -174,7 +179,7 @@ class ColorPicker {
       return;
     }
 
-    const hsva = this.painter[this.parameterName];
+    const hsva = this.getHSVA();
 
     if (this.huePressed) {
       let angle = Math.atan2(y - CIRCLE_Y, x - CIRCLE_X);

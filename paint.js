@@ -259,8 +259,7 @@ class Paint {
         );
 
         this.colorPicker = new ColorPicker(
-            this,
-            'brushColorHSVA',
+            () => this.brushColorHSVA,
             wgl,
             canvas,
             shaderSources,
