@@ -10,6 +10,11 @@ class Paint {
         this.canvas = canvas;
         this.wgl = wgl;
 
+        // Debug instrumentation flags, read once from ?debug= (see
+        // debug/debug-flags.js). Read here and branched on at construction so a
+        // disabled probe is structurally absent rather than a per-frame test.
+        this.debug = parseDebugFlags();
+
         // Enable required extensions
         if (wgl.isWebGL2) {
             // float textures are core in WebGL 2; this enables rendering to them

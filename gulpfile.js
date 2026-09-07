@@ -28,6 +28,7 @@ const paths = {
     'debug/deterministic-rng.js',
     // device-emulation harness must load before wrappedgl.js
     'glsl3.js',
+    'debug/debug-flags.js',
     'debug/gpu-profiles.js',
     'debug/texture-selftest.js',
     'debug/device-diag.js',
