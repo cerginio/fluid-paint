@@ -549,22 +549,43 @@ they are independently verifiable, and neither blocks Phase 6. `simulate()` is
 ~180 lines of fixed advect → divergence → jacobi → subtract with a shared
 scissored draw-state preamble; converting it to a pass list is its own change.
 
-### Phase 6 — Input: PointerDispatcher
+### Phase 6 — Input: PointerDispatcher — DONE (device retest outstanding)
 
 This lands *before* the visual UI, deliberately. Input is the riskiest part of
 the UI change (it is what the engine actually feels like) and it can be swapped
 underneath the existing canvas-drawn chrome, so it gets tested in isolation.
 
-- Vendor `pointer-dispatcher.js` into `app/ui/`.
-- Replace the `onPointer*` handlers with dispatcher subscriptions:
-  `pan` -> stroke, `pan2` -> canvas pan, `pinch` -> painting resize.
-- Delete the hand-rolled `getResizingSide()` edge hit-testing (paint.js:938)
-  and the `activePointers` bookkeeping.
-- **Wire `pressure` into `beginStroke`/`moveStroke`** — closes the pen-pressure
-  TODO. Stylus on the tablet is the acceptance test.
+Done:
 
-**Device retest required**, on the A56 and the tablet, with a stylus if
+- Vendored `pointer-dispatcher.js` into `app/ui/`, with **one** local patch.
+- Replaced the `onPointer*` handlers with dispatcher subscriptions and deleted
+  the `activePointers` / `primaryPointerId` bookkeeping.
+- Wired `pressure` into the stroke — the pen-pressure TODO is closed.
+
+**Device retest still required**, on the A56 and the tablet, with a stylus if
 available. Gesture behaviour cannot be verified by golden images.
+
+#### Two deviations from this plan, both deliberate
+
+**`getResizingSide()` was NOT deleted.** The plan assumed `pinch` could replace
+it. It cannot: a pinch has a scale about a centroid but no notion of *which*
+edge is being dragged, and that is what drives the asymmetric clamping in the
+resize, the `offsetX`/`offsetY` anchoring on commit, and the resize **cursor**.
+Deleting it would have swapped edge-anchored resizing for centroid scaling — a
+different feature. `pinch` was added *alongside* it as the touch path.
+
+**The vendored file is not byte-identical.** The plan says "take as-is / no
+changes needed"; one patch was unavoidable. `_move()` tested only whether
+`getCoalescedEvents` *exists*, not whether it returned anything, and a synthetic
+`PointerEvent` has the method but returns an **empty list** — so no `pan` was
+ever emitted under any automated test, while `panstart`/`panend` still fired.
+Recorded in `docs/UI-COMPONENTS.md`, marked `LOCAL PATCH` in the file.
+
+Also note the plan's "no changes needed / self-contained" assessment missed that
+the dispatcher's coordinates are **Y-down CSS pixels** scaled by its own reading
+of the backing store, while this app's screen space is **Y-up** and `Viewport`
+owns the DPR. That is adapted at the boundary (`_toScreen` / `_deltaToScreen`)
+rather than by editing the vendored file.
 
 ### Phase 7 — Responsive HTML layout
 - `app/index.html` + `layout.css`: the canvas becomes one grid cell; chrome

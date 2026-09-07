@@ -166,6 +166,14 @@ class Paint {
         this.brushX = 0;
         this.brushY = 0;
         this.brushScale = 50;
+        // Pen pressure, as a MULTIPLIER rather than a computed height: brushScale
+        // is changed independently by the size slider and the wheel, and a stored
+        // height would silently keep the old size after either of those.
+        this.brushPressure = 1;
+        // Two-finger pinch state: the span and rectangle the gesture started
+        // with, so a resize scales from its origin rather than compounding.
+        this.pinchStartSpan = null;
+        this.pinchStartRectangle = null;
         this.colorModel = ColorModel.RYB;
 
         this.needsRedraw = true; // whether we need to redraw the painting
@@ -330,19 +338,32 @@ class Paint {
         this.mouseY = 0;
         this.spaceDown = false;
 
-        // ---- Pointer Events state & gesture hygiene ----
-        this.activePointers = new Map(); // pointerId -> { x, y, type }
-        this.primaryPointerId = null;
         // Prevent browser gestures (scroll/zoom) on the drawing surface
         this.canvas.style.touchAction = 'none';
 
-        // ---- Unified Pointer Events (replaces mouse + touch) ----
-        canvas.addEventListener('pointerdown', this.onPointerDown.bind(this), { passive: false });
-        canvas.addEventListener('pointermove', this.onPointerMove.bind(this), { passive: false });
-        canvas.addEventListener('pointerover', this.onPointerOver.bind(this), { passive: false });
-        canvas.addEventListener('pointercancel', this.onPointerCancel.bind(this), { passive: false });
-        // Up can occur off-canvas; use window as a robust backstop
-        window.addEventListener('pointerup', this.onPointerUp.bind(this), { passive: false });
+        // ---- Input: PointerDispatcher (Phase 6) ----
+        //
+        // The dispatcher owns pointer bookkeeping, gesture recognition and the
+        // per-frame RAF flush that the hand-rolled activePointers map used to do.
+        //
+        // It reports CSS-relative, Y-DOWN coordinates scaled by its own reading
+        // of the element's backing store. This app's screen space is Y-UP from
+        // the bottom-left and owns the device pixel ratio in Viewport, so every
+        // coordinate crosses through _toScreen() below and nothing downstream
+        // sees a dispatcher coordinate directly. Adapting at the boundary is
+        // what keeps the vendored file all but untouched: it carries exactly one
+        // local patch, marked LOCAL PATCH in the file and recorded in
+        // docs/UI-COMPONENTS.md.
+        this.pointerDispatcher = new PointerDispatcher(canvas);
+
+        this.pointerDispatcher
+            .on('panstart', this.onGestureStart)
+            .on('pan', this.onGesturePan)
+            .on('panend', this.onGestureEnd)
+            .on('cursormove', this.onGestureHover)
+            .on('pan2', this.onGesturePan2)
+            .on('pan2end', this.onGestureEnd)
+            .on('pinch', this.onGesturePinch);
 
         // Wheel (brush size) – scoped to canvas
         canvas.addEventListener('wheel', this.onWheel.bind(this), { passive: false });
@@ -553,12 +574,20 @@ class Paint {
     update() {
         const wgl = this.wgl;
 
+        this._syncBrushToPointer();
+
         // update brush
+        //
+        // brushHeight carries pen pressure (Phase 6). It is applied here rather
+        // than at the input event because the bristles are advanced every frame
+        // and only this call reaches them -- a height set on the event alone
+        // would never be read. It defaults to the unscaled height, so a mouse,
+        // a finger, and a pen at full pressure all behave exactly as before.
         if (this.brushInitialized) {
             this.engine.positionBrush(
                 this.brushX,
                 this.brushY,
-                BRUSH_HEIGHT * this.brushScale,
+                BRUSH_HEIGHT * this.brushScale * this.brushPressure,
                 this.brushScale
             );
         }
@@ -943,30 +972,75 @@ class Paint {
     }
 
     // ----------------------------
-    // Pointer Events (unified input)
+    // Input: PointerDispatcher gestures (Phase 6)
     // ----------------------------
-    onPointerDown(event) {
-        if (event.preventDefault) event.preventDefault();
 
-        // Only handle primary button for mouse; accept pen/touch
+    /**
+     * Dispatcher coordinates -> this app's screen space.
+     *
+     * The dispatcher reports CSS-relative pixels with Y growing DOWNWARD from
+     * the top-left, pre-scaled by its own reading of the canvas backing store.
+     * Viewport owns the device pixel ratio and its screen space is Y-UP from
+     * the bottom-left, so the scale is divided back out and Y is flipped here.
+     *
+     * Doing it in one place is deliberate: it is what keeps the vendored
+     * dispatcher byte-identical to its tilecraft source, and it keeps
+     * pixelRatio single-sourced in Viewport rather than re-derived from the DOM.
+     */
+    _toScreen(x, y) {
+        const rect = this.canvas.getBoundingClientRect();
+        const scaleX = rect.width === 0 ? 1 : this.canvas.width / rect.width;
+        const scaleY = rect.height === 0 ? 1 : this.canvas.height / rect.height;
+        return this.viewport.cssToScreen(x / scaleX, y / scaleY);
+    }
+
+    /**
+     * A dispatcher DELTA -> a screen-space delta.
+     *
+     * Deltas take the same scaling as a point but no origin, and the Y flip is
+     * a sign change rather than a subtraction from the height. Running a delta
+     * through _toScreen() would add the viewport height to it every frame.
+     */
+    _deltaToScreen(dx, dy) {
+        const rect = this.canvas.getBoundingClientRect();
+        const scaleX = rect.width === 0 ? 1 : this.canvas.width / rect.width;
+        const scaleY = rect.height === 0 ? 1 : this.canvas.height / rect.height;
+        const ratio = this.viewport.pixelRatio;
+        return { x: (dx / scaleX) * ratio, y: -(dy / scaleY) * ratio };
+    }
+
+    /**
+     * Pointer pressure -> a brush-height multiplier. Closes the pen-pressure TODO.
+     *
+     * Only a pen is scaled. The Pointer Events spec reports a flat 0.5 for
+     * devices with no pressure hardware, so multiplying unconditionally would
+     * silently halve the brush for every mouse and finger user -- a visible
+     * regression dressed as a feature. Some pens also report 0 on the very
+     * first sample of a stroke, which would open the stroke with a zero-height
+     * brush, so the floor keeps a light touch painting.
+     */
+    _pressureScale(pressure, pointerType) {
+        if (pointerType !== 'pen' || typeof pressure !== 'number') return 1;
+        return Utilities.clamp(pressure, MIN_PRESSURE_SCALE, 1);
+    }
+
+    /** Brush height for the current stroke, including pen pressure. */
+    _brushHeight(pressure, pointerType) {
+        return BRUSH_HEIGHT * this.brushScale * this._pressureScale(pressure, pointerType);
+    }
+
+    onGestureStart = (event) => {
+        // Right-click toggles the panel; it never starts a stroke.
         if (event.pointerType === 'mouse' && event.button !== 0) {
             PaintState.showPanel = !PaintState.showPanel;
             document.getElementById('ui').style.display = PaintState.showPanel ? '' : 'none';
             return;
         }
 
-        const position = this.viewport.eventToScreen(event);
+        const position = this._toScreen(event.centerX, event.centerY);
         const mouseX = position.x;
         const mouseY = position.y;
 
-        // Track pointer and choose primary if none
-        this.activePointers.set(event.pointerId, { x: mouseX, y: mouseY, type: event.pointerType });
-        if (this.primaryPointerId === null) this.primaryPointerId = event.pointerId;
-
-        // Keep receiving move/up even if pointer leaves the canvas
-        this.canvas.setPointerCapture(event.pointerId);
-
-        // Update tracked positions
         this.mouseX = mouseX;
         this.mouseY = mouseY;
         this.brushX = mouseX;
@@ -976,7 +1050,6 @@ class Paint {
             this.colorPicker.onMouseDown(mouseX, mouseY);
         }
 
-        // Color picker first
         if (this.colorPicker.isInUse()) return;
 
         const mode = this.desiredInteractionMode(mouseX, mouseY);
@@ -993,229 +1066,302 @@ class Paint {
             this.saveSnapshot();
         }
 
-        // If a second touch lands while painting, switch to panning (mirrors old touch logic)
-        if (event.pointerType !== 'mouse' &&
-            this.interactionState === InteractionMode.PAINTING &&
-            this.activePointers.size === 2) {
-            this.interactionState = InteractionMode.PANNING;
-        }
-
-        // Initialize brush at first contact if needed
+        // panstart carries no pressure -- it fires on pointerdown, before any
+        // move sample. The first pan event supplies the real value.
         if (!this.brushInitialized) {
             this.engine.initializeBrush(
                 this.brushX,
                 this.brushY,
-                BRUSH_HEIGHT * this.brushScale,
+                this._brushHeight(1, event.pointerType),
                 this.brushScale
             );
             this.brushInitialized = true;
         }
+    };
+
+    /**
+     * Take the brush position from the dispatcher's LIVE pointer state, before
+     * this frame's simulation step.
+     *
+     * The dispatcher defers pan to its own requestAnimationFrame. The render
+     * loop's RAF is registered first (in _start), and RAF callbacks run in
+     * registration order, so without this the brush would always be one frame
+     * behind the pointer: every frame simulated the previous position and the
+     * deferred pan only caught up afterwards. Brush.update() derives bristle
+     * speed from the delta it is given, so a stale position does not merely lag
+     * visually -- it changes how much paint is deposited.
+     *
+     * Reading the live position here restores the synchronous behaviour the
+     * pre-Phase-6 pointermove handler had, while leaving gesture recognition
+     * (which genuinely wants accumulated per-frame deltas) on the dispatcher.
+     */
+    _syncBrushToPointer() {
+        if (this.interactionState !== InteractionMode.PAINTING) return;
+
+        const pointers = this.pointerDispatcher && this.pointerDispatcher.pointers;
+        if (!pointers || pointers.size !== 1) return;
+
+        const pt = pointers.values().next().value;
+        if (!pt) return;
+
+        const position = this._toScreen(pt.x, pt.y);
+        this.brushX = position.x;
+        this.brushY = position.y;
     }
 
-    onPointerMove(event) {
-        if (event.preventDefault) event.preventDefault();
-
-        const position = this.viewport.eventToScreen(event);
+    onGesturePan = (event) => {
+        const position = this._toScreen(event.centerX, event.centerY);
         const mx = position.x;
         const my = position.y;
 
-        // Update bookkeeping
-        this.activePointers.set(event.pointerId, { x: mx, y: my, type: event.pointerType });
-
-        // Determine which pointer drives interactions
-        const drivingId = this.primaryPointerId ?? event.pointerId;
-
-        // Update brush position for the driving pointer
-        if (event.pointerId === drivingId) {
-            this.brushX = mx;
-            this.brushY = my;
-        }
+        this.brushX = mx;
+        this.brushY = my;
 
         if (!this.brushInitialized) {
             this.engine.initializeBrush(
                 this.brushX,
                 this.brushY,
-                BRUSH_HEIGHT * this.brushScale,// TODO: x pen pressure 
+                this._brushHeight(event.pressure, event.pointerType),
                 this.brushScale
             );
             this.brushInitialized = true;
         }
 
-        // Panning / resizing movement mirrors original logic
-        if (this.interactionState === InteractionMode.PANNING && event.pointerId === drivingId) {
-            const deltaX = mx - this.mouseX;
-            const deltaY = my - this.mouseY;
+        // Pen pressure reaches the stroke here: recorded per sample so it tracks
+        // the pen through the stroke, not just at the moment of contact.
+        this.brushPressure = this._pressureScale(event.pressure, event.pointerType);
 
-            this.paintingRectangle.left += deltaX;
-            this.paintingRectangle.bottom += deltaY;
-
-            // TODO: debug paintingRectangle
-            this.paintingRectangle.left = Utilities.clamp(
-                this.paintingRectangle.left,
-                -this.paintingRectangle.width,
-                this.canvas.width
-            );
-            this.paintingRectangle.bottom = Utilities.clamp(
-                this.paintingRectangle.bottom,
-                -this.paintingRectangle.height,
-                this.canvas.height
-            );
-
-            this.needsRedraw = true;
-        } else if (this.interactionState === InteractionMode.RESIZING && event.pointerId === drivingId) {
-            if (
-                this.resizingSide === ResizingSide.LEFT ||
-                this.resizingSide === ResizingSide.TOP_LEFT ||
-                this.resizingSide === ResizingSide.BOTTOM_LEFT
-            ) {
-                this.newPaintingRectangle.left = Utilities.clamp(
-                    mx,
-                    this.paintingRectangle.getRight() - this.maxPaintingWidth,
-                    this.paintingRectangle.getRight() - MIN_PAINTING_WIDTH
-                );
-                this.newPaintingRectangle.width =
-                    this.paintingRectangle.left +
-                    this.paintingRectangle.width -
-                    this.newPaintingRectangle.left;
-            }
-            if (
-                this.resizingSide === ResizingSide.RIGHT ||
-                this.resizingSide === ResizingSide.TOP_RIGHT ||
-                this.resizingSide === ResizingSide.BOTTOM_RIGHT
-            ) {
-                this.newPaintingRectangle.width = Utilities.clamp(
-                    mx - this.paintingRectangle.left,
-                    MIN_PAINTING_WIDTH,
-                    this.maxPaintingWidth
-                );
-            }
-            if (
-                this.resizingSide === ResizingSide.BOTTOM ||
-                this.resizingSide === ResizingSide.BOTTOM_LEFT ||
-                this.resizingSide === ResizingSide.BOTTOM_RIGHT
-            ) {
-                this.newPaintingRectangle.bottom = Utilities.clamp(
-                    my,
-                    this.paintingRectangle.getTop() - this.maxPaintingWidth,
-                    this.paintingRectangle.getTop() - MIN_PAINTING_WIDTH
-                );
-                this.newPaintingRectangle.height =
-                    this.paintingRectangle.bottom +
-                    this.paintingRectangle.height -
-                    this.newPaintingRectangle.bottom;
-            }
-            if (
-                this.resizingSide === ResizingSide.TOP ||
-                this.resizingSide === ResizingSide.TOP_LEFT ||
-                this.resizingSide === ResizingSide.TOP_RIGHT
-            ) {
-                this.newPaintingRectangle.height = Utilities.clamp(
-                    my - this.paintingRectangle.bottom,
-                    MIN_PAINTING_WIDTH,
-                    this.maxPaintingWidth
-                );
-            }
-            this.needsRedraw = true;
+        if (this.interactionState === InteractionMode.PANNING) {
+            const delta = this._deltaToScreen(event.dx, event.dy);
+            this._panPainting(delta.x, delta.y);
+        } else if (this.interactionState === InteractionMode.RESIZING) {
+            this._resizePaintingTo(mx, my);
         }
 
-        // Forward to color picker
-        this.colorPicker.onMouseMove(position.x, position.y);
+        this.colorPicker.onMouseMove(mx, my);
 
-        // Track last mouse only for the driving pointer
-        if (event.pointerId === drivingId) {
-            this.mouseX = mx;
-            this.mouseY = my;
-        }
-    }
+        this.mouseX = mx;
+        this.mouseY = my;
+    };
 
-    onPointerUp(event) {
-        if (event.preventDefault) event.preventDefault();
+    /** Two-finger drag pans the canvas, whatever the one-finger mode was. */
+    onGesturePan2 = (event) => {
+        // A genuine pinch owns the gesture; panning the canvas underneath a
+        // resize would fight it for the same rectangle.
+        if (this.interactionState === InteractionMode.RESIZING) return;
 
-        // Treat color picker up using last known coords to be robust even if up is off-canvas
-        this.colorPicker.onMouseUp(this.mouseX, this.mouseY);
-
-        // Finalize resize like original onMouseUp
-        if (this.interactionState === InteractionMode.RESIZING) {
-            let offsetX = 0,
-                offsetY = 0;
-
-            if (
-                this.resizingSide === ResizingSide.LEFT ||
-                this.resizingSide === ResizingSide.TOP_LEFT ||
-                this.resizingSide === ResizingSide.BOTTOM_LEFT
-            ) {
-                offsetX =
-                    (this.paintingRectangle.left - this.newPaintingRectangle.left) *
-                    this.resolutionScale;
-            }
-
-            if (
-                this.resizingSide === ResizingSide.BOTTOM ||
-                this.resizingSide === ResizingSide.BOTTOM_LEFT ||
-                this.resizingSide === ResizingSide.BOTTOM_RIGHT
-            ) {
-                offsetY =
-                    (this.paintingRectangle.bottom - this.newPaintingRectangle.bottom) *
-                    this.resolutionScale;
-            }
-
-            this.paintingRectangle = this.newPaintingRectangle;
-
-            // The feather width is the engine's -- it must match the width the
-            // resize preview drew with, or the painting jumps on release.
-            this.engine.resizePainting(
-                this.getPaintingResolutionWidth(),
-                this.getPaintingResolutionHeight(),
-                offsetX,
-                offsetY
-            );
-
-            this.needsRedraw = true;
+        // A second finger landing mid-stroke ends the stroke rather than
+        // smearing paint along the pan.
+        if (this.interactionState === InteractionMode.PAINTING) {
+            this.interactionState = InteractionMode.PANNING;
         }
 
-        // Update bookkeeping AFTER resize handling
-        this.activePointers.delete(event.pointerId);
+        const delta = this._deltaToScreen(event.dx, event.dy);
+        this._panPainting(delta.x, delta.y);
 
-        // Choose a new driving pointer if needed
-        if (this.primaryPointerId === event.pointerId) {
-            const next = this.activePointers.keys().next();
-            this.primaryPointerId = next.done ? null : next.value;
-            if (this.primaryPointerId !== null) {
-                const p = this.activePointers.get(this.primaryPointerId);
-                this.mouseX = p.x;
-                this.mouseY = p.y;
-            }
+        const position = this._toScreen(event.centerX, event.centerY);
+        this.mouseX = position.x;
+        this.mouseY = position.y;
+    };
+
+    /**
+     * Pinch scales the painting about its own centre.
+     *
+     * This is the touch counterpart to edge-drag resizing, not a replacement
+     * for it: a pinch has a scale factor but no notion of WHICH edge is being
+     * dragged, which is what getResizingSide() supplies for the mouse path and
+     * for the resize cursor.
+     */
+    onGesturePinch = (event) => {
+        // pinch and pan2 BOTH fire for every two-finger gesture, so a pure
+        // two-finger drag has to be told apart from a real pinch or dragging the
+        // canvas silently resizes the painting.
+        //
+        // The test is the span relative to where this gesture STARTED, not the
+        // per-frame scale. Two fingers landing on the same frame make the first
+        // frame's scale spike (measured ~1.19 for a span that never changed),
+        // and a per-frame test acts on that spike before the gesture is really
+        // under way. Total span change cannot spike: it starts at exactly 1.
+        if (this.pinchStartSpan === null) this.pinchStartSpan = event.span;
+
+        const totalScale = event.span / this.pinchStartSpan;
+        if (Math.abs(totalScale - 1) < PINCH_SCALE_DEADZONE) return;
+
+        if (this.interactionState !== InteractionMode.RESIZING) {
+            this.saveSnapshot();
+            this.interactionState = InteractionMode.RESIZING;
+            this.resizingSide = ResizingSide.NONE;
+            this.newPaintingRectangle = this.paintingRectangle.clone();
+            // The rectangle the whole gesture scales FROM. Scaling the running
+            // rectangle by a total ratio every frame would compound it.
+            this.pinchStartRectangle = this.paintingRectangle.clone();
         }
 
-        // If no pointers remain, reset interaction state
-        if (this.activePointers.size === 0) {
-            this.interactionState = InteractionMode.NONE;
-        }
-    }
+        const start = this.pinchStartRectangle;
+        const aspect = start.height / start.width;
+        const centerX = start.left + start.width / 2;
+        const centerY = start.bottom + start.height / 2;
 
-    onPointerCancel(event) {
-        if (event.preventDefault) event.preventDefault();
-        // Treat like an up
-        this.onPointerUp(event);
-    }
+        const width = Utilities.clamp(
+            start.width * totalScale,
+            MIN_PAINTING_WIDTH,
+            this.maxPaintingWidth
+        );
+        const height = width * aspect;
 
-    onPointerOver(event) {
-        if (event.preventDefault) event.preventDefault();
+        const rect = this.newPaintingRectangle;
+        rect.width = width;
+        rect.height = height;
+        rect.left = centerX - width / 2;
+        rect.bottom = centerY - height / 2;
 
-        const position = this.viewport.eventToScreen(event);
-        const mouseX = position.x;
-        const mouseY = position.y;
+        this.needsRedraw = true;
+    };
 
-        this.brushX = mouseX;
-        this.brushY = mouseY;
+    onGestureHover = (event) => {
+        const position = this._toScreen(event.x, event.y);
+
+        this.brushX = position.x;
+        this.brushY = position.y;
+        this.mouseX = position.x;
+        this.mouseY = position.y;
 
         this.engine.initializeBrush(
             this.brushX,
             this.brushY,
-            BRUSH_HEIGHT * this.brushScale,
+            this._brushHeight(event.pressure, event.pointerType),
             this.brushScale
         );
         this.brushInitialized = true;
+    };
+
+    onGestureEnd = (event) => {
+        this.colorPicker.onMouseUp(this.mouseX, this.mouseY);
+
+        // The next two-finger gesture measures its span from scratch.
+        this.pinchStartSpan = null;
+        this.pinchStartRectangle = null;
+
+        if (this.interactionState === InteractionMode.RESIZING) {
+            this._commitResize();
+        }
+
+        this.interactionState = InteractionMode.NONE;
+    };
+
+    /** Shared by one-finger PANNING and two-finger pan2. */
+    _panPainting(deltaX, deltaY) {
+        this.paintingRectangle.left += deltaX;
+        this.paintingRectangle.bottom += deltaY;
+
+        this.paintingRectangle.left = Utilities.clamp(
+            this.paintingRectangle.left,
+            -this.paintingRectangle.width,
+            this.canvas.width
+        );
+        this.paintingRectangle.bottom = Utilities.clamp(
+            this.paintingRectangle.bottom,
+            -this.paintingRectangle.height,
+            this.canvas.height
+        );
+
+        this.needsRedraw = true;
+    }
+
+    /** Edge/corner resize driven by the dragged pointer, per resizingSide. */
+    _resizePaintingTo(mx, my) {
+        if (
+            this.resizingSide === ResizingSide.LEFT ||
+            this.resizingSide === ResizingSide.TOP_LEFT ||
+            this.resizingSide === ResizingSide.BOTTOM_LEFT
+        ) {
+            this.newPaintingRectangle.left = Utilities.clamp(
+                mx,
+                this.paintingRectangle.getRight() - this.maxPaintingWidth,
+                this.paintingRectangle.getRight() - MIN_PAINTING_WIDTH
+            );
+            this.newPaintingRectangle.width =
+                this.paintingRectangle.left +
+                this.paintingRectangle.width -
+                this.newPaintingRectangle.left;
+        }
+        if (
+            this.resizingSide === ResizingSide.RIGHT ||
+            this.resizingSide === ResizingSide.TOP_RIGHT ||
+            this.resizingSide === ResizingSide.BOTTOM_RIGHT
+        ) {
+            this.newPaintingRectangle.width = Utilities.clamp(
+                mx - this.paintingRectangle.left,
+                MIN_PAINTING_WIDTH,
+                this.maxPaintingWidth
+            );
+        }
+        if (
+            this.resizingSide === ResizingSide.BOTTOM ||
+            this.resizingSide === ResizingSide.BOTTOM_LEFT ||
+            this.resizingSide === ResizingSide.BOTTOM_RIGHT
+        ) {
+            this.newPaintingRectangle.bottom = Utilities.clamp(
+                my,
+                this.paintingRectangle.getTop() - this.maxPaintingWidth,
+                this.paintingRectangle.getTop() - MIN_PAINTING_WIDTH
+            );
+            this.newPaintingRectangle.height =
+                this.paintingRectangle.bottom +
+                this.paintingRectangle.height -
+                this.newPaintingRectangle.bottom;
+        }
+        if (
+            this.resizingSide === ResizingSide.TOP ||
+            this.resizingSide === ResizingSide.TOP_LEFT ||
+            this.resizingSide === ResizingSide.TOP_RIGHT
+        ) {
+            this.newPaintingRectangle.height = Utilities.clamp(
+                my - this.paintingRectangle.bottom,
+                MIN_PAINTING_WIDTH,
+                this.maxPaintingWidth
+            );
+        }
+        this.needsRedraw = true;
+    }
+
+    /** Commit a resize on release: offsets follow the anchored edge. */
+    _commitResize() {
+        let offsetX = 0,
+            offsetY = 0;
+
+        if (
+            this.resizingSide === ResizingSide.LEFT ||
+            this.resizingSide === ResizingSide.TOP_LEFT ||
+            this.resizingSide === ResizingSide.BOTTOM_LEFT
+        ) {
+            offsetX =
+                (this.paintingRectangle.left - this.newPaintingRectangle.left) *
+                this.resolutionScale;
+        }
+
+        if (
+            this.resizingSide === ResizingSide.BOTTOM ||
+            this.resizingSide === ResizingSide.BOTTOM_LEFT ||
+            this.resizingSide === ResizingSide.BOTTOM_RIGHT
+        ) {
+            offsetY =
+                (this.paintingRectangle.bottom - this.newPaintingRectangle.bottom) *
+                this.resolutionScale;
+        }
+
+        this.paintingRectangle = this.newPaintingRectangle;
+
+        // The feather width is the engine's -- it must match the width the
+        // resize preview drew with, or the painting jumps on release.
+        this.engine.resizePainting(
+            this.getPaintingResolutionWidth(),
+            this.getPaintingResolutionHeight(),
+            offsetX,
+            offsetY
+        );
+
+        this.needsRedraw = true;
     }
 
     onWheel(event) {

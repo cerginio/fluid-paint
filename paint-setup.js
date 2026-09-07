@@ -120,6 +120,18 @@ const MAX_BRUSH_SCALE = 75;
 const BRUSH_HEIGHT = 2.0; //how high the brush is over the canvas - this is scaled with the brushScale
 const Z_THRESHOLD = 0.13333; //this is scaled with the brushScale
 
+// A two-finger gesture emits BOTH pan2 and pinch; the dispatcher only withholds
+// a pinch whose scale is exactly 1, so span jitter makes a pure drag report a
+// scale a hair off 1. Below this much scale change a two-finger gesture counts
+// as a drag, not a resize. See Paint.onGesturePinch().
+const PINCH_SCALE_DEADZONE = 0.02;
+
+// Floor for pen-pressure brush scaling (Phase 6). A pen that reports 0 -- which
+// some report on the first sample of a stroke -- would otherwise open the
+// stroke with a zero-height brush and paint nothing at the very moment of
+// contact. Only pens are scaled at all; see Paint._pressureScale().
+const MIN_PRESSURE_SCALE = 0.15;
+
 
 //splatting parameters
 const SPLAT_VELOCITY_SCALE = 0.14;

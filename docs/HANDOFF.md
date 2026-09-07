@@ -1,10 +1,11 @@
-# Handoff — Phases 0-5 done, iPhone closed
+# Handoff — Phases 0-6 done, device retest owed
 
-Written 2026-09-07. Read this, then `FLUID-ENGINE-EXTRACTION-PLAN.md`.
+Written 2026-09-07. Read this, then `docs/FLUID-ENGINE-EXTRACTION-PLAN.md`.
 
 ## Where things stand
 
-Branch: **`fluid-engine-v1`**, working tree **clean**. **Phases 0-5 are done.**
+Branch: **`fluid-engine-v1`**, working tree **clean**. **Phases 0-6 are done**,
+but Phase 6 owes a **device retest with a stylus** — see below.
 
 Golden images: **12/12 pass** on both the source and dist paths, with hashes
 **byte-identical** to the Phase 0 baseline. Shader lint passes, now reporting
@@ -44,7 +45,9 @@ fluid-paint/              <- git repo root
     shaders/              engine shaders only (19)
   app/
     shaders/              UI chrome shaders (5), split out in Phase 4
-  paint.js (1333 lines)   the app: chrome, input, undo policy. No engine state.
+    ui/
+      pointer-dispatcher.js   vendored (Phase 6), ONE local patch
+  paint.js                the app: chrome, input, undo policy. No engine state.
   paint-setup.js          app constants (lighting left in P4, budget in P5)
   viewport.js             coordinate spaces + DPR
   common.js               the two shader manifests + loadShaderTrees()
@@ -209,19 +212,125 @@ constructing the engine, with a comment saying why that line cannot move.
 If a future change shifts every hash at once, suspect RNG ordering before
 suspecting the renderer.
 
-## Phase 6 — next
+## Phase 6 — what was done
 
-Per the plan, input: vendor `pointer-dispatcher.js` into `app/ui/`, replace the
-`onPointer*` handlers with dispatcher subscriptions (`pan` -> stroke, `pan2` ->
-canvas pan, `pinch` -> painting resize), delete the hand-rolled
-`getResizingSide()` edge hit-testing and the `activePointers` bookkeeping, and
-**wire `pressure` into the stroke** — that closes the pen-pressure TODO at
-`paint.js`, marked `BRUSH_HEIGHT * this.brushScale,// TODO: x pen pressure`.
+Input now goes through the vendored `app/ui/pointer-dispatcher.js`. The
+`onPointer*` handlers and the `activePointers` / `primaryPointerId` bookkeeping
+are gone; `paint.js` subscribes to `panstart` / `pan` / `panend` / `cursormove`
+/ `pan2` / `pan2end` / `pinch`. **The pen-pressure TODO is closed.**
 
-It lands before the visual UI deliberately: input is the riskiest part of the UI
-change and can be swapped underneath the existing canvas-drawn chrome, so it
-gets tested in isolation. **Device retest required** on the A56 and the tablet,
-with a stylus if available — gesture behaviour is invisible to golden images.
+Goldens are **12/12 byte-identical** to the Phase 0 baseline on both source and
+dist — nothing was re-recorded. Shader lint still reports 24 shaders.
+
+Full detail is in **`docs/UI-COMPONENTS.md`**. The parts that will bite:
+
+### The dispatcher's event vocabulary is not what the plan said
+
+There is no `pointerdown`/`pointerup` event. It is `panstart` / `pan` / `panend`
+(plus `pan2`, `pinch`, `cursormove`). `panstart` carries **no `pressure`** — it
+fires on pointerdown, before any move sample — so the first real pressure value
+arrives with the first `pan`.
+
+### The vendored file carries ONE patch, and losing it fails silently
+
+`_move()` tested only whether `getCoalescedEvents` *exists*, not whether it
+returned anything. A **synthetic** `PointerEvent` — `dispatchEvent`, which is
+what the golden harness and every automated test uses — has the method but
+returns an **empty list**, so `samples` was `[]` and **no `pan` was ever
+emitted**. `panstart` and `panend` still fired, which is exactly what makes it
+look like input works: the stroke begins, ends, and deposits nothing.
+
+Marked `LOCAL PATCH` in the file. If it is ever re-synced from tilecraft, this
+must be re-applied.
+
+### Coordinates are adapted at the boundary, in two helpers
+
+The dispatcher reports CSS-relative **Y-down** pixels scaled by its own reading
+of the backing store; this app is **Y-up** and `Viewport` owns the DPR.
+`_toScreen()` converts a point, `_deltaToScreen()` a delta. They are separate on
+purpose: a delta takes the scale but no origin, and its Y flip is a sign change,
+not a subtraction from the height. **Running a delta through `_toScreen()` would
+add the viewport height to it every frame.**
+
+### The brush position is read live, not from the `pan` event
+
+`_syncBrushToPointer()` runs at the top of `update()`. The dispatcher defers
+`pan` to its own RAF; the render loop's RAF is registered **first** (in
+`_start`), and RAF callbacks run in registration order — so acting only on the
+event left the brush **one frame behind the pointer, every frame**. Measured
+directly: 11 `update()` frames ran at the stale position before the first `pan`
+arrived.
+
+That is not a cosmetic lag. `Brush.update()` derives bristle **speed** from the
+delta it is handed, so a stale position changes how much paint is deposited —
+it showed up as ~2% more paint in the same cells, same colour, same splat count
+(34 vs 34). It looks exactly like noise. It is not.
+
+### `pan2` and `pinch` both fire for EVERY two-finger gesture
+
+The dispatcher only withholds a pinch whose scale is exactly 1. Two fingers
+landing on the same frame make the **first frame's scale spike** — measured
+~1.19 for a span that never changed — so a per-frame scale test flips the mode
+to RESIZING and **a two-finger drag silently becomes a resize**.
+
+`onGesturePinch()` therefore measures against the span the *gesture started
+with* (`pinchStartSpan`), which cannot spike because it starts at exactly 1, and
+gates on `PINCH_SCALE_DEADZONE`. It scales from `pinchStartRectangle`, not the
+running rectangle, so the total ratio does not compound frame over frame.
+
+### `getResizingSide()` was NOT deleted, though the plan said to
+
+A pinch has a scale about a centroid but **no notion of which edge is being
+dragged** — and that is what drives the asymmetric clamping in
+`_resizePaintingTo()`, the `offsetX`/`offsetY` anchoring in `_commitResize()`,
+and the resize **cursor** (`cursorForResizingSide`, paint.js:732). Deleting it
+would have replaced edge-anchored mouse resizing with centroid scaling: a
+different feature, not the same one. Pinch was added *alongside* it.
+
+### Pen pressure: only pens are scaled
+
+`_pressureScale()` returns 1 for anything that is not `pointerType === 'pen'`.
+The Pointer Events spec reports a flat **`0.5` for devices with no pressure
+hardware**, so scaling unconditionally would have silently **halved the brush
+for every mouse and finger user** — a visible regression dressed as a feature.
+Pens are clamped to `MIN_PRESSURE_SCALE` (0.15) because some report **0 on the
+first sample** of a stroke, which would open the stroke with a zero-height brush.
+
+Pressure is stored as `brushPressure`, a **multiplier**, not a computed height:
+`brushScale` is changed independently by the size slider and the wheel, and a
+stored height would silently keep the old size after either.
+
+### How Phase 6 was actually verified
+
+The goldens cannot see any of this — they drive a single-pointer mouse stroke
+and never test pressure, gestures or hover. A throwaway probe
+(`debug/phase6-probe2.js`, deleted after use) drove all four directly:
+
+| Check | Expected |
+|---|---|
+| mouse at the spec's no-hardware `pressure: 0.5` | brush height **100** (unscaled) |
+| pen 1.0 / 0.25 / 0 | 100 / 25 / **15** (floored, never 0) |
+| two-finger drag, fingers +50 CSS x / +30 CSS y | `movedX +50`, `movedY -30`, mode never RESIZING |
+| pinch, growing span | painting width grows |
+| hover | brush moves, mode stays NONE |
+
+**Sabotage-verified.** Inverting the X delta made `movedX` −50; dropping the
+`pointerType !== 'pen'` guard made the mouse height 50. Both were caught, so the
+passes mean something. If you rewrite either path, write the probe back.
+
+### Still owed on Phase 6
+
+**Device retest on the A56 and the Galaxy Tab S9, with a stylus.** Everything
+above was verified against headless SwiftShader with synthetic events. Synthetic
+input is precisely what the vendored file got wrong, and no amount of it proves
+a real digitizer behaves the same. Pressure curve feel in particular is
+unverified on real hardware.
+
+## Phase 7 — next
+
+Per the plan, the responsive HTML layout. Note Phase 6 landed input underneath
+the existing canvas-drawn chrome deliberately, so that chrome is still there and
+still drawn by GL.
 
 ### Also outstanding from Phase 5
 
@@ -297,6 +406,22 @@ instead of 16, and the 15 undo snapshots ignored entirely. Recompute from
 script.** That is how `debug2.js` sat dead in the build while its self-test
 appeared to run. If a probe matters, let it throw.
 
+**A synthetic `PointerEvent` has `getCoalescedEvents` but it returns an EMPTY
+list.** Any input code that trusts the method's existence emits nothing under
+every automated test while looking fine by inspection. This is what the vendored
+dispatcher's one local patch fixes, and the failure is silent: the gesture's
+start and end events still fire.
+
+**RAF callbacks run in registration order, and the render loop registers
+first.** Anything that defers input to its own RAF is therefore a frame behind
+the simulation unless the app reads it live. Because `Brush.update()` derives
+bristle speed from the delta it is given, a one-frame-stale position changes
+deposition, not just apparent latency — it reads as ~2% noise in the goldens.
+
+**`pointerType` is not decoration.** The Pointer Events spec reports
+`pressure: 0.5` for hardware with no pressure sensor, so any unconditional
+`* pressure` halves the brush for every mouse user. Scale pens only.
+
 Still true from earlier phases: the RYB colour model is protected;
 `hsvToRgb`/`hsvToRyb` being identical is not a bug; hue maps onto RYB channels
 (`0.333` yellow, `0.667` blue); bristles need settling frames after
@@ -337,6 +462,16 @@ Useful query parameters: `?diag=1` (on-device capability panel), `?gpu=<profile>
 
 ## Open items
 
+- **Phase 6 device retest — the A56 and the Galaxy Tab S9, with a stylus.**
+  The blocking one. Everything in Phase 6 was verified against headless
+  SwiftShader with **synthetic** pointer events, and synthetic input is exactly
+  what the vendored dispatcher got wrong. Confirm: a one-finger stroke paints,
+  two-finger drag pans without resizing, pinch resizes, and stylus pressure
+  visibly varies stroke width. The pressure curve is linear and its feel is
+  unvalidated on real hardware — if it reads top-heavy, that is a tuning
+  question, not a bug (see the nonlinear-curve option in the Phase 6 notes).
+- The two Phase 5 extension points (Renderer interface, `simulate()` pass list)
+  are deferred, not dropped. Neither blocks Phase 7.
 - ~~Re-test the iPhone 14~~ — **done, 2026-09-07. It paints.** No banding
   reported in long strokes, and `readPaintTexture()`'s `gl.FLOAT` read against
   a half-float target is accepted by WebKit's driver. See
@@ -344,8 +479,6 @@ Useful query parameters: `?diag=1` (on-device capability panel), `?gpu=<profile>
 - The 1 GB render-target budget is validated on Android, not on iOS.
 - The +/-5000 depth range — unresolved; needs a mid-stroke golden scenario.
 - `viewport.screenToSimulation` still has no caller.
-- The two Phase 5 extension points (Renderer interface, `simulate()` pass list)
-  are deferred, not dropped. See the Phase 6 section.
 - `simulator.md` is misnamed: it is not simulator documentation but a saved
   `runWebGLSelfTest()` output dump from an Adreno 642L. That function went with
   `debug2.js`, so the file is an orphaned artifact. Keep it as a device record
