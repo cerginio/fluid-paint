@@ -550,12 +550,30 @@ class Simulator {
     return simulationArea;
   }
 
-  splat(brush, zThreshold, paintingRectangle, splatColor, splatRadius, velocityScale) {
+  /**
+   * Deposit paint and velocity where the brush's bristles cross the canvas.
+   *
+   * `brushRectangle` is the painting's extent **in the same space as the
+   * brush's own coordinates** (brush.positionX/Y and the position textures).
+   * The engine does not know or care what that space is -- it only needs the
+   * rectangle in order to map brush coordinates into the simulation and into
+   * clip space. Today the app keeps its brush in screen pixels and passes its
+   * screen-space painting rectangle, but nothing here depends on that: an
+   * engine that knew this was "the screen" would not be UI-independent.
+   *
+   * @param {Brush} brush
+   * @param {number} zThreshold
+   * @param {Rectangle} brushRectangle the painting, in brush coordinates
+   * @param {number[]} splatColor
+   * @param {number} splatRadius
+   * @param {number} velocityScale
+   */
+  splat(brush, zThreshold, brushRectangle, splatColor, splatRadius, velocityScale) {
     // the area we need to simulate for this set of splats
     let brushPadding = Math.ceil(brush.scale * SPLAT_PADDING);
     brushPadding += Math.ceil(brush.getFilteredSpeed() * SPEED_PADDING);
 
-    // start in canvas space
+    // start in brush space
     const area = new Rectangle(
       brush.positionX - brushPadding,
       brush.positionY - brushPadding,
@@ -564,10 +582,10 @@ class Simulator {
     );
 
     // transform into simulation space
-    area.translate(-paintingRectangle.left, -paintingRectangle.bottom);
+    area.translate(-brushRectangle.left, -brushRectangle.bottom);
     area.scale(
-      this.resolutionWidth / paintingRectangle.width,
-      this.resolutionHeight / paintingRectangle.height
+      this.resolutionWidth / brushRectangle.width,
+      this.resolutionHeight / brushRectangle.height
     );
     area.round();
     area.intersectRectangle(new Rectangle(0, 0, this.resolutionWidth, this.resolutionHeight));
@@ -598,8 +616,8 @@ class Simulator {
       )
       .bindIndexBuffer(brush.splatIndexBuffer)
       .useProgram(this.splatProgram)
-      .uniform2f('u_paintingDimensions', paintingRectangle.width, paintingRectangle.height)
-      .uniform2f('u_paintingPosition', paintingRectangle.left, paintingRectangle.bottom)
+      .uniform2f('u_paintingDimensions', brushRectangle.width, brushRectangle.height)
+      .uniform2f('u_paintingPosition', brushRectangle.left, brushRectangle.bottom)
       .uniform1f('u_splatRadius', splatRadius)
       .uniform4f('u_splatColor', splatColor[0], splatColor[1], splatColor[2], splatColor[3])
       .uniformTexture('u_positionsTexture', 0, wgl.TEXTURE_2D, brush.positionsTexture)
@@ -653,8 +671,8 @@ class Simulator {
       )
       .bindIndexBuffer(brush.splatIndexBuffer)
       .useProgram(this.velocitySplatProgram)
-      .uniform2f('u_paintingDimensions', paintingRectangle.width, paintingRectangle.height)
-      .uniform2f('u_paintingPosition', paintingRectangle.left, paintingRectangle.bottom)
+      .uniform2f('u_paintingDimensions', brushRectangle.width, brushRectangle.height)
+      .uniform2f('u_paintingPosition', brushRectangle.left, brushRectangle.bottom)
       .uniform1f('u_splatRadius', splatRadius)
       .uniformTexture('u_positionsTexture', 0, wgl.TEXTURE_2D, brush.positionsTexture)
       .uniformTexture('u_previousPositionsTexture', 1, wgl.TEXTURE_2D, brush.previousPositionsTexture)

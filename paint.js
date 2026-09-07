@@ -626,7 +626,10 @@ class Paint {
             const splatVelocityScale =
                 SPLAT_VELOCITY_SCALE * splatColor[3] * this.resolutionScale;
 
-            // splat paint
+            // Splat paint. The brush's coordinates are screen pixels, so the
+            // painting rectangle is handed over in that same space -- the
+            // engine transforms brush space to simulation space and knows
+            // nothing about the screen.
             this.simulator.splat(
                 this.brush,
                 Z_THRESHOLD * this.brushScale,
