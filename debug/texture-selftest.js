@@ -322,8 +322,127 @@ function testTexelFetchImmunity(gl) {
   return result;
 }
 
+/*
+ * Can this device ALPHA-BLEND into a FLOAT render target?
+ *
+ * This is the exact path Simulator.splat() uses: it enables BLEND with
+ * SRC_ALPHA / ONE_MINUS_SRC_ALPHA and renders into paintTexture, which is
+ * always FLOAT (unlike the velocity/pressure targets, which fall back to
+ * half-float). Blending into a float target is gated by EXT_float_blend, and
+ * an implementation that lacks it is entitled to fail the draw silently --
+ * which looks exactly like "the brush moves, the bristles touch the canvas,
+ * and the canvas stays white".
+ *
+ * Checking for the extension is not enough on its own: WebGL 2 implementations
+ * may expose blending behaviour without advertising it, and some advertise it
+ * while still misbehaving. So this actually does the blend and reads back.
+ *
+ * Method: clear the target to 0, then draw a full-coverage quad of
+ * colour (1,1,1,1) with alpha 0.5 blending. The correct result is 0.5.
+ *
+ * @returns {{pass: boolean, value: number|null, extension: boolean, error: string|null}}
+ */
+function floatBlendRoundTrip(gl) {
+  const gl2 = typeof WebGL2RenderingContext !== 'undefined' &&
+              gl instanceof WebGL2RenderingContext;
+  const out = {
+    pass: false,
+    value: null,
+    extension: !!gl.getExtension('EXT_float_blend'),
+    error: null,
+  };
+
+  // The float-renderable extensions must be enabled before a float target works.
+  if (gl2) gl.getExtension('EXT_color_buffer_float');
+  else { gl.getExtension('OES_texture_float'); gl.getExtension('WEBGL_color_buffer_float'); }
+
+  const internalFormat = gl2 ? gl.RGBA32F : gl.RGBA;
+  const texture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, 1, 1, 0, gl.RGBA, gl.FLOAT, null);
+
+  const fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+
+  if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+    out.error = 'float render target incomplete';
+    gl.deleteFramebuffer(fbo); gl.deleteTexture(texture);
+    return out;
+  }
+
+  const vsSrc = gl2
+    ? '#version 300 es\n' + 'in vec2 a_p; void main(){ gl_Position = vec4(a_p,0.0,1.0); }'
+    : 'attribute vec2 a_p; void main(){ gl_Position = vec4(a_p,0.0,1.0); }';
+  const fsSrc = gl2
+    ? '#version 300 es\n' + 'precision highp float; out vec4 o; void main(){ o = vec4(1.0,1.0,1.0,0.5); }'
+    : 'precision highp float; void main(){ gl_FragColor = vec4(1.0,1.0,1.0,0.5); }';
+
+  const compile = (type, src) => {
+    const sh = gl.createShader(type);
+    gl.shaderSource(sh, src); gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+      out.error = 'shader: ' + gl.getShaderInfoLog(sh);
+      return null;
+    }
+    return sh;
+  };
+
+  const vs = compile(gl.VERTEX_SHADER, vsSrc);
+  const fs = vs && compile(gl.FRAGMENT_SHADER, fsSrc);
+  if (!vs || !fs) {
+    gl.deleteFramebuffer(fbo); gl.deleteTexture(texture);
+    return out;
+  }
+
+  const prog = gl.createProgram();
+  gl.attachShader(prog, vs); gl.attachShader(prog, fs);
+  gl.bindAttribLocation(prog, 0, 'a_p');
+  gl.linkProgram(prog);
+
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, -1,1, 1,-1, 1,1]), gl.STATIC_DRAW);
+
+  gl.viewport(0, 0, 1, 1);
+  gl.clearColor(0, 0, 0, 0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+
+  // Exactly what splat() sets.
+  gl.enable(gl.BLEND);
+  gl.blendEquation(gl.FUNC_ADD);
+  gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE);
+
+  gl.useProgram(prog);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  gl.disable(gl.BLEND);
+
+  const px = new Float32Array(4);
+  try {
+    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.FLOAT, px);
+    out.value = px[0];
+    // src.a * src.rgb + (1 - src.a) * dst.rgb = 0.5 * 1 + 0.5 * 0 = 0.5
+    out.pass = Math.abs(px[0] - 0.5) < 0.05;
+    if (!out.pass && px[0] === 0) out.error = 'blend produced zero -- the splat would deposit nothing';
+  } catch (e) {
+    out.error = 'readPixels: ' + e.message;
+  }
+
+  gl.deleteBuffer(buf); gl.deleteProgram(prog);
+  gl.deleteShader(vs); gl.deleteShader(fs);
+  gl.deleteFramebuffer(fbo); gl.deleteTexture(texture);
+  return out;
+}
+
 if (typeof window !== 'undefined') {
   window.runTextureSelfTest = runTextureSelfTest;
   window.testTexelFetchImmunity = testTexelFetchImmunity;
   window.textureRoundTrip = textureRoundTrip;
+  window.floatBlendRoundTrip = floatBlendRoundTrip;
 }

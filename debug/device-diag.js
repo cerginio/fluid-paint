@@ -58,6 +58,28 @@ function showDeviceDiagnostics(wgl) {
     add('OES_texture_float_linear', String(hasFloatLinear),
         hasFloatLinear ? 'good' : 'expected');
     add('hasFloatTextureSupport()', String(gate), gate ? 'good' : 'bad');
+
+    // Blending into a FLOAT render target -- the exact path Simulator.splat()
+    // takes into paintTexture, which is always FLOAT. A device that cannot do
+    // this shows a brush that moves and bristles that touch the canvas while
+    // the canvas stays blank, because the draw is dropped rather than failing.
+    // Reported for iPhone 14, 2026-09-07; see docs/HANDOFF.md.
+    add('EXT_float_blend', String(!!gl.getExtension('EXT_float_blend')),
+        gl.getExtension('EXT_float_blend') ? 'good' : 'bad');
+    if (typeof floatBlendRoundTrip === 'function') {
+      try {
+        const fb = floatBlendRoundTrip(gl);
+        add('&nbsp;blend into FLOAT target',
+            fb.pass ? 'PASS' : ('FAIL' + (fb.value !== null ? ' (got ' + fb.value.toFixed(3) + ', want 0.5)' : '')),
+            fb.pass ? 'good' : 'bad');
+        if (!fb.pass) {
+          rows.push('<div style="color:#ff5c5c">&nbsp;&nbsp;splatting cannot deposit paint on this device</div>');
+          if (fb.error) rows.push('<div style="color:#ff5c5c;opacity:.8">&nbsp;&nbsp;' + fb.error + '</div>');
+        }
+      } catch (e) {
+        add('&nbsp;blend into FLOAT target', 'ERROR: ' + e.message, 'bad');
+      }
+    }
     add('MAX_TEXTURE_SIZE', gl.getParameter(gl.MAX_TEXTURE_SIZE));
     add('devicePixelRatio', window.devicePixelRatio);
 
