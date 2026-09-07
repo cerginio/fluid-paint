@@ -79,10 +79,20 @@ production code paths, not that they exist.
 | Item | Location | Disposition |
 |---|---|---|
 | Painting-rect outline (`showPaintingRect`, `paintingRectThickness`, `paintingRectColor`, `rectOutlineProgram`) | paint.js:105-116 | Flag `debug.paintingRect`, default off |
-| Ortho near/far ±5000 probe | paint.js:293 | Investigate; if inert, normalise to ±1 and expose the probe as flag `debug.depthRange` |
+| Ortho near/far ±5000 probe | `rebuildProjectionMatrix()` | **Left at ±5000 — unresolved, see note below.** Deduplicated in Phase 1; the value is untouched |
 | `debug.js`, `debug2.js`, `debug/` | — | Fold into the engine's debug module |
 | `brushviewer.js` live bristle preview | — | Flag `debug.brushViewer` |
 | Texture self-test, GPU profiles, shader lint | `debug/` | Keep; already flag-gated via `?selftest=1` / `?gpu=` |
+
+**The ±5000 depth range could not be resolved against the golden images.** The
+matrix feeds exactly one draw — the bristle overlay, which renders only while a
+stroke is in progress and only to the screen, never to the paint texture. The
+golden scenarios capture after the stroke ends, so the overlay is absent from
+both hashes. Verified by sabotage: narrowing the range to ±1 moved nothing, and
+so did ±0.0001, which must clip every bristle. A baseline that cannot fail is
+not evidence, so the value stays at ±5000 and the question is still open.
+Answering it needs either a golden scenario that captures mid-stroke or manual
+device verification.
 
 Commented-out dead alternatives (e.g. paint.js:115) are genuinely deleted — a
 comment is not a feature flag.
