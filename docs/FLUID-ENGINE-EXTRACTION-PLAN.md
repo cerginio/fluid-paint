@@ -1,6 +1,6 @@
 # Fluid Engine Extraction Plan
 
-Status: Phases 0-4 complete -- see HANDOFF.md
+Status: Phases 0-5 complete -- see HANDOFF.md
 Branch: `fluid-engine-v1` (from df884cc on webgl2_migration)
 Decisions taken: keep the david.li UI working as the reference harness; fix the
 coordinate/DPR problem as part of the move; build extension *points* but only
@@ -513,11 +513,41 @@ could not tell the two apart.
 - Still no public API — `paint.js` constructs `PaintingRenderer` directly.
   That is Phase 5.
 
-### Phase 5 — The FluidEngine facade
-- Add `fluid-engine/index.js` with the command API above.
-- Rewrite `Paint` as a host: it calls commands and draws chrome, owning no
-  simulation state.
-- Extension points established as described in §5.
+### Phase 5 — The FluidEngine facade — DONE (extension points deferred)
+
+- `fluid-engine/index.js` holds `FluidEngine`, composing `Simulator`, `Brush`
+  and `PaintingRenderer`. `paint.js` owns no simulation state: it has zero
+  references to `this.simulator`, `this.brush` or `this.renderer`.
+- **There is no `engine.simulator` property**, deliberately. A host that needs
+  something the API does not offer is a finding about the API, not a reason to
+  reach past it. The golden harness was the first test of that rule — it read
+  `painter.simulator.paintTexture` and now calls `engine.readPaintTexture()`.
+- **Undo is split where the plan asked.** The ring buffer, its depth and the
+  rotation policy stay in the app. Filling and reloading a snapshot is the
+  engine's, *including allocating it* — only the engine knows the paint texture
+  type the capability probe chose, and a host that allocated `gl.FLOAT` itself
+  would break undo on exactly the devices that fallback exists for.
+- **The bristle overlay** was the case flagged as fighting the facade. It is
+  chrome drawn from engine GL objects, so it gets one named
+  `getBristleGeometry()` rather than four public fields. `BrushViewer` takes
+  that geometry too, instead of the `Brush`.
+- `ColorPicker` no longer takes an object plus a property *name*; it takes a
+  `getHSVA` accessor. Phase 8 deletes the file, but the name-based reach-in was
+  invisible from both sides and worth closing first.
+- **Capabilities are public**, per the honesty surface. The `?diag=1` panel
+  deliberately does **not** use them: it runs on the raw context before `Paint`
+  exists, so it still reports when startup fails — the case it exists for.
+- The render-target budget arithmetic moved to the engine as two **statics**.
+  Static because the host must ask before the engine exists: the answer is what
+  sizes the engine. `BYTES_PER_TEXEL` and `SIMULATION_TARGETS` left
+  `paint-setup.js` — the app had to read `simulation.js` to know the second.
+
+**Deferred to a follow-up**, deliberately: the two structural extension points
+(§5, "Extension points"). The `Renderer` interface and `Simulator.simulate()`'s
+named pass list are refactors of those two files rather than of the boundary,
+they are independently verifiable, and neither blocks Phase 6. `simulate()` is
+~180 lines of fixed advect → divergence → jacobi → subtract with a shared
+scissored draw-state preamble; converting it to a pass list is its own change.
 
 ### Phase 6 — Input: PointerDispatcher
 

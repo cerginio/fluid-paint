@@ -1,28 +1,26 @@
-# Handoff — Phases 0-4 done, iPhone fix confirmed on the device
+# Handoff — Phases 0-5 done, iPhone closed
 
 Written 2026-09-07. Read this, then `FLUID-ENGINE-EXTRACTION-PLAN.md`.
 
 ## Where things stand
 
-Branch: **`fluid-engine-v1`**, working tree **clean**. **Phases 0-4 are done.**
+Branch: **`fluid-engine-v1`**, working tree **clean**. **Phases 0-5 are done.**
 
 Golden images: **12/12 pass** on both the source and dist paths, with hashes
 **byte-identical** to the Phase 0 baseline. Shader lint passes, now reporting
 24 shaders across two trees.
 
 ```
+6d5e6d3  Phase 5: add the FluidEngine facade and split undo out of the engine
+9ac1f3e  Give ColorPicker an accessor instead of an object and a property name
+06a9860  Close the iPhone 14 bug: confirmed fixed on the device
+1a7f944  Record Phase 4 in the plan and handoff
 767820b  Phase 4: extract the painting render into fluid-engine/renderer.js
 da591b8  Split the UI chrome shaders out of the engine tree
-fa0c2f9  Rewrite the handoff for a fresh session
-ca509aa  Note simulator.md as an orphaned self-test dump
-b616c1e  Record Phase 3 in the plan and handoff
 9cf9f2b  Phase 3: move the engine into fluid-engine/
-5199f72  Delete debug2.js, which was never loaded
 e4a313c  Sever splat()'s screen dependency: take a brush-space rectangle
 96f051f  Fix the iPhone 14 blank canvas: probe float blending, degrade to half-float
 ```
-
-The two commits from `da591b8` up are this session's work.
 
 ### Device verification results (user, 2026-09-07)
 
@@ -30,7 +28,7 @@ The two commits from `da591b8` up are this session's work.
 |---|---|
 | Samsung A56 | **Good** — Phase 2 works, DPR on |
 | Samsung Galaxy Tab S9 | **Good** |
-| iPhone 14 | **Was blank; fixed in `96f051f` and confirmed on the device** |
+| iPhone 14 | **Was blank; fixed in `96f051f`, confirmed on the device — closed** |
 
 ### Current tree
 
@@ -39,14 +37,15 @@ fluid-paint/              <- git repo root
   fluid-engine/           <- the engine
     simulation.js         Simulator
     brush.js              Brush
+    index.js              FluidEngine -- the public surface (Phase 5)
     renderer.js           PaintingRenderer (Phase 4)
     gl/wrappedgl.js       WrappedGL
     gl/glsl3.js
     shaders/              engine shaders only (19)
   app/
     shaders/              UI chrome shaders (5), split out in Phase 4
-  paint.js (1363 lines)   the app: chrome + input + undo, no painting render
-  paint-setup.js          app constants (the lighting ones left in Phase 4)
+  paint.js (1333 lines)   the app: chrome, input, undo policy. No engine state.
+  paint-setup.js          app constants (lighting left in P4, budget in P5)
   viewport.js             coordinate spaces + DPR
   common.js               the two shader manifests + loadShaderTrees()
   colorpicker.js slider.js buttons.js brushviewer.js rectangle.js utilities.js
@@ -145,36 +144,93 @@ tree exactly:
 numbers, so the match means something. If you rewrite either path again, write
 the probe back — the numbers above are the expected values.
 
-## Phase 5 — next
+## Phase 5 — what was done
 
-Add `fluid-engine/index.js` with the command API, and rewrite `Paint` as a host
-that owns no simulation state.
+`fluid-engine/index.js` holds `FluidEngine`, composing `Simulator`, `Brush` and
+`PaintingRenderer`. **`paint.js` has zero references to `this.simulator`,
+`this.brush` or `this.renderer`** — that grep is the check that the boundary
+actually holds.
 
-The exact surface to cover is measurable — this is every engine member
-`paint.js` currently touches:
+### There is no `engine.simulator`, on purpose
 
-| Member | Uses | Note |
-|---|---|---|
-| `simulator.resolutionWidth` / `Height` | 3 / 3 | read-only |
-| `simulator.splat` / `simulate` / `resize` / `clear` | 1 each | the verbs |
-| `simulator.copyPaintTexture` / `applyPaintTexture` | 1 each | undo/redo |
-| `simulator.changeResolution` | 2 | quality slider |
-| `simulator.fluidity` | 2 | mutated directly by a slider |
-| `simulator.paintTextureType` | 2 | snapshot allocation must follow it |
-| `brush.initialize` | 3 | |
-| `brush.update` / `setBristleCount` | 1 each | |
-| `brush.bristleCount` / `maxBristleCount` | 1 each | read by the splat alpha math |
-| `brush.positionsTexture` / `brushTextureCoordinatesBuffer` / `brushIndexBuffer` | 1 each | **the bristle overlay reaches into GL objects** |
+A host that needs something the API does not offer is a finding about the API,
+not a licence to reach past it. The golden harness was the first test of that
+rule: it read `painter.simulator.paintTexture` to hash the simulation, which is
+a legitimate need, so the engine grew `readPaintTexture()` rather than the
+harness growing a back door. Expect Phase 9's second host to find more; add
+methods, do not add an escape hatch.
 
-The last row is the one that will fight you. The brush preview draw in
-`update()` binds the brush's own buffers and texture directly, so a facade that
-hides them breaks it. That draw is chrome (it is a debug/UI overlay), so either
-the facade exposes a `drawBristles()` command or the overlay moves into the
-engine's debug area. Decide deliberately; do not leak the buffers through the
-API just to keep the existing call compiling.
+### Undo, split
 
-`simulator.fluidity` being written directly by a slider is the other one: a
-command API wants a setter, not a public field.
+The ring buffer, `HISTORY_SIZE`, and when to rotate stay in `paint.js` —
+history depth is a product decision. `engine.saveSnapshot()` /
+`restoreSnapshot()` do the pixels, and **`engine.createSnapshot()` does the
+allocation**. That last one matters: the texture must match the paint texture
+type the capability probe chose, so a host that allocated its own `gl.FLOAT`
+snapshot would work everywhere except the devices the half-float fallback
+exists for, and would fail at *undo* rather than at startup.
+
+`applySnapshot()` still restores the painting rectangle and the quality button
+in the app, because those are app state; the snapshot's `paintingWidth`,
+`paintingHeight` and `resolutionScale` are readable for exactly that.
+
+### The bristle overlay
+
+The case the plan flagged as fighting the facade: chrome that draws from engine
+GL objects. It gets **one named `getBristleGeometry()`**, not four public
+fields, so a second caller for those objects is visible in review. `BrushViewer`
+takes the same geometry object instead of the `Brush`.
+
+### Capabilities, and why `?diag=1` does not use them
+
+`engine.capabilities` is public per the plan's honesty surface. The diag panel
+**deliberately still reads the raw context**: it runs before `Paint` exists so
+that it reports on a device where startup *fails*, which is the case it exists
+for. Routing it through the engine would break it exactly when it is needed.
+
+### The budget arithmetic moved, as statics
+
+`FluidEngine.maxResolutionScaleForBudget()` and `estimateRenderTargetBytes()`
+are **static because the host must ask before the engine exists** — the answer
+is what sizes the engine. `BYTES_PER_TEXEL` and `SIMULATION_TARGETS` left
+`paint-setup.js`; the app previously had to read `simulation.js` to know that
+the second one is 7. Verified against the old formulas on four cases including
+2520x1560 @ ratio 2 (1320 MB, correctly over the 1 GB budget) — identical.
+
+### The bug the goldens caught
+
+Moving `Brush`'s construction into the engine put it **before** `paint.js`'s
+`Math.random()` for the initial hue. Under `?seed=`, `Brush`'s randoms texture
+depends on how many draws came first, so all 12 hashes shifted — for a reason
+completely invisible in the diff. Fixed by restoring the draw order, **not** by
+re-recording the baseline. `paint.js` now draws the hue immediately before
+constructing the engine, with a comment saying why that line cannot move.
+
+If a future change shifts every hash at once, suspect RNG ordering before
+suspecting the renderer.
+
+## Phase 6 — next
+
+Per the plan, input: vendor `pointer-dispatcher.js` into `app/ui/`, replace the
+`onPointer*` handlers with dispatcher subscriptions (`pan` -> stroke, `pan2` ->
+canvas pan, `pinch` -> painting resize), delete the hand-rolled
+`getResizingSide()` edge hit-testing and the `activePointers` bookkeeping, and
+**wire `pressure` into the stroke** — that closes the pen-pressure TODO at
+`paint.js`, marked `BRUSH_HEIGHT * this.brushScale,// TODO: x pen pressure`.
+
+It lands before the visual UI deliberately: input is the riskiest part of the UI
+change and can be swapped underneath the existing canvas-drawn chrome, so it
+gets tested in isolation. **Device retest required** on the A56 and the tablet,
+with a stylus if available — gesture behaviour is invisible to golden images.
+
+### Also outstanding from Phase 5
+
+The two structural extension points in §5 of the plan were deliberately
+deferred: the `Renderer` interface, and a named pass list for
+`Simulator.simulate()`. Neither blocks Phase 6, both are independently
+verifiable, and `simulate()` is ~180 lines of fixed advect -> divergence ->
+jacobi -> subtract sharing one scissored draw-state preamble — a real refactor
+of that file, not of the boundary. Do it as its own change.
 
 ## Things a fresh session will otherwise get wrong
 
@@ -204,6 +260,16 @@ GL behind `WrappedGL`'s state cache, so it resets viewport, blend equation,
 blend func and clear colour to the tracked defaults before clearing the
 dirty-set. Clearing the dirty-set alone would leak a 1x1 viewport into the next
 draw.
+
+**Construction order is load-bearing under `?seed=`.** `Brush`'s constructor
+fills a randoms texture from `Math.random()`, so with the deterministic RNG
+installed its bristles depend on how many draws happened before it. Phase 5 hit
+this and it shifted all 12 hashes invisibly. If every hash moves at once,
+suspect RNG ordering first.
+
+**`?diag=1` reads the raw context on purpose, not `engine.capabilities`.** It
+runs before `Paint` exists so it still reports on a device where startup fails.
+"Unifying" it with the engine's capabilities would break the one case it is for.
 
 **The goldens have blind spots, and they are where the risk is.** They never
 call `save()`, never enter the resize preview, and cannot see the bristle
@@ -278,6 +344,8 @@ Useful query parameters: `?diag=1` (on-device capability panel), `?gpu=<profile>
 - The 1 GB render-target budget is validated on Android, not on iOS.
 - The +/-5000 depth range — unresolved; needs a mid-stroke golden scenario.
 - `viewport.screenToSimulation` still has no caller.
+- The two Phase 5 extension points (Renderer interface, `simulate()` pass list)
+  are deferred, not dropped. See the Phase 6 section.
 - `simulator.md` is misnamed: it is not simulator documentation but a saved
   `runWebGLSelfTest()` output dump from an Adreno 642L. That function went with
   `debug2.js`, so the file is an orphaned artifact. Keep it as a device record
