@@ -17,9 +17,6 @@ class Brush {
   constructor(wgl, shaderSources, maxBristleCount) {
     this.wgl = wgl;
 
-    // const gl = wgl.gl || wgl;
-    // this.dbg = makeDebugVisualizer(gl, gl.canvas);
-
     this.maxBristleCount = maxBristleCount;
     this.bristleCount = maxBristleCount; // number of bristles currently being used
 

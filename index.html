@@ -123,19 +123,6 @@
             }
 
             (async () => {
-                // PATCH#1: TEST
-                // const results = await runWebGLUsageSelfTest({
-                //     canvas,
-                //     gl: wgl.gl,
-                //     getPaintingRect: () => ({
-                //         left: 0,
-                //         bottom: 0,
-                //         width: canvas.width,
-                //         height: canvas.height
-                //     })
-                // });
-                // console.table(results);
-
                 // Renderable is not blendable. hasFloatTextureSupport() only
                 // asks whether a float target can be drawn into; splat()
                 // additionally needs to ALPHA-BLEND into one, and a device
@@ -159,7 +146,6 @@
                     if (goldenScenario) {
                         scheduleGoldenSuite(() => window.__painter, goldenScenario);
                     }
-                    if (typeof runWebGLSelfTest === 'function') runWebGLSelfTest(wgl.gl);
                 } else {
                     //required features unsupported
                     document.getElementById('placeholder').outerHTML = document.getElementById('no-support').innerHTML;
