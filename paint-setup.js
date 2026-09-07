@@ -144,7 +144,6 @@ const COLOR_PICKER_LEFT = 20;
 const COLOR_PICKER_TOP = 523;
 
 const RESIZING_RADIUS_CSS = 20;   // CSS pixels -- convert with viewport.cssLengthToScreen
-const RESIZING_FEATHER_SIZE = 8; //in pixels 
 
 //box shadow parameters
 const BOX_SHADOW_SIGMA = 5.0;
@@ -152,14 +151,11 @@ const BOX_SHADOW_WIDTH = 10.0;
 const PAINTING_SHADOW_ALPHA = 0.5;
 const PANEL_SHADOW_ALPHA = 1.0;
 
-//rendering parameters
-const BACKGROUND_GRAY = 0.7;
-const NORMAL_SCALE = 7.0;
-const ROUGHNESS = 0.075;
-const F0 = 0.05;
-const SPECULAR_SCALE = 0.5;
-const DIFFUSE_SCALE = 0.15;
-const LIGHT_DIRECTION = [0, 1, 1];
+// The painting's rendering parameters -- background grey, normal scale,
+// roughness, F0, specular/diffuse scale, light direction and the resize
+// feather -- moved into fluid-engine/renderer.js in Phase 4. They describe how
+// the engine's wet paint reflects light, so they belong with the draw call that
+// uses them, not with the app's layout numbers above.
 
 
 const HISTORY_SIZE = 15; //number of snapshots we store - this should be number of reversible actions + 1

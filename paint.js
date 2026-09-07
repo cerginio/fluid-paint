@@ -48,35 +48,11 @@ class Paint {
 
         this.framebuffer = wgl.createFramebuffer();
 
-        this.paintingProgram = wgl.createProgram(
-            shaderSources['shaders/painting.vert'],
-            shaderSources['shaders/painting.frag']
-        );
-
-        this.paintingProgramRGB = wgl.createProgram(
-            shaderSources['shaders/painting.vert'],
-            '#define RGB \n ' + shaderSources['shaders/painting.frag']
-        );
-
-        this.resizingPaintingProgram = wgl.createProgram(
-            shaderSources['shaders/painting.vert'],
-            '#define RESIZING \n ' + shaderSources['shaders/painting.frag']
-        );
-
-        this.resizingPaintingProgramRGB = wgl.createProgram(
-            shaderSources['shaders/painting.vert'],
-            '#define RESIZING \n #define RGB \n ' + shaderSources['shaders/painting.frag']
-        );
-
-        this.savePaintingProgram = wgl.createProgram(
-            shaderSources['shaders/painting.vert'],
-            '#define SAVE \n ' + shaderSources['shaders/painting.frag']
-        );
-
-        this.savePaintingProgramRGB = wgl.createProgram(
-            shaderSources['shaders/painting.vert'],
-            '#define SAVE \n #define RGB \n ' + shaderSources['shaders/painting.frag']
-        );
+        // The painting render lives in the engine (Phase 4). It owns every
+        // painting.vert/painting.frag variant, the fullscreen blit that puts
+        // the result on screen, and the lighting constants that go with them.
+        // What stays here is the chrome below.
+        this.renderer = new PaintingRenderer(wgl, shaderSources);
 
         this.brushProgram = wgl.createProgram(
             shaderSources['shaders/brush.vert'],
@@ -93,12 +69,6 @@ class Paint {
         this.blurProgram = wgl.createProgram(
             shaderSources['shaders/fullscreen.vert'],
             makeBlurShader(PANEL_BLUR_SAMPLES),
-            { a_position: 0 }
-        );
-
-        this.outputProgram = wgl.createProgram(
-            shaderSources['shaders/fullscreen.vert'],
-            shaderSources['shaders/output.frag'],
             { a_position: 0 }
         );
 
@@ -656,83 +626,26 @@ class Paint {
             .intersectRectangle(new Rectangle(0, 0, this.canvas.width, this.canvas.height));
 
         if (this.needsRedraw) {
-            // draw painting into texture
-            wgl.framebufferTexture2D(
-                this.framebuffer,
-                wgl.FRAMEBUFFER,
-                wgl.COLOR_ATTACHMENT0,
-                wgl.TEXTURE_2D,
-                this.canvasTexture,
-                0
-            );
-            const clearState = wgl
-                .createClearState()
-                .bindFramebuffer(this.framebuffer)
-                .clearColor(BACKGROUND_GRAY, BACKGROUND_GRAY, BACKGROUND_GRAY, 1.0);
-            wgl.clear(clearState, wgl.COLOR_BUFFER_BIT | wgl.DEPTH_BUFFER_BIT);
-
-            let paintingProgram;
-            if (this.colorModel === ColorModel.RYB) {
-                paintingProgram =
-                    this.interactionState === InteractionMode.RESIZING
-                        ? this.resizingPaintingProgram
-                        : this.paintingProgram;
-            } else if (this.colorModel === ColorModel.RGB) {
-                paintingProgram =
-                    this.interactionState === InteractionMode.RESIZING
-                        ? this.resizingPaintingProgramRGB
-                        : this.paintingProgramRGB;
-            }
-            const paintingDrawState = wgl
-                .createDrawState()
-                .bindFramebuffer(this.framebuffer)
-                .vertexAttribPointer(
-                    this.quadVertexBuffer,
-                    paintingProgram.getAttribLocation('a_position'),
-                    2,
-                    wgl.FLOAT,
-                    false,
-                    0,
-                    0
-                )
-                .useProgram(paintingProgram)
-                .uniform1f('u_featherSize', RESIZING_FEATHER_SIZE)
-                .uniform1f('u_normalScale', NORMAL_SCALE / this.resolutionScale)
-                .uniform1f('u_roughness', ROUGHNESS)
-                .uniform1f('u_diffuseScale', DIFFUSE_SCALE)
-                .uniform1f('u_specularScale', SPECULAR_SCALE)
-                .uniform1f('u_F0', F0)
-                .uniform3f(
-                    'u_lightDirection',
-                    LIGHT_DIRECTION[0],
-                    LIGHT_DIRECTION[1],
-                    LIGHT_DIRECTION[2]
-                )
-                .uniform2f('u_paintingPosition', this.paintingRectangle.left, this.paintingRectangle.bottom)
-                .uniform2f('u_paintingResolution', this.simulator.resolutionWidth, this.simulator.resolutionHeight)
-                .uniform2f('u_paintingSize', this.paintingRectangle.width, this.paintingRectangle.height)
-                .uniform2f('u_screenResolution', this.canvas.width, this.canvas.height)
-                .uniformTexture('u_paintTexture', 0, wgl.TEXTURE_2D, this.simulator.paintTexture)
-                .viewport(
-                    clippedPaintingRectangle.left,
-                    clippedPaintingRectangle.bottom,
-                    clippedPaintingRectangle.width,
-                    clippedPaintingRectangle.height
-                );
-
-            wgl.drawArrays(paintingDrawState, wgl.TRIANGLE_STRIP, 0, 4);
-
+            this.renderer.renderToTexture({
+                simulator: this.simulator,
+                framebuffer: this.framebuffer,
+                targetTexture: this.canvasTexture,
+                paintingRectangle: this.paintingRectangle,
+                clippedRectangle: clippedPaintingRectangle,
+                targetWidth: this.canvas.width,
+                targetHeight: this.canvas.height,
+                resolutionScale: this.resolutionScale,
+                colorModel: this.colorModel,
+                resizing: this.interactionState === InteractionMode.RESIZING,
+            });
         }
 
-        // output painting to screen
-        const outputDrawState = wgl
-            .createDrawState()
-            .viewport(0, 0, this.canvas.width, this.canvas.height)
-            .useProgram(this.outputProgram)
-            .uniformTexture('u_input', 0, wgl.TEXTURE_2D, this.canvasTexture)
-            .vertexAttribPointer(this.quadVertexBuffer, 0, 2, wgl.FLOAT, wgl.FALSE, 0, 0);
+        // The painting is redrawn only when it changed, but it has to be
+        // presented every frame -- the chrome below is drawn over it and is
+        // not part of the painting texture.
+        this.renderer.present(this.canvasTexture, this.canvas.width, this.canvas.height);
 
-        wgl.drawArrays(outputDrawState, wgl.TRIANGLE_STRIP, 0, 4);
+        // --- everything below here is UI chrome, and belongs to the app ---
 
         this.drawShadow(PAINTING_SHADOW_ALPHA, clippedPaintingRectangle); // draw painting shadow
 
@@ -909,49 +822,18 @@ class Paint {
         //reset attributes so nothing gets saved if we hit an error somewhere
         this.saveButton.removeAttribute('download');
         this.saveButton.setAttribute('href', '#');
-        //we first render the painting to a WebGL texture
-        var wgl = this.wgl;
+        const saveWidth = this.paintingRectangle.width;
+        const saveHeight = this.paintingRectangle.height;
 
-        var saveWidth = this.paintingRectangle.width;
-        var saveHeight = this.paintingRectangle.height;
-
-        var saveTexture = wgl.buildTexture(wgl.RGBA, wgl.UNSIGNED_BYTE, saveWidth, saveHeight, null, wgl.CLAMP_TO_EDGE, wgl.CLAMP_TO_EDGE, wgl.NEAREST, wgl.NEAREST);
-
-        var saveFramebuffer = wgl.createFramebuffer();
-        wgl.framebufferTexture2D(saveFramebuffer, wgl.FRAMEBUFFER, wgl.COLOR_ATTACHMENT0, wgl.TEXTURE_2D, saveTexture, 0);
-
-        var paintingProgram = this.colorModel === ColorModel.RYB ? this.savePaintingProgram : this.savePaintingProgramRGB;
-
-        var saveDrawState = wgl.createDrawState()
-            .bindFramebuffer(saveFramebuffer)
-            .viewport(0, 0, saveWidth, saveHeight)
-            .vertexAttribPointer(this.quadVertexBuffer, paintingProgram.getAttribLocation('a_position'), 2, wgl.FLOAT, false, 0, 0)
-            .useProgram(paintingProgram)
-            .uniform2f('u_paintingSize', this.paintingRectangle.width, this.paintingRectangle.height)
-            .uniform2f('u_paintingResolution', this.simulator.resolutionWidth, this.simulator.resolutionHeight)
-            .uniform2f('u_screenResolution', this.paintingRectangle.width, this.paintingRectangle.height)
-            .uniform2f('u_paintingPosition', 0, 0)
-            .uniformTexture('u_paintTexture', 0, wgl.TEXTURE_2D, this.simulator.paintTexture)
-
-            .uniform1f('u_normalScale', NORMAL_SCALE / this.resolutionScale)
-            .uniform1f('u_roughness', ROUGHNESS)
-            .uniform1f('u_diffuseScale', DIFFUSE_SCALE)
-            .uniform1f('u_specularScale', SPECULAR_SCALE)
-            .uniform1f('u_F0', F0)
-            .uniform3f('u_lightDirection', LIGHT_DIRECTION[0], LIGHT_DIRECTION[1], LIGHT_DIRECTION[2]);
-
-        wgl.drawArrays(saveDrawState, wgl.TRIANGLE_STRIP, 0, 4);
-
-        //then we read back this texture
-
-        var savePixels = new Uint8Array(saveWidth * saveHeight * 4);
-        wgl.readPixels(wgl.createReadState().bindFramebuffer(saveFramebuffer),
-            0, 0, saveWidth, saveHeight, wgl.RGBA, wgl.UNSIGNED_BYTE, savePixels);
-
-
-        wgl.deleteTexture(saveTexture);
-        wgl.deleteFramebuffer(saveFramebuffer);
-
+        // The engine renders and reads back; the app only knows what to do with
+        // the bytes afterwards.
+        const savePixels = this.renderer.renderToPixels({
+            simulator: this.simulator,
+            width: saveWidth,
+            height: saveHeight,
+            resolutionScale: this.resolutionScale,
+            colorModel: this.colorModel,
+        });
 
         //then we draw the pixels to a 2D canvas and then save from the canvas
         //is there a better way?
@@ -1295,7 +1177,7 @@ class Paint {
                 this.getPaintingResolutionHeight(),
                 offsetX,
                 offsetY,
-                RESIZING_FEATHER_SIZE
+                PaintingRenderer.RESIZING_FEATHER_SIZE
             );
 
             this.needsRedraw = true;

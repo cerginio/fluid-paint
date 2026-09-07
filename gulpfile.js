@@ -44,6 +44,7 @@ const paths = {
     'viewport.js',
     'fluid-engine/brush.js',
     'fluid-engine/simulation.js',
+    'fluid-engine/renderer.js',
     'colorpicker.js',
     'slider.js',
     'buttons.js',
