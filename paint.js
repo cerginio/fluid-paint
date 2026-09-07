@@ -123,8 +123,13 @@ class Paint {
             ? new PaintingRectOverlay(wgl, shaderSources, this.quadVertexBuffer)
             : null;
 
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
+        // The single owner of canvas sizing, devicePixelRatio, the Y-flip and
+        // all three coordinate spaces. See viewport.js.
+        //
+        // DPR stays OFF in this commit so that introducing the module is a pure
+        // refactor with the golden images to prove it; it is turned on in its
+        // own commit, which is the one allowed to move the baseline.
+        this.viewport = new Viewport(canvas, { pixelRatioEnabled: false });
 
         // position of painting on screen, and its dimensions (pixels)
         this.paintingRectangle = new Rectangle(
@@ -291,8 +296,7 @@ class Paint {
         this.rebuildProjectionMatrix();
 
         this.onResize = () => {
-            this.canvas.width = window.innerWidth;
-            this.canvas.height = window.innerHeight;
+            this.viewport.resize();
 
             this.paintingRectangle.left = Utilities.clamp(
                 this.paintingRectangle.left,
@@ -1007,9 +1011,9 @@ class Paint {
             return;
         }
 
-        const position = Utilities.getMousePosition(event, this.canvas);
+        const position = this.viewport.eventToScreen(event);
         const mouseX = position.x;
-        const mouseY = this.canvas.height - position.y;
+        const mouseY = position.y;
 
         // Track pointer and choose primary if none
         this.activePointers.set(event.pointerId, { x: mouseX, y: mouseY, type: event.pointerType });
@@ -1067,9 +1071,9 @@ class Paint {
     onPointerMove(event) {
         if (event.preventDefault) event.preventDefault();
 
-        const position = Utilities.getMousePosition(event, this.canvas);
+        const position = this.viewport.eventToScreen(event);
         const mx = position.x;
-        const my = this.canvas.height - position.y;
+        const my = position.y;
 
         // Update bookkeeping
         this.activePointers.set(event.pointerId, { x: mx, y: my, type: event.pointerType });
@@ -1171,7 +1175,7 @@ class Paint {
         }
 
         // Forward to color picker
-        this.colorPicker.onMouseMove(position.x, this.canvas.height - position.y);
+        this.colorPicker.onMouseMove(position.x, position.y);
 
         // Track last mouse only for the driving pointer
         if (event.pointerId === drivingId) {
@@ -1253,9 +1257,9 @@ class Paint {
     onPointerOver(event) {
         if (event.preventDefault) event.preventDefault();
 
-        const position = Utilities.getMousePosition(event, this.canvas);
+        const position = this.viewport.eventToScreen(event);
         const mouseX = position.x;
-        const mouseY = this.canvas.height - position.y;
+        const mouseY = position.y;
 
         this.brushX = mouseX;
         this.brushY = mouseY;

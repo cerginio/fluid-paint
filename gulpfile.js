@@ -41,6 +41,7 @@ const paths = {
     'wrappedgl.js',
     'utilities.js',
     'rectangle.js',
+    'viewport.js',
     'brush.js',
     'simulator.js',
     'colorpicker.js',
