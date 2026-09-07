@@ -80,7 +80,7 @@ const PANEL_BLUR_STRIDE = 8;
 const COLOR_PICKER_LEFT = 20;
 const COLOR_PICKER_TOP = 523;
 
-const RESIZING_RADIUS = 20;
+const RESIZING_RADIUS_CSS = 20;   // CSS pixels -- convert with viewport.cssLengthToScreen
 const RESIZING_FEATHER_SIZE = 8; //in pixels 
 
 //box shadow parameters

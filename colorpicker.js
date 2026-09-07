@@ -40,6 +40,14 @@ class ColorPicker {
     this.left = left;
     this.bottom = bottom;
 
+    // Every constant in this file (radii, slider box, WIDTH/HEIGHT) is authored
+    // in CSS pixels, while left/bottom and the incoming mouse coordinates are
+    // screen pixels. Rather than convert a dozen constants, the picker carries
+    // one scale: sizes are multiplied by it on the way out to GL, and mouse
+    // coordinates are divided by it on the way in. Set by Paint from the
+    // viewport; 1 reproduces the old behaviour exactly.
+    this.scale = 1;
+
     // whether we're currently manipulating the hue or the saturation/lightness/alpha
     this.huePressed = false;
     this.saturationLightnessPressed = false;
@@ -76,17 +84,17 @@ class ColorPicker {
       .viewport(0, 0, this.canvas.width, this.canvas.height)
       .vertexAttribPointer(this.quadVertexBuffer, 0, 2, wgl.FLOAT, wgl.FALSE, 0, 0)
       .useProgram(rgbModel ? this.pickerProgramRGB : this.pickerProgram)
-      .uniform2f("u_resolution", WIDTH, HEIGHT)
-      .uniform1f("u_innerRadius", INNER_RADIUS)
-      .uniform1f("u_outerRadius", OUTER_RADIUS)
-      .uniform1f("u_squareWidth", SQUARE_WIDTH)
-      .uniform2f("u_circlePosition", CIRCLE_X, CIRCLE_Y)
-      .uniform2f("u_alphaSliderPosition", ALPHA_SLIDER_X, ALPHA_SLIDER_Y)
-      .uniform2f("u_alphaSliderDimensions", ALPHA_SLIDER_WIDTH, ALPHA_SLIDER_HEIGHT)
+      .uniform2f("u_resolution", WIDTH * this.scale, HEIGHT * this.scale)
+      .uniform1f("u_innerRadius", INNER_RADIUS * this.scale)
+      .uniform1f("u_outerRadius", OUTER_RADIUS * this.scale)
+      .uniform1f("u_squareWidth", SQUARE_WIDTH * this.scale)
+      .uniform2f("u_circlePosition", CIRCLE_X * this.scale, CIRCLE_Y * this.scale)
+      .uniform2f("u_alphaSliderPosition", ALPHA_SLIDER_X * this.scale, ALPHA_SLIDER_Y * this.scale)
+      .uniform2f("u_alphaSliderDimensions", ALPHA_SLIDER_WIDTH * this.scale, ALPHA_SLIDER_HEIGHT * this.scale)
       .uniform4f("u_currentHSVA", hsva[0], hsva[1], hsva[2], hsva[3])
       .uniform2f("u_screenResolution", this.canvas.width, this.canvas.height)
       .uniform2f("u_position", this.left, this.bottom)
-      .uniform2f("u_dimensions", WIDTH, HEIGHT)
+      .uniform2f("u_dimensions", WIDTH * this.scale, HEIGHT * this.scale)
       // premultiplied alpha
       .enable(wgl.BLEND)
       .blendFunc(wgl.ONE, wgl.ONE_MINUS_SRC_ALPHA);
@@ -100,8 +108,8 @@ class ColorPicker {
 
   // x and y are relative to the canvas
   overHue(x, y) {
-    x -= this.left;
-    y -= this.bottom;
+    x = (x - this.left) / this.scale;
+    y = (y - this.bottom) / this.scale;
 
     const xDist = x - CIRCLE_X;
     const yDist = y - CIRCLE_Y;
@@ -112,8 +120,8 @@ class ColorPicker {
 
   // x and y are relative to the canvas
   overSaturationLightness(x, y) {
-    x -= this.left;
-    y -= this.bottom;
+    x = (x - this.left) / this.scale;
+    y = (y - this.bottom) / this.scale;
 
     const xDist = x - CIRCLE_X;
     const yDist = y - CIRCLE_Y;
@@ -123,8 +131,8 @@ class ColorPicker {
 
   // x and y are relative to the canvas
   overAlpha(x, y) {
-    x -= this.left;
-    y -= this.bottom;
+    x = (x - this.left) / this.scale;
+    y = (y - this.bottom) / this.scale;
 
     return (
       x >= ALPHA_SLIDER_X &&
@@ -159,8 +167,8 @@ class ColorPicker {
 
   onMouseMove(mouseX, mouseY) {
     // make relative to the picker
-    let x = mouseX - this.left;
-    let y = mouseY - this.bottom;
+    let x = (mouseX - this.left) / this.scale;
+    let y = (mouseY - this.bottom) / this.scale;
 
     if (!(this.huePressed || this.saturationLightnessPressed || this.alphaPressed)) {
       return;

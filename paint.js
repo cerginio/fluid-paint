@@ -309,7 +309,9 @@ class Paint {
                 this.canvas.height
             );
 
-            this.colorPicker.bottom = this.canvas.height - COLOR_PICKER_TOP;
+            this.colorPicker.scale = this.viewport.pixelRatio;
+            this.colorPicker.bottom = this.canvas.height - this.viewport.cssLengthToScreen(COLOR_PICKER_TOP);
+            this.colorPicker.left = this.viewport.cssLengthToScreen(COLOR_PICKER_LEFT);
             if (this.brushViewer !== null) this.brushViewer.bottom = this.canvas.height - 150;
 
             this.rebuildProjectionMatrix();
@@ -762,7 +764,12 @@ class Paint {
             this.canvas.style.cursor = desiredCursor;
         }
 
-        const panelBottom = this.canvas.height - PANEL_HEIGHT;
+        // The panel is authored in CSS pixels but drawn in the backing store, so
+        // its size has to scale with the ratio or it renders at half size on a
+        // DPR-2 screen while the HTML UI over it stays full size.
+        const panelWidth = this.viewport.cssLengthToScreen(PANEL_WIDTH);
+        const panelHeight = this.viewport.cssLengthToScreen(PANEL_HEIGHT);
+        const panelBottom = this.canvas.height - panelHeight;
 
         if (this.needsRedraw) {
             // blur the canvas for the panel
@@ -774,8 +781,8 @@ class Paint {
                 .viewport(
                     0,
                     Utilities.clamp(panelBottom - BLUR_FEATHER, 0, this.canvas.height),
-                    PANEL_WIDTH + BLUR_FEATHER,
-                    PANEL_HEIGHT + BLUR_FEATHER
+                    panelWidth + BLUR_FEATHER,
+                    panelHeight + BLUR_FEATHER
                 )
                 .bindFramebuffer(this.framebuffer)
                 .uniform2f('u_resolution', this.canvas.width, this.canvas.height)
@@ -811,17 +818,17 @@ class Paint {
             // draw panel to screen
             const panelDrawState = wgl
                 .createDrawState()
-                .viewport(0, panelBottom, PANEL_WIDTH, PANEL_HEIGHT)
+                .viewport(0, panelBottom, panelWidth, panelHeight)
                 .uniformTexture('u_canvasTexture', 0, wgl.TEXTURE_2D, this.blurredCanvasTexture)
                 .uniform2f('u_canvasResolution', this.canvas.width, this.canvas.height)
-                .uniform2f('u_panelResolution', PANEL_WIDTH, PANEL_HEIGHT)
+                .uniform2f('u_panelResolution', panelWidth, panelHeight)
                 .useProgram(this.panelProgram)
                 .vertexAttribPointer(this.quadVertexBuffer, 0, 2, wgl.FLOAT, wgl.FALSE, 0, 0);
             wgl.drawArrays(panelDrawState, wgl.TRIANGLE_STRIP, 0, 4);
 
             this.drawShadow(
                 PANEL_SHADOW_ALPHA,
-                new Rectangle(0, panelBottom, PANEL_WIDTH, PANEL_HEIGHT)
+                new Rectangle(0, panelBottom, panelWidth, panelHeight)
             ); // shadow for panel
 
 
@@ -928,16 +935,20 @@ class Paint {
 
     // what interaction mode would be triggered if we clicked with given mouse position
     desiredInteractionMode(mouseX, mouseY) {
-        const mouseOverPanel = PaintState.showPanel && mouseX < PANEL_WIDTH && mouseY > this.canvas.height - PANEL_HEIGHT;
+        // PANEL_* are CSS pixels; mouseX/mouseY are screen pixels.
+        const panelWidth = this.viewport.cssLengthToScreen(PANEL_WIDTH);
+        const panelHeight = this.viewport.cssLengthToScreen(PANEL_HEIGHT);
+        const resizingRadius = this.viewport.cssLengthToScreen(RESIZING_RADIUS_CSS);
+        const mouseOverPanel = PaintState.showPanel && mouseX < panelWidth && mouseY > this.canvas.height - panelHeight;
 
         if (mouseOverPanel) {
             return InteractionMode.NONE;
         } else if (
             this.spaceDown ||
-            this.mouseX < this.paintingRectangle.left - RESIZING_RADIUS ||
-            this.mouseX > this.paintingRectangle.left + this.paintingRectangle.width + RESIZING_RADIUS ||
-            this.mouseY < this.paintingRectangle.bottom - RESIZING_RADIUS ||
-            this.mouseY > this.paintingRectangle.bottom + this.paintingRectangle.height + RESIZING_RADIUS
+            this.mouseX < this.paintingRectangle.left - resizingRadius ||
+            this.mouseX > this.paintingRectangle.left + this.paintingRectangle.width + resizingRadius ||
+            this.mouseY < this.paintingRectangle.bottom - resizingRadius ||
+            this.mouseY > this.paintingRectangle.bottom + this.paintingRectangle.height + resizingRadius
         ) {
             return InteractionMode.PANNING;
         } else if (this.getResizingSide(mouseX, mouseY) !== ResizingSide.NONE) {
@@ -950,6 +961,12 @@ class Paint {
     getResizingSide(mouseX, mouseY) {
         // the side we'd be resizing with the current mouse position
         // we can resize if our perpendicular distance to an edge is less than RESIZING_RADIUS
+        //
+        // The radius is authored in CSS pixels, but mouseX/mouseY are screen
+        // pixels, so it has to be converted or the grab zone shrinks as the
+        // device pixel ratio rises -- half as wide on a DPR-2 phone, which is
+        // where a grab margin matters most.
+        const RESIZING_RADIUS = this.viewport.cssLengthToScreen(RESIZING_RADIUS_CSS);
         if (
             Math.abs(mouseX - this.paintingRectangle.left) <= RESIZING_RADIUS &&
             Math.abs(mouseY - this.paintingRectangle.getTop()) <= RESIZING_RADIUS
