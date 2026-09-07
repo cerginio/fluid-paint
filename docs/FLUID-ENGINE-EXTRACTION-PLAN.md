@@ -1,7 +1,7 @@
 # Fluid Engine Extraction Plan
 
-Status: proposed
-Branch base: `webgl2_migration` (df884cc)
+Status: Phase 0 complete (58e7d74) -- see HANDOFF.md
+Branch: `fluid-engine-v1` (from df884cc on webgl2_migration)
 Decisions taken: keep the david.li UI working as the reference harness; fix the
 coordinate/DPR problem as part of the move; build extension *points* but only
 one implementation behind each; replace the hand-rolled UI with a modular
