@@ -71,10 +71,19 @@ function makeYRotationMatrix(m, angle) {
 }
 
 
-// h in [0,1], s,v in [0,1]
-function fixHueForPreview(h) {
-    return 1.0 - h; // перевертання: CW ↔ CCW
-}
+/*
+ * REMOVED in Phase 10 -- kept here only as a note, with no callers.
+ *
+ * This was `return 1.0 - h`, applied to the preview's hue before hsvToRgb().
+ * It was a hand-tuned compensation for the additive/subtractive mismatch: the
+ * preview was drawn with hsvToRgb (light) while the paint went through
+ * hsvToRyb + the pigment cube, and inverting the hue got part of the wheel
+ * looking roughly right at the expense of the rest.
+ *
+ * paint.js now calls hsvToPigmentRgb() (app/ui/ryb.js), which is the actual
+ * conversion, so no correction is needed. Do NOT reinstate this on top of it --
+ * applying both puts the preview back out by exactly the amount it corrects.
+ */
 
 // --- class ---
 class BrushViewer {

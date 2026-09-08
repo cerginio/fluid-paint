@@ -73,6 +73,18 @@
         </div>
     </div>
 
+    <!--
+      Debug facility toggles, pinned to two screen corners rather than put in
+      the panel. They are deliberately OUTSIDE #ui: the panel is draggable and
+      collapsible, and a switch for an overlay should not disappear with it or
+      move when the panel moves. Each button constructs or destroys its facility
+      -- see app/ui/debug-toggles.js on why hiding would not be equivalent.
+
+      Starting state comes from ?debug= (debug/debug-flags.js), not from markup.
+    -->
+    <div id="debug-toggle-tr" class="debug-toggle-corner"></div>
+    <div id="debug-toggle-br" class="debug-toggle-corner"></div>
+
     <div id="footer">
         <a href="http://david.li">david.li</a> | <a href="http://github.com/dli/paint">Origin code</a>
     </div>
@@ -118,6 +130,7 @@
     <script src="app/ui/color.js"></script>
     <script src="app/ui/sliders.js"></script>
     <script src="app/ui/buttons.js"></script>
+    <script src="app/ui/debug-toggles.js"></script>
     <script src="brushviewer.js"></script>
     <script src="app/ui/pointer-dispatcher.js"></script>
     <script src="app/ui/panel.js"></script>
@@ -165,15 +178,42 @@
             // what makes brush.js's `if (presenter)` skip the readback rather
             // than merely hide its output.
             const debugFlags = parseDebugFlags();
-            if (debugFlags.textureProbe) {
-                // create the debug canvas now that DOM exists
-                const dbg = setupDebugCanvas({ w: 256, h: 256, corner: 'bottom-right' });
-                debugCanvas = dbg.canvas;          // <-- assign to globals
-                debugCtx2d = dbg.ctx2d;
 
-                // presenter uses the same WebGL context
+            /*
+             * Build and tear down the texture probe.
+             *
+             * Setting `presenter` back to undefined is what actually turns the
+             * facility OFF: brush.js guards its per-frame readback with
+             * `typeof presenter !== 'undefined' && presenter`, so clearing it
+             * skips the readback entirely rather than merely hiding the result.
+             * The readback is the expensive half, which is why the toggle has to
+             * do this and not just set display:none on the canvas.
+             */
+            function enableTextureProbe() {
+                if (presenter) return;
+                const dbg = setupDebugCanvas({ w: 256, h: 256, corner: 'bottom-right' });
+                debugCanvas = dbg.canvas;
+                debugCtx2d = dbg.ctx2d;
                 presenter = makeGLDebugPresenter(wgl.gl);
             }
+
+            function disableTextureProbe() {
+                if (debugCanvas && debugCanvas.parentNode) {
+                    debugCanvas.parentNode.removeChild(debugCanvas);
+                }
+                debugCanvas = undefined;
+                debugCtx2d = undefined;
+                presenter = undefined;
+            }
+
+            // Exposed so the toggle UI (built in paint.js, which cannot see
+            // these closures) can drive them.
+            window.__textureProbe = {
+                isOn: () => !!presenter,
+                set: (on) => (on ? enableTextureProbe() : disableTextureProbe()),
+            };
+
+            if (debugFlags.textureProbe) enableTextureProbe();
 
             (async () => {
                 // Renderable is not blendable. hasFloatTextureSupport() only

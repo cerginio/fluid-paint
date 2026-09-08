@@ -62,6 +62,7 @@ const paths = {
     'app/ui/color.js',
     'app/ui/sliders.js',
     'app/ui/buttons.js',
+    'app/ui/debug-toggles.js',
     'brushviewer.js',
     // Vendored from tilecraft with one local patch; see docs/UI-COMPONENTS.md.
     // Reports Y-down CSS-relative coords, so paint.js adapts them via viewport.

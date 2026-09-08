@@ -850,6 +850,136 @@ Goldens **12/12 source and dist**, with `paint` hashes byte-identical to their
 pre-Phase-10 values — the proof that a display change did not leak onto the paint
 path. Phases 7/8/9 probes still **30/30, 17/17, 18/18**.
 
+## Phase 10b — DONE (debug toggles + the brush preview's colour)
+
+### On-screen toggles for the debug facilities
+
+The three flags in `debug/debug-flags.js` could previously only be changed by
+reloading with `?debug=`. That is useless on a phone, where retyping a URL to
+see the bristle preview costs the painting.
+
+`app/ui/debug-toggles.js` (new) mounts buttons into two fixed corners:
+
+| corner | facility | default |
+|---|---|---|
+| top right | brush preview (`brushViewer`) | **on** |
+| bottom right | texture probe (`textureProbe`) | **off** |
+
+**The containers live OUTSIDE `#ui`.** The panel is draggable and collapsible,
+and a switch for an overlay must not vanish with it or move when it moves.
+
+**Each toggle CONSTRUCTS and DESTROYS — it does not hide.** `debug-flags.js`
+promises an off facility allocates nothing and adds no per-frame work; a toggle
+that hid its output would silently break that promise while looking the same.
+For the texture probe that means clearing the `presenter` global, which is what
+`brush.js:535`'s `typeof presenter` guard tests — so the per-frame 256×256
+readback genuinely stops rather than being drawn and discarded. Each `get()`
+reads the live field, never a cached flag, so a button cannot claim a facility
+is on when its construction threw.
+
+**`textureProbe` now defaults OFF** — the one exception to "everything defaults
+on", at the user's direction. It is the only flag whose cost is paid every frame
+*while painting*, and with a one-tap toggle it no longer needs a reload to reach.
+The other two are unchanged and the decomposition rule stands.
+
+The bottom-right stack is offset `bottom: 280px` to clear the probe's own 256px
+canvas — otherwise the button needed to turn the probe off sits underneath it.
+
+### The brush preview was painting the wrong colour too
+
+`paint.js` drew the bristle projection with `hsvToRgb(fixHueForPreview(h), …)`,
+where `fixHueForPreview` was `return 1.0 - h`. That was a hand-tuned
+compensation for the same additive/subtractive mismatch Phase 10 fixed in the
+picker: additive preview, subtractive paint, and inverting the hue got part of
+the wheel looking roughly right at the expense of the rest.
+
+It now calls `hsvToPigmentRgb()` and matches the canvas exactly at every hue:
+
+| hue | old preview | new preview = what the canvas paints |
+|---|---|---|
+| 0° | `[null,null,null]` | `[255,0,0]` |
+| 60° | `[255,0,255]` | `[128,0,128]` |
+| 120° | `[0,0,255]` | `[42,95,153]` |
+| 240° | `[0,255,0]` | `[255,255,0]` |
+
+Note hue 0: `1 - 0 = 1`, and `Math.floor(1*6) = 6` indexes past the end of the
+six-element lookup arrays, so the old path fed **NaN** to the shader at pure
+red. Removing the hack closed a latent bug as well as the colour error. The
+function is retired in place in `brushviewer.js` with a note saying not to
+reinstate it on top of the real conversion — applying both puts the preview back
+out by exactly the amount it corrects.
+
+Also fixed: the viewer was constructed at `bottom = 20` but moved to
+`canvas.height - 150` by the first resize, so it jumped on the first layout
+change. Both now agree on top-right.
+
+### Verification
+
+Toggles driven in a real browser, source AND `dist/`: both directions, the probe
+canvas leaving and re-entering the DOM, no page errors. Probes **16/16, 17/17,
+18/18, 30/30**; goldens **12/12 source and dist** with `paint` hashes unchanged.
+
+## Phase 10c — DONE (the s/v ends: the fix the rim could not see)
+
+Three bugs reported after 10a, all one cause. **The first pass only ever tested
+the wheel's RIM** (s=1, v=1), where the mapping happens to be right; the entire
+interior was wrong and 16/16 passed anyway. That is the lesson worth keeping.
+
+### The cause
+
+`hsvToRyb()` is an ADDITIVE formula: as a colour desaturates it raises all three
+channels toward 1. Its output is then *reinterpreted* as pigment LOAD — and in a
+subtractive space a channel is how much ink is on the paper, where **zero is
+blank paper, not black**. So "desaturated" was being read as "pile on every
+pigment", which lands on the cube's `v111` corner: a near-black brown.
+
+| symptom reported | measured before | should be |
+|---|---|---|
+| centre of wheel is black, not white | `s=0` → `[51,24,0]` | `[255,255,255]` |
+| value slider inverted | `v=0` → `[255,255,255]` | `[0,0,0]` |
+| value slider gradient | white → red | black → red |
+
+The third report — the handle keeping RGB — was a **separate second path**: the
+handles are filled from `hslString`, which reached the colour through
+`IroColor.hsvToHsl`, never touching `hsvToRgb`. Converting `hsvToRgb` therefore
+left the handles alone, and a handle sitting on the ring showed a different
+colour from the ring beneath it.
+
+### The fix
+
+`hsvToPigmentRgb()` no longer composes `rybToRgbDisplay(hsvToRyb(...))`. That
+composition looks right and is wrong away from the rim. It now uses
+`hueToPigmentLoad()` — the sexagesimal ramp **without** the `m = v - c` white
+term — under the model a painter would describe:
+
+- **saturation scales the LOAD** (0 = no ink = white paper)
+- **value multiplies the RESULT** (toward black)
+
+At s=1, v=1 the two agree exactly, which is what keeps the rim showing the
+colours the brush deposits. `hslString` now returns `this.rgb`, so the handles
+follow every other surface. The unused `hue` and `saturation` slider gradients
+were converted too, so a future layout change cannot silently reintroduce RGB.
+
+**`hsvToRyb()` in common.js is untouched and still correct on the paint path** —
+`splat()` receives pigment to deposit, and the user only picks colours whose s
+and v are already baked in. Display has the different job of rendering the whole
+s/v space, so it needs its own mapping rather than a reinterpretation.
+
+### Verification
+
+`debug/phase10-probe.js` is now **23/23** — seven new checks covering the three
+reports. **Sabotage-tested**: reverting `hsvToPigmentRgb` to the old composition
+fails exactly three of them, with the reported symptoms (`value 0` → white,
+gradient white→red). Goldens 12/12 source and dist, `paint` unchanged.
+
+Two traps found while writing those checks:
+
+1. **Preact re-renders asynchronously.** Reading a handle's `fill` right after
+   `color.set()` returns the PREVIOUS colour — it looks exactly like a broken
+   handle and cost a false failure. The probe now settles two frames first.
+2. **A rim-only test cannot see an interior bug.** The new checks assert the
+   s=0 and v=0 ends explicitly, plus that the rim did NOT move.
+
 ## UX findings from the Phase 6 device retest — STILL OPEN after Phase 7
 
 These came from real-device use, not from a harness. They are **the** reason

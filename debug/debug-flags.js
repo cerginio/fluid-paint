@@ -30,10 +30,24 @@
  * own spelling; they are already gated and are left alone.
  */
 
+/*
+ * Note the one exception to "everything defaults on", added in Phase 10 along
+ * with the on-screen toggles.
+ *
+ * textureProbe now defaults OFF, at the user's direction. It is the only flag
+ * whose cost is paid every frame WHILE PAINTING -- a 256x256 readPixels plus
+ * four getParameter calls per frame (see the extraction plan's inventory) --
+ * and it is the least often wanted of the three. The other two stay on, so the
+ * decomposition rule is unchanged: these flags still exist to give each feature
+ * its own module and seam, not to hide features.
+ *
+ * With the corner toggles it is now one tap away rather than a reload, which is
+ * what makes starting it off reasonable where it would not have been before.
+ */
 const DEBUG_FLAG_DEFAULTS = {
   paintingRect: true,    // the painting-rectangle outline overlay
   brushViewer: true,     // the live bristle preview panel
-  textureProbe: true,    // the 2D readback view of a brush texture (debug.js)
+  textureProbe: false,   // the 2D readback view of a brush texture (debug.js)
 };
 
 function parseDebugFlags(search) {

@@ -161,6 +161,84 @@ const dist = (a, b) =>
         : `pigment dist ${toPigment.toFixed(1)} vs RGB dist ${toRgb.toFixed(1)}`);
   }
 
+  console.log('\n[ends] saturation and value ends, in a SUBTRACTIVE space');
+
+  /*
+   * These three were reported as visible bugs after the first pass, and they
+   * share one cause: `hsvToRyb()` is an ADDITIVE formula, so it raises all
+   * three channels as a colour desaturates. Read as pigment LOAD that means
+   * "pile on every ink", which lands on the cube's v111 corner -- a near-black
+   * brown. Hence:
+   *
+   *   - towards the wheel's centre (s -> 0) the widget went BLACK, not white
+   *   - the value slider ran BACKWARDS: v=0 gave white, v=1 the colour
+   *
+   * In a subtractive space zero ink is BLANK PAPER, so s=0 must be white and
+   * v=0 must be black. The rim (s=1,v=1) is unaffected, which is why the first
+   * pass's hue checks all passed while the interior was wrong -- a test on the
+   * rim alone cannot see this.
+   */
+  const readColor = async (h, sat, val) => {
+    await page.evaluate(({ h, sat, val }) => {
+      window.__painter.colorControl.picker.color.set({ h, s: sat, v: val, a: 1 });
+    }, { h, sat, val });
+    // Preact re-renders asynchronously; the DOM (handles) lags the model by a
+    // frame. Reading too early reports the PREVIOUS colour, which looks exactly
+    // like a broken handle -- it cost a false failure while writing this.
+    await settle(page, 2);
+    return page.evaluate(() => {
+      const c = window.__painter.colorControl.picker.color;
+      const el = document.querySelector(
+        '#color-picker-slot .IroWheel .IroHandle circle[fill]:not([fill="none"])');
+      return {
+        rgb: [c.rgb.r, c.rgb.g, c.rgb.b],
+        handle: el ? el.getAttribute('fill') : null,
+      };
+    });
+  };
+
+  const white = await readColor(0, 0, 100);
+  check('saturation 0 is WHITE PAPER, not black', white.rgb,
+    (v) => v[0] > 245 && v[1] > 245 && v[2] > 245,
+    'zero pigment load is blank paper; the additive formula sent this to v111');
+
+  const black = await readColor(0, 100, 0);
+  check('value 0 is BLACK, not white', black.rgb,
+    (v) => v[0] < 10 && v[1] < 10 && v[2] < 10,
+    'the value slider ran backwards before this');
+
+  const rim = await readColor(0, 100, 100);
+  check('the rim (s=1,v=1) is unchanged', rim.rgb,
+    (v) => v[0] > 245 && v[1] < 10 && v[2] < 10,
+    'hue 0 is still pure red -- the interior fix must not move the rim');
+
+  const gradientEnds = await page.evaluate(() => {
+    const g = document.querySelectorAll('#color-picker-slot .IroSliderGradient');
+    if (!g.length) return null;
+    const m = getComputedStyle(g[0]).backgroundImage.match(/rgb\([^)]*\)/g);
+    return m ? [m[0], m[m.length - 1]] : null;
+  });
+  check('the value slider runs black -> colour', gradientEnds,
+    (v) => v !== null && /rgb\(0,\s*0,\s*0\)/.test(v[0]),
+    'left end must be black; it was white while the model was inverted');
+
+  console.log('\n[handle] the wheel handle agrees with the ring under it');
+
+  /*
+   * The handles are filled from `hslString`, which reached the colour through
+   * IroColor.hsvToHsl -- a SEPARATE additive path that never touches hsvToRgb.
+   * So converting hsvToRgb left the handles alone, and a handle sitting on the
+   * ring showed a different colour from the ring beneath it.
+   */
+  for (const handleHue of [0, 60, 240]) {
+    const got = await readColor(handleHue, 100, 100);
+    const handleRgb = parseRgb(got.handle);
+    check(`handle at hue ${handleHue} matches the swatch`,
+      { swatch: got.rgb, handle: got.handle },
+      () => handleRgb !== null && dist(handleRgb, got.rgb) < 6,
+      'the handle is filled from hslString, which was a second RGB path');
+  }
+
   console.log('\n[ring] the wheel\'s hue ring is drawn in pigment');
 
   /*

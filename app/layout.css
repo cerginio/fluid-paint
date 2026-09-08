@@ -461,3 +461,72 @@ html, body {
   #color-picker-slot { width: 200px; margin-left: var(--edge-pad); }
   #models div { width: 100px; }
 }
+
+/* Debug facility toggles, pinned to two corners.
+ *
+ * Outside #ui deliberately: the panel is draggable and collapsible, and a
+ * switch for an overlay must not vanish with it or move when it moves.
+ *
+ * The bottom-right stack sits ABOVE the texture probe's own 256px canvas
+ * (debug.js pins that to bottom:8px right:8px at z-index 99999), so its offset
+ * clears 256 + the canvas's own 8px gap + a margin. Without that the button
+ * the user needs in order to turn the probe OFF would be underneath the probe.
+ * z-index is one higher than the probe's for the same reason.
+ */
+.debug-toggle-corner {
+  position: fixed;
+  z-index: 100000;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  pointer-events: none; /* the container is a layout box, not a target */
+}
+
+#debug-toggle-tr {
+  top: 8px;
+  right: 8px;
+}
+
+#debug-toggle-br {
+  bottom: 280px; /* 256 probe + 8 its gap + 16 breathing room */
+  right: 8px;
+}
+
+.debug-toggle-corner .debug-toggle {
+  pointer-events: auto;
+  /* .button's own margin-top is for the panel's stacked layout and would push
+     these apart here; the flex gap above spaces them instead. */
+  margin-top: 0;
+  width: 132px;
+  height: 26px;
+  line-height: 26px;
+  text-align: center;
+  font-size: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.55);
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+
+/* button-selected paints white-on-black in the panel; keep that meaning here
+   but stay legible over the painting rather than over the panel's dark ground. */
+.debug-toggle-corner .debug-toggle.button-selected {
+  background: rgba(255, 255, 255, 0.9);
+  color: black;
+}
+
+.debug-toggle-corner .debug-toggle.button-unselected {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+/* On a phone the probe canvas is a large fraction of the screen; keep the
+   toggles reachable and thumb-sized rather than shrinking them. */
+@media (max-width: 640px) {
+  #debug-toggle-br { bottom: 280px; }
+  .debug-toggle-corner .debug-toggle {
+    height: 32px;
+    line-height: 32px;
+  }
+}

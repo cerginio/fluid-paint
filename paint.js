@@ -311,8 +311,74 @@ class Paint {
         // Live bristle preview -- constructed only when its flag is on, so with
         // ?debug=-brushViewer nothing is allocated and the per-frame draw below
         // is skipped outright. Enabled by default.
+        /*
+         * TOP right, matching the resize handler below (`canvas.height - 150`).
+         * It was constructed at bottom=20 and then moved to the top by the first
+         * resize, so it visibly jumped on the first layout change; the two now
+         * agree, and the toggle's rebuild uses the same expression.
+         */
         this.brushViewer = this.debug.brushViewer
-            ? new BrushViewer(wgl, this.brushProgram, canvas.width - 250, 20, 250, 150)
+            ? new BrushViewer(wgl, this.brushProgram,
+                canvas.width - 250, canvas.height - 150, 250, 150)
+            : null;
+
+        /*
+         * On-screen switches for the debug facilities.
+         *
+         * Each `set` CONSTRUCTS or DESTROYS, matching what `?debug=` does at
+         * load: debug-flags.js promises that an off facility allocates nothing
+         * and adds no per-frame work, and a toggle that merely hid its output
+         * would quietly break that promise while looking identical. The
+         * per-frame code below is unchanged -- it still tests `!== null`.
+         *
+         * `get` reads the live field rather than a flag copy, so a button can
+         * never claim a facility is on when construction failed.
+         *
+         * The containers live outside #ui (see index.html) so a collapsed or
+         * dragged panel does not take the switches with it. Absent containers
+         * mean no toggles -- the no-support page has none, and a second host
+         * brings its own markup.
+         */
+        const toggleTR = document.getElementById('debug-toggle-tr');
+        const toggleBR = document.getElementById('debug-toggle-br');
+
+        this.debugToggles = toggleTR
+            ? new DebugToggles({
+                element: toggleTR,
+                toggles: [{
+                    id: 'brushViewer',
+                    label: 'Brush preview',
+                    title: 'The live bristle projection (top right)',
+                    get: () => this.brushViewer !== null,
+                    set: (on) => {
+                        if (on === (this.brushViewer !== null)) return;
+                        this.brushViewer = on
+                            ? new BrushViewer(wgl, this.brushProgram,
+                                this.canvas.width - 250, this.canvas.height - 150, 250, 150)
+                            : null;
+                        this.needsRedraw = true;
+                    },
+                }],
+            })
+            : null;
+
+        this.debugTogglesBR = toggleBR
+            ? new DebugToggles({
+                element: toggleBR,
+                toggles: [{
+                    id: 'textureProbe',
+                    label: 'Texture probe',
+                    title: 'The 256x256 readback view (bottom right)',
+                    // Owned by index.html's inline script, which holds the
+                    // `presenter` global brush.js reads; it publishes this pair
+                    // because those closures are not reachable from here.
+                    get: () => !!(window.__textureProbe && window.__textureProbe.isOn()),
+                    set: (on) => {
+                        if (window.__textureProbe) window.__textureProbe.set(on);
+                        this.needsRedraw = true;
+                    },
+                }],
+            })
             : null;
 
         this.rebuildProjectionMatrix();
@@ -875,9 +941,26 @@ class Paint {
         // This was the LAST chrome drawn into the canvas. What remains below is
         // the painting's own shadow and the debug overlays.
         if (this.brushViewer !== null) {
+            /*
+             * PIGMENT, not hsvToRgb (Phase 10).
+             *
+             * This preview shows the bristles that are about to deposit paint,
+             * so it has to be the colour that paint will BE -- the same two
+             * steps the splat takes (hsvToRyb, then the cube), which is what
+             * the wheel now shows too.
+             *
+             * `fixHueForPreview()` used to sit here doing `1.0 - h`. That was a
+             * hand-tuned compensation for this exact mismatch: hsvToRgb is
+             * additive and the paint is subtractive, and inverting the hue got
+             * one part of the wheel looking roughly right at the cost of the
+             * rest. With the real conversion it is unnecessary, and applying
+             * both would put the preview back out by the amount it corrects.
+             */
             const hsva = this.brushColorHSVA;
-            const H = fixHueForPreview(hsva[0]);
-            const rgb = hsvToRgb(H, hsva[1], hsva[2]);
+            const rgb = hsvToPigmentRgb(
+                hsva[0], hsva[1], hsva[2],
+                this.colorModel === FluidEngine.COLOR_MODEL.RGB
+            );
 
             this.brushViewer.draw(this.brushX, this.brushY, this.engine.getBristleGeometry(), rgb);
         }

@@ -105,12 +105,63 @@ function rybToRgbDisplay(ryb, additive) {
 }
 
 /**
- * The whole chain, HSV -> the colour actually painted. This is the function the
- * widget needs, and the one `picker.frag:52` was.
+ * The pure-hue pigment LOAD for a hue, scaled by saturation.
  *
- * `hsvToRyb()` lives in common.js and is the single definition on the paint
- * path; it is called rather than reimplemented so the widget cannot drift from
- * the paint by a rounding difference.
+ * This is the sexagesimal ramp WITHOUT the `m = v - c` white term that
+ * `hsvToRyb()` adds. That term is the whole reason a naive
+ * `rybToRgbDisplay(hsvToRyb(...))` renders the wheel wrong at its edges, and
+ * the reason is worth stating plainly, because it is the opposite of the RGB
+ * intuition:
+ *
+ *   In a SUBTRACTIVE space the channels are how much INK is on the paper.
+ *   Zero is not black, it is BLANK PAPER -- the cube's v000 corner is white.
+ *   Full load on all three is v111, a near-black brown.
+ *
+ * `hsvToRyb()` is an additive formula, so it raises all three channels toward
+ * 1 as a colour desaturates. Read as ink that means "pile on every pigment",
+ * which lands on v111. Hence the two bugs this fixes:
+ *
+ *   - towards the wheel's CENTRE (s -> 0) it went BLACK instead of white
+ *   - the value slider ran BACKWARDS: v=0 gave white (no ink), v=1 the colour
+ *
+ * The right model is the one a painter would describe: saturation is HOW MUCH
+ * pigment (0 = none = paper), and value darkens the mixed result toward black.
+ * So saturation scales the load, and value multiplies the resulting colour.
+ *
+ * @param {number} h  hue, 0..1
+ * @param {number} s  saturation, 0..1
+ * @returns {number[]} R/Y/B pigment loads, 0..1
+ */
+function hueToPigmentLoad(h, s) {
+  const hDash = ((h % 1) + 1) % 1 * 6;   // guard against a negative hue
+  const x = 1 - Math.abs(hDash % 2 - 1);
+  const i = Math.floor(hDash) % 6;
+
+  // The six sectors of the ramp, as (R, Y, B) loads at full saturation.
+  const ramp = [
+    [1, x, 0], [x, 1, 0], [0, 1, x],
+    [0, x, 1], [x, 0, 1], [1, 0, x],
+  ][i];
+
+  return [ramp[0] * s, ramp[1] * s, ramp[2] * s];
+}
+
+/**
+ * The whole chain, HSV -> the colour the widget should show.
+ *
+ * NOT `rybToRgbDisplay(hsvToRyb(h, s, v))`. That composition looks right and is
+ * wrong away from full saturation and value -- see `hueToPigmentLoad()` above
+ * for why, and for the two visible bugs it caused.
+ *
+ * This deliberately does NOT call `hsvToRyb()`. That function is the paint
+ * path's, and it is correct there: `paint.js` hands its output to `splat()` as
+ * the pigment to deposit, and the user only ever picks a colour whose s and v
+ * are already baked into the choice. Display has a different job -- rendering
+ * the whole s/v space, including its blank-paper and black ends -- so it needs
+ * its own mapping rather than a reinterpretation of that one.
+ *
+ * At s=1, v=1 the two agree exactly, which is what keeps the wheel's rim
+ * showing the same colours the brush deposits.
  *
  * @param {number} h  hue, 0..1
  * @param {number} s  saturation, 0..1
@@ -119,7 +170,10 @@ function rybToRgbDisplay(ryb, additive) {
  * @returns {number[]} rgb, 0..1
  */
 function hsvToPigmentRgb(h, s, v, additive) {
-  return rybToRgbDisplay(hsvToRyb(h, s, v), additive);
+  const rgb = rybToRgbDisplay(hueToPigmentLoad(h, s), additive);
+  // Value darkens the MIXED result. Doing it to the load instead would mean
+  // "less ink", which is lighter -- the inversion this whole function fixes.
+  return [rgb[0] * v, rgb[1] * v, rgb[2] * v];
 }
 
 /** 0..1 rgb -> a CSS rgb() string, clamped and rounded. The cube can return a
