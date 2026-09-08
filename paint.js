@@ -261,6 +261,15 @@ class Paint {
                 } else if (index === 1) {
                     this.colorModel = FluidEngine.COLOR_MODEL.RGB;
                 }
+                // The picker draws its swatches in whichever model is painting,
+                // so the widget has to be told the model moved -- otherwise it
+                // keeps describing colours the brush is no longer making.
+                if (this.colorControl) this.colorControl.setAdditive();
+                if (this.toolPanel) {
+                    this.toolPanel.paintHueStripe(
+                        this.colorModel === FluidEngine.COLOR_MODEL.RGB
+                    );
+                }
                 this.needsRedraw = true;
             }
         );
@@ -284,6 +293,10 @@ class Paint {
             ? new ColorControl({
                 element: colorSlot,
                 getHSVA: () => this.brushColorHSVA,
+                // Read live rather than captured: the toggle flips this after
+                // the control is built, and a snapshot would freeze the picker
+                // in whichever model happened to be selected at startup.
+                isAdditive: () => this.colorModel === FluidEngine.COLOR_MODEL.RGB,
                 onChange: () => {
                     // The compact bar's hue stripe shows the same hue, so it has
                     // to follow the wheel or the two disagree the moment the
@@ -497,7 +510,14 @@ class Paint {
             })
             : null;
 
-        if (this.toolPanel) this.toolPanel.setHue(this.brushColorHSVA[0]);
+        if (this.toolPanel) {
+            this.toolPanel.setHue(this.brushColorHSVA[0]);
+            // Repaint the stripe in pigment (Phase 10). Its CSS gradient is RGB
+            // and names hues the brush does not paint; see app/layout.css.
+            this.toolPanel.paintHueStripe(
+                this.colorModel === FluidEngine.COLOR_MODEL.RGB
+            );
+        }
 
         // The compact bar's brush-size slider. It and the one in the expanded
         // body edit the SAME value, so each has to push the other's handle or

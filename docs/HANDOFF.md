@@ -1,4 +1,4 @@
-# Handoff — Phases 0-9 done; goldens still need a decision
+# Handoff — Phases 0-10 done; goldens decided and re-recorded
 
 Written 2026-09-07, updated 2026-09-08 for Phases 9 and 8 (done in that order).
 Read this, then `docs/FLUID-ENGINE-EXTRACTION-PLAN.md`.
@@ -18,17 +18,29 @@ consumed it for the Natural/Digital toggle, which let the app's duplicate
 **Phase 8a (bristle re-seeding) and 9a (the stroke API) are NOT done.** Neither
 is 10 (documentation). The Phase 6 retest's three UX findings are **still open**.
 
-Golden images: **`paint` byte-identical on all 12, source AND dist** — re-verified
-after Phase 8, which matters more there than anywhere else: an RGB triple leaking
-from the new colour picker into the simulation would move exactly these hashes.
-They did not move. **`screen` moved on all 12**, drift inherited from Phase 7 and
-now also from Phase 8 (the GL picker is no longer painted into the canvas).
+Golden images: **all 12 pass, source AND dist.** The Phase 7 screen-hash decision
+is CLOSED (2026-09-08): the narrowing option was taken and the baseline
+re-recorded. `readScreen()` now hashes the centre 60% of the painting
+(`SCREEN_SAMPLE_FRACTION`), so chrome in the margin no longer moves a hash and UI
+work stops tripping the suite. Before recording, `assertGreen` was confirmed
+passing on all four colorMix rows with unchanged RYB means — that was the guard
+against a real regression riding along on the re-record, which was the stated
+reason it had been deferred.
 
-Shader lint: **21** shaders, down from 23 — `picker.vert` and `picker.frag` went
-with the GL colour picker.
+`paint` hashes are byte-identical across Phases 8-10, which is the invariant that
+matters: an RGB triple leaking from the picker into the simulation would move
+exactly those, and it never did.
+
+Shader lint: **23** shaders. It was 21 after Phase 8 deleted `picker.vert` and
+`picker.frag`; both were RESTORED in Phase 10 as the reference for the pigment
+cube. They are no longer compiled — only `colorpicker.js` referenced them and
+that file is not loaded — so they are documentation, not dead manifest entries.
+`app/ui/ryb.js` checks its cube against `picker.frag` at runtime.
 
 Phase-specific probes: `debug/phase7-probe.js` **30/30**,
-`debug/phase8-probe.js` **17/17**, `debug/phase9-probe.js` **18/18**.
+`debug/phase8-probe.js` **17/17**, `debug/phase9-probe.js` **18/18**,
+`debug/phase10-probe.js` **16/16** (and 16/16 against `dist/` via
+`GOLDEN_ROOT=dist`).
 
 ```
 6d5e6d3  Phase 5: add the FluidEngine facade and split undo out of the engine
@@ -760,6 +772,84 @@ separate source files on purpose, and `dist/` only has `bundle.js`, so a copy
 would 404 four times. The gulpfile says so where the copy would have gone. Run it
 from source: `npm run dev`, then `/examples/minimal/index.html`.
 
+## Phase 10 — DONE (the picker's colour space)
+
+Phase 8 mounted an RGB-native picker beside a subtractive simulation and left
+the widget drawing in RGB, reasoning that the wheel is "only a chooser" and a
+user picking blue should see blue. **That reasoning was wrong**, and the error
+was not subtle.
+
+### The bug, measured
+
+`hsvToRyb()` (common.js) is the ordinary sexagesimal HSV→RGB formula whose three
+outputs are *reinterpreted* as R/Y/B pigment loads — David Li's trick, and
+deliberate. The consequence is that it and `rybToRgb()` are **not a round trip**,
+so the hue the wheel NAMED was not the hue the brush DEPOSITED:
+
+| wheel said | canvas painted |
+|---|---|
+| 240° blue | `#ffff00` pure YELLOW |
+| 60° yellow | `#800080` purple |
+| 120° green | `#2a5f99` slate blue |
+| 0° red | `#ff0000` red — the only fixed point |
+
+Everything but red sat ~120° from the pigment. The picker was not showing "an
+RGB interpretation" of the colour; it was naming a different colour.
+
+### The fix, and where it lives
+
+The old GL picker already had this right — `app/shaders/picker.frag:52` is
+`rybToRgb(hsv2ryb(hsv))`, pushing every swatch through the same two steps the
+paint takes. That file was restored by the user as the reference.
+
+- **`app/ui/ryb.js`** (new) — the pigment cube in JS, transcribed from
+  `picker.frag`. `assertMatchesShader()` parses the eight corners back out of
+  the shader source and compares, so the three copies (JS, picker.frag,
+  painting.frag) cannot silently drift.
+- **`lib/iro.js`** — `IroColor.hsvToRgb` now routes through the cube. This is the
+  single choke point: the ring, both slider gradients, the handle fills and
+  `color.rgb` all derive from it. The hue ring's two conic-gradients are sampled
+  at 24 stops (the pigment path between hues is *curved*, so six stops are wrong
+  everywhere between the endpoints), and the value ramp at 8.
+- **`app/ui/panel.js` + `layout.css`** — the compact bar's hue stripe had the
+  identical bug and the identical "it's only an indicator" comment.
+
+`rgbToHsv` is deliberately NOT inverted: its only caller is the `rgb` setter,
+which this app never uses. An RGB setter here would need a real inverse of the
+cube, not the old body.
+
+**An earlier version of this phase did it as a CSS overlay** — repainting iro's
+rendered DOM from outside to avoid editing a vendored MPL-2.0 file. That was
+dropped: `lib/iro.js` is this project's own three-year-old fork with its own
+fixes and features, not a pristine upstream drop, so fixing it at the source is
+both simpler and honest. Attribution will be summarised at the end of the
+rework, not mid-flight.
+
+### Two traps worth knowing
+
+1. **Script order is load-bearing.** iro builds the ring gradients at MODULE
+   LOAD, so `app/ui/ryb.js` must be concatenated *before* `lib/iro.js`, not
+   merely before `color.js`. Loaded the other way the ring silently falls back
+   to RGB while every other surface converts. `index.html` and `gulpfile.js`
+   both carry the ordering with a comment saying why.
+2. **Hue 240 cannot test the Natural/Digital toggle.** The two models coincide
+   there: RYB `(0,0,1)` → additive `1-ryb.yxz` → `(1,1,0)`, the same yellow the
+   cube's blue corner gives. The first version of the toggle check used 240 and
+   "passed" while measuring nothing. Hue 0 is the most discriminating (red vs
+   magenta, 255 apart).
+
+### Verification
+
+`debug/phase10-probe.js` **16/16**, and **16/16 against `dist/`** via
+`GOLDEN_ROOT=dist` — worth doing here specifically, because the fix depends on
+bundle concatenation order and minification strips the comments and mangles the
+names a source grep would look for. Running the real page is the only honest
+check.
+
+Goldens **12/12 source and dist**, with `paint` hashes byte-identical to their
+pre-Phase-10 values — the proof that a display change did not leak onto the paint
+path. Phases 7/8/9 probes still **30/30, 17/17, 18/18**.
+
 ## UX findings from the Phase 6 device retest — STILL OPEN after Phase 7
 
 These came from real-device use, not from a harness. They are **the** reason
@@ -991,28 +1081,15 @@ Useful query parameters: `?diag=1` (on-device capability panel), `?gpu=<profile>
 - ~~Phase 6 device retest with a stylus~~ — **done, 2026-09-07. It passed.**
   Tablet 5/5 with finger and stylus; phones 3.7/5. The pressure curve was not
   reported as top-heavy, so leave it linear until someone says otherwise.
-- **The golden baseline still needs a decision — the blocking one, and there is
-  half-finished work in the tree for it.** All 12 `screen` hashes moved after
-  Phase 7 while all 12 `paint` hashes stayed byte-identical; the cause is
-  measured, not assumed (`readScreen()` hashes the painting rectangle, which
-  starts at x=20, and the old GL panel covered x=0..300).
+- ~~The golden baseline needs a decision~~ — **done, 2026-09-08.** The
+  narrowing option in the tree was adopted: `readScreen()` samples the centre
+  60% of the painting, `sampleRegionScreen()` remaps `assertGreen`'s painting
+  fractions into the crop, and the baseline was re-recorded. All 12 pass, source
+  and dist. The re-record risk (an unrelated regression riding along) was
+  discharged first by confirming `assertGreen` passed on all four colorMix rows
+  with unchanged RYB means. Net effect: **chrome in the outer 20% margin no
+  longer moves a screen hash**, so UI phases stop tripping the suite.
 
-  **`debug/golden-harness.js` is uncommitted and implements the second option** —
-  narrowing `readScreen()` to the centre 60% of the painting (`SCREEN_SAMPLE_
-  FRACTION`), with `sampleRegionScreen()` remapping painting fractions into the
-  crop so `assertGreen`'s sample points keep pointing at the same paint. It was
-  written before Phase 9 and is not mine; it looks complete and self-consistent,
-  but it has **not been decided on and the baseline has not been re-recorded**,
-  so the suite still reports 12 drifts either way.
-
-  Confirmed during Phase 9: the drift is unchanged by everything since Phase 7.
-  Running the suite with the Phase 9 changes applied and only the harness change
-  reverted reproduced the Phase 7 screen hashes exactly. So whichever way this is
-  decided, it is a Phase 7 decision, not a Phase 9 one.
-
-  Decide, then either `npm run test:golden:record` or finish the narrowing and
-  record once. Re-recording is the one move that can also hide an unrelated
-  regression riding along, which is why it is still not done.
 - **Pinch zoom-out crops the image** — still open, unchanged by Phase 7. Zoom and
   canvas resize are the same gesture, so zooming out destroys paint. Separate
   view zoom from the painting rectangle; see UX finding 1. This one loses user

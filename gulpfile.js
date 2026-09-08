@@ -54,6 +54,10 @@ const paths = {
     // iro.js before app/ui/color.js, which constructs an iro.ColorPicker.
     // Vendored verbatim, MPL-2.0 -- see docs/UI-COMPONENTS.md. colorpicker.js
     // and its two GL programs are gone (Phase 8).
+    // The pigment cube in JS. Must come BEFORE iro.js: iro builds its hue ring
+    // gradients through the cube at module load (Phase 10). The bundle is
+    // concatenated in this order, so this ordering is the load order.
+    'app/ui/ryb.js',
     'lib/iro.js',
     'app/ui/color.js',
     'app/ui/sliders.js',

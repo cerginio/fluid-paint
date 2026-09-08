@@ -109,6 +109,11 @@
     <script src="fluid-engine/index.js"></script>
     <!-- colorpicker.js is GONE (Phase 8): the GL hue ring, its two programs and
          its hand-written hit tests are replaced by the iro.js wheel below. -->
+    <!-- ryb.js BEFORE iro.js, not merely before color.js: iro builds its hue
+         ring gradients through the pigment cube at MODULE LOAD, so the cube has
+         to exist by then. Loaded the other way round the ring silently falls
+         back to RGB while every other surface is pigment. -->
+    <script src="app/ui/ryb.js"></script>
     <script src="lib/iro.js"></script>
     <script src="app/ui/color.js"></script>
     <script src="app/ui/sliders.js"></script>

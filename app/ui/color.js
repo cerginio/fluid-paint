@@ -23,14 +23,50 @@
  * A as numbers in 0..1**, which is the app's existing `brushColorHSVA` contract.
  * It never hands an RGB triple to anything downstream, and it never asks iro.js
  * what colour the paint "is" -- iro's own `color.rgb` is the colour of the
- * WIDGET, which is an RGB rendering of the hue the user picked, not the pigment
- * that hue becomes. Those two are different by design and conflating them is the
- * exact mistake §3b warns about.
+ * WIDGET, not the pigment that hue becomes. Those two are different by design
+ * and conflating them is the exact mistake §3b warns about.
  *
- * The wheel therefore shows an RGB interpretation of the chosen hue. That is
- * correct and intended: it is a colour *chooser*, and a user picking "blue"
- * should see blue. What the paint then does with that hue is the simulation's
- * business, and the Digital/Natural toggle is what says which model composites.
+ * ---------------------------------------------------------------------------
+ * PHASE 10: the widget now shows PIGMENT, not light
+ * ---------------------------------------------------------------------------
+ *
+ * Phase 8 left the above rule intact on the data path but drew the widget in
+ * iro's own RGB, on the reasoning that "a user picking blue should see blue".
+ * That reasoning was wrong, and measurably so: `hsvToRyb()` is not a round trip
+ * with `rybToRgb()`, so the hue the wheel NAMES is not the hue the canvas
+ * PAINTS. Measured across the wheel (see app/ui/ryb.js for the table):
+ *
+ *     wheel says blue   (240deg) -> canvas paints pure YELLOW
+ *     wheel says yellow ( 60deg) -> canvas paints purple
+ *     wheel says green  (120deg) -> canvas paints slate blue
+ *
+ * Red is the only fixed point; everything else is off by roughly 120deg. So the
+ * picker was not showing "an RGB interpretation of the hue" -- it was showing a
+ * different colour from the one about to come out of the brush. That is the
+ * additive/subtractive mismatch, and it is what `_repaint()` below fixes.
+ *
+ * The fix is the one the OLD picker already had. `app/shaders/picker.frag:52`:
+ *
+ *     vec3 hsvToRgb (vec3 hsv) { return rybToRgb(hsv2ryb(hsv)); }
+ *
+ * -- every swatch went through the same two steps as the paint. `_repaint()`
+ * does exactly that in CSS, for the four surfaces iro.js paints from its own
+ * RGB assumption. The geometry, hit-testing, handles and events remain iro's.
+ *
+ * Note what did NOT change: the H/S/V/A boundary above is untouched, and the
+ * hue the user picks is still the same number. Only its swatch moved. The
+ * golden hashes are the proof -- they are unchanged by this phase, because
+ * nothing here is on the paint path.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY NOT PATCH lib/iro.js
+ * ---------------------------------------------------------------------------
+ *
+ * iro.js is MPL-2.0 and docs/UI-COMPONENTS.md sets the rule: do not edit it in
+ * place, wrap it, keep the copyleft boundary where it is. Every surface below is
+ * therefore restyled from OUTSIDE, through the DOM iro rendered. The class names
+ * used (`.IroWheelHue`, `.IroSliderGradient`, `.IroHandle`) are iro's public
+ * rendered output, and the Phase 8 probe already asserts them.
  *
  * ---------------------------------------------------------------------------
  * What this does NOT own
@@ -56,17 +92,31 @@ const DEFAULT_PICKER_WIDTH = 200;
 const DEGREES = 360;
 const PERCENT = 100;
 
+
 class ColorControl {
   /**
    * @param {Object}   options
    * @param {HTMLElement} options.element   the slot to mount into
    * @param {function(): number[]} options.getHSVA  live [h,s,v,a], all 0..1
    * @param {function(): void} options.onChange  called after the array is edited
+   * @param {function(): boolean} [options.isAdditive]  true while the Digital
+   *   (RGB) model is selected. The swatches follow the model the paint is
+   *   actually using, so flipping the toggle must repaint the widget -- see
+   *   `setAdditive()`. Defaults to Natural (subtractive) when not supplied.
    */
-  constructor({ element, getHSVA, onChange }) {
+  constructor({ element, getHSVA, onChange, isAdditive }) {
     this.element = element;
     this.getHSVA = getHSVA;
     this.onChange = onChange || (() => {});
+    this.isAdditive = isAdditive || (() => false);
+
+    /*
+     * Hand the model down to lib/iro.js, which draws every surface through
+     * IroColor.hsvToRgb and needs to know which of the two cube paths to take.
+     * A live function rather than a value: the toggle flips after this control
+     * is built, and a snapshot would freeze the widget in the startup model.
+     */
+    iroAdditiveModel = () => this.isAdditive();
 
     /*
      * Guards the round trip. `setHSVA()` writes the app's colour into the
@@ -134,6 +184,51 @@ class ColorControl {
     if (width === this.picker.state.width) return;
     this.picker.resize(width);
   }
+
+  /**
+   * Called when the Natural/Digital toggle moves. The two models composite
+   * differently AND display differently (`rybToRgb`'s `#ifdef RGB` branch), so
+   * the swatches have to change with them or the widget goes back to describing
+   * a colour the paint is not using.
+   */
+  setAdditive() {
+    /*
+     * The wheel's two hue gradients are built ONCE at module load (they are
+     * expensive and never change while the model is fixed), so a re-render
+     * alone would redraw the sliders and handles in the new model while the
+     * ring kept the old one -- a half-converted widget, which is worse than
+     * either model on its own. Rebuild them first, then re-render.
+     */
+    if (typeof iro.rebuildHueGradients === 'function') iro.rebuildHueGradients();
+
+    // setState is iro's own re-render entry (it is what setOptions uses).
+    // Passing the current colour is a no-op change that still forces the
+    // vdom pass, which is exactly what is wanted: the colour did not move,
+    // only the space it is drawn in.
+    this.picker.setState({ color: this.picker.color });
+  }
+
+  /*
+   * ------------------------------------------------------------------------
+   * Widget -> pigment
+   * ------------------------------------------------------------------------
+   *
+   * There is deliberately no repaint code here any more.
+   *
+   * The first version of this phase overwrote iro's rendered DOM from outside
+   * -- the ring's conic-gradient, both slider gradients, the handle fills -- to
+   * avoid editing a vendored file. That worked, but it meant re-deriving in CSS
+   * what iro already computes internally, and racing its re-renders to do it.
+   *
+   * The colour space now lives where it belongs: `IroColor.hsvToRgb` in
+   * lib/iro.js goes through the pigment cube, and every surface derives from
+   * that one function -- so the ring, the sliders, the handles and `color.rgb`
+   * are all pigment with no help from here. lib/iro.js is this project's own
+   * long-standing fork, not a pristine upstream drop, so fixing it at the
+   * source is the honest place for it.
+   *
+   * What this file still owns is WHICH model is drawn -- see `setAdditive()`.
+   */
 
   /*
    * Widget -> app. Mutates the live array in place; see the class comment on

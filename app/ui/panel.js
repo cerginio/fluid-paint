@@ -228,6 +228,31 @@ class ToolPanel {
     if (this.hueHandle) this.hueHandle.style.left = (hue * 100).toFixed(3) + '%';
   }
 
+  /**
+   * Repaint the hue stripe in pigment (Phase 10).
+   *
+   * The stripe is the hue control while the panel is collapsed, so it has to
+   * name the same colour the wheel and the canvas do. Its CSS gradient is
+   * authored in RGB and is about 120deg away from the pigment -- see the note
+   * on `#bar-hue-stripe` in app/layout.css.
+   *
+   * Sampled rather than given six stops, because the pigment path between hues
+   * is curved; the reasoning is the same as for the wheel's ring, in
+   * app/ui/color.js.
+   *
+   * @param {boolean} additive  true while the Digital (RGB) model is selected
+   */
+  paintHueStripe(additive) {
+    if (!this.hueStripe || typeof cssPigment !== 'function') return;
+    const STOPS = 24;
+    const stops = [];
+    for (let i = 0; i <= STOPS; i++) {
+      const t = i / STOPS;
+      stops.push(cssPigment(t, 1, 1, additive) + ' ' + (t * 100).toFixed(2) + '%');
+    }
+    this.hueStripe.style.background = 'linear-gradient(to right, ' + stops.join(', ') + ')';
+  }
+
   destroy() {
     window.removeEventListener('resize', this._onWindowResize);
   }

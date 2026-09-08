@@ -13,7 +13,10 @@
  *   3. a tap on the grip collapses to the compact bar, and back
  *   4. the compact bar's controls (size slider, hue stripe) stay usable
  *   5. the hue stripe sets hue and ONLY hue -- saturation/value/alpha survive
- *   6. the colour picker follows its DOM slot, including after a drag
+ *   6. the colour picker sits in its DOM slot, including after a drag
+ *      (Phase 8: it IS the slot's content now, so this asks whether the widget
+ *      is inside the slot's box rather than whether a GL draw was told where
+ *      the slot is)
  *   7. the breakpoints change the layout at phone sizes
  *   8. a press on the panel does not paint, now that the geometric
  *      "is the pointer over the panel" test is gone
@@ -98,10 +101,27 @@ const metrics = () => ({
     return { w: Math.round(r.width), h: Math.round(r.height),
              top: Math.round(r.top), left: Math.round(r.left) };
   })(),
-  picker: {
-    left: Math.round(window.__painter.colorPicker.left),
-    bottom: Math.round(window.__painter.colorPicker.bottom),
-  },
+  /*
+   * The picker's rect, in CSS pixels.
+   *
+   * Phase 8 changed what this can even be. The GL picker had `left`/`bottom` in
+   * BACKING-STORE pixels because it was drawn into the canvas, and the checks
+   * below compared those numbers against the slot's rect to prove the draw
+   * followed the layout. iro.js is DOM, so there is no such pair to read -- the
+   * question becomes whether the widget's box is inside the slot's box, which
+   * the browser guarantees by containment rather than by arithmetic.
+   *
+   * Reported in the same shape so the checks stay readable, but measured off the
+   * element. `null` if the widget is missing, which fails the checks loudly
+   * rather than passing on undefined.
+   */
+  picker: (() => {
+    const el = document.querySelector('#color-picker-slot .IroColorPicker');
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { left: Math.round(r.left), top: Math.round(r.top),
+             w: Math.round(r.width), h: Math.round(r.height) };
+  })(),
   slotCss: (() => {
     const s = document.getElementById('color-picker-slot');
     if (!s) return null;
@@ -151,8 +171,9 @@ const metrics = () => ({
       check('panel floats over the canvas', [m.panelCss.left, m.canvasCss.left],
         ([p, c]) => p > c, 'the panel is inset within the canvas, not beside it');
 
-      check('picker follows its slot', [m.picker.left, m.slotCss.left - m.canvasCss.left],
-        ([a, b]) => a === b, 'picker.left == slot.left relative to the canvas');
+      check('the picker is inside its slot', [m.picker, m.slotCss],
+        ([p, s]) => p !== null && p.left >= s.left - 1 && p.left + p.w <= s.left + s.w + 1,
+        'Phase 8: the widget is the slot content, so containment IS the check');
 
       await context.close();
     }
@@ -181,8 +202,9 @@ const metrics = () => ({
       check('the panel is still expanded', await page.evaluate(() => document.getElementById('ui').dataset.collapsed),
         (v) => v === 'false', 'a real drag must NOT toggle the collapse');
 
-      check('the picker followed the panel', [after.picker.left, after.slotCss.left - after.canvasCss.left],
-        ([a, b]) => a === b, 'the GL picker tracks the moved DOM slot');
+      check('the picker moved with the panel', [after.picker, after.slotCss],
+        ([p, s]) => p !== null && p.left >= s.left - 1 && p.left + p.w <= s.left + s.w + 1,
+        'it is inside the panel, so a drag moves it for free -- no repositioning code');
 
       check('the canvas did not change size', [before.canvasCss.w, after.canvasCss.w],
         ([b, a]) => b === a, 'a floating panel never resizes the painting');
@@ -339,8 +361,9 @@ const metrics = () => ({
       check('panel is nearly full width but inset', m.panelCss.w,
         (w) => w === 366, '390 - 2*12');
 
-      check('picker still follows its slot', [m.picker.left, m.slotCss.left - m.canvasCss.left],
-        ([a, b]) => a === b, 'the old COLOR_PICKER_TOP would be off-canvas here');
+      check('the picker is still inside its slot at this breakpoint', [m.picker, m.slotCss],
+        ([p, s]) => p !== null && p.left >= s.left - 1 && p.left + p.w <= s.left + s.w + 1,
+        'the old COLOR_PICKER_TOP would have put it off-canvas here');
 
       await context.close();
     }

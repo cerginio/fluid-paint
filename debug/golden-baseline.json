@@ -1,11 +1,11 @@
 {
-  "recorded": "2026-09-07T11:42:09.400Z",
+  "recorded": "2026-09-08T07:36:32.415Z",
   "seed": 20260907,
   "note": "headless SwiftShader; not comparable to real-GPU hashes",
   "entries": {
     "webgl2/dpr1/basic": {
       "paintHash": "1de870d1",
-      "screenHash": "6bf3ad4b",
+      "screenHash": "5d94f419",
       "resolution": "1860x1140",
       "webgl": 2,
       "dpr": 1,
@@ -13,7 +13,7 @@
     },
     "webgl2/dpr1/colorMix": {
       "paintHash": "8fe5c7ab",
-      "screenHash": "9573739d",
+      "screenHash": "9ea8a5c4",
       "resolution": "1860x1140",
       "webgl": 2,
       "dpr": 1,
@@ -21,7 +21,7 @@
     },
     "webgl2/dpr1/wetBlend": {
       "paintHash": "06ace8f7",
-      "screenHash": "3bb1f42d",
+      "screenHash": "6f1bf85c",
       "resolution": "1860x1140",
       "webgl": 2,
       "dpr": 1,
@@ -29,7 +29,7 @@
     },
     "webgl1/dpr1/basic": {
       "paintHash": "65e76ea0",
-      "screenHash": "d4a73b34",
+      "screenHash": "ed6498a8",
       "resolution": "1860x1140",
       "webgl": 1,
       "dpr": 1,
@@ -37,7 +37,7 @@
     },
     "webgl1/dpr1/colorMix": {
       "paintHash": "80e13791",
-      "screenHash": "236927c9",
+      "screenHash": "811e440b",
       "resolution": "1860x1140",
       "webgl": 1,
       "dpr": 1,
@@ -45,7 +45,7 @@
     },
     "webgl1/dpr1/wetBlend": {
       "paintHash": "b25c5a04",
-      "screenHash": "36207149",
+      "screenHash": "c73dfef4",
       "resolution": "1860x1140",
       "webgl": 1,
       "dpr": 1,
@@ -53,7 +53,7 @@
     },
     "webgl2/dpr2/basic": {
       "paintHash": "ddb43f43",
-      "screenHash": "404a5149",
+      "screenHash": "10ed349c",
       "resolution": "2220x1375",
       "webgl": 2,
       "dpr": 2,
@@ -61,7 +61,7 @@
     },
     "webgl2/dpr2/colorMix": {
       "paintHash": "9676d0b9",
-      "screenHash": "dc15e6ee",
+      "screenHash": "d8148cb5",
       "resolution": "2220x1375",
       "webgl": 2,
       "dpr": 2,
@@ -69,7 +69,7 @@
     },
     "webgl2/dpr2/wetBlend": {
       "paintHash": "407e7e73",
-      "screenHash": "df2dcf44",
+      "screenHash": "0f30bc85",
       "resolution": "2220x1375",
       "webgl": 2,
       "dpr": 2,
@@ -77,7 +77,7 @@
     },
     "webgl1/dpr2/basic": {
       "paintHash": "14531823",
-      "screenHash": "c099dd83",
+      "screenHash": "8cd90003",
       "resolution": "2220x1375",
       "webgl": 1,
       "dpr": 2,
@@ -85,7 +85,7 @@
     },
     "webgl1/dpr2/colorMix": {
       "paintHash": "0b4f40c0",
-      "screenHash": "66cf680b",
+      "screenHash": "f6b05d55",
       "resolution": "2220x1375",
       "webgl": 1,
       "dpr": 2,
@@ -93,7 +93,7 @@
     },
     "webgl1/dpr2/wetBlend": {
       "paintHash": "1399e585",
-      "screenHash": "62672c7b",
+      "screenHash": "b4ffd1f3",
       "resolution": "2220x1375",
       "webgl": 1,
       "dpr": 2,

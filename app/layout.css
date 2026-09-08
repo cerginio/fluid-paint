@@ -187,10 +187,15 @@ html, body {
 
 /* The hue stripe: a full-spectrum gradient, tap or drag to set hue.
  *
- * The gradient is authored in RGB because that is what CSS can express, and it
- * is only an INDICATOR -- the hue it reports is fed through the app's existing
- * HSVA -> RYB path, so the subtractive colour model is untouched. Do not be
- * tempted to read colour back out of this gradient. */
+ * The gradient below is a FALLBACK only. Phase 10 overwrites it at startup with
+ * the pigment sweep, via ToolPanel.paintHueStripe() -- the RGB stops here name
+ * hues about 120deg away from what the brush actually paints (blue on this
+ * stripe paints yellow), so this stripe used to disagree with both the wheel
+ * and the canvas. It is left in place so the control is still legible if
+ * scripting fails before the repaint runs.
+ *
+ * Still do not read colour back out of this gradient: the hue it reports is a
+ * position, fed through the app's HSVA -> RYB path like every other hue. */
 #bar-hue-stripe {
   position: relative;
   height: 18px;
