@@ -30,6 +30,62 @@ const SIMULATION_RENDER_TARGETS = 7;
 // this, so the estimate is a ceiling, which is the useful direction to err.
 const BYTES_PER_RGBA_TEXEL = 16;
 
+/*
+ * The engine's own shader files, relative to fluid-engine/.
+ *
+ * Phase 9 finding. Until the second host existed this list lived only in the
+ * app's common.js as ENGINE_SHADERS, which meant a host had to carry an
+ * inventory of the ENGINE's internals: nineteen filenames it has no reason to
+ * know, that go stale the moment a pass is added, and whose failure mode is a
+ * shader compiled from `undefined` deep inside a constructor rather than a
+ * named error. The engine knows which shaders it needs; it should say so.
+ *
+ * This is a manifest, not a loader. The engine still does no I/O -- the host
+ * fetches these however it likes and hands back the sources -- because a host
+ * may bundle them, inline them, or serve them from somewhere the engine cannot
+ * guess. See FluidEngine.SHADER_FILES and the note on loadShaderTrees().
+ */
+const ENGINE_SHADER_FILES = Object.freeze([
+  'shaders/splat.vert', 'shaders/splat.frag',
+  'shaders/fullscreen.vert',
+  'shaders/advect.frag',
+  'shaders/divergence.frag',
+  'shaders/jacobi.frag',
+  'shaders/subtract.frag',
+  'shaders/resize.frag',
+
+  'shaders/project.frag',
+  'shaders/distanceconstraint.frag',
+  'shaders/planeconstraint.frag',
+  'shaders/bendingconstraint.frag',
+  'shaders/setbristles.frag',
+  'shaders/updatevelocity.frag',
+
+  'shaders/brush.vert', 'shaders/brush.frag',
+  'shaders/painting.vert', 'shaders/painting.frag',
+  'shaders/output.frag',
+]);
+
+/*
+ * Which colour model the painting is composited in.
+ *
+ * Phase 9 finding. `renderToTexture({ colorModel })` has always been an engine
+ * parameter, but the only public NAME for its two values lived in the app's
+ * paint-setup.js, while the renderer compared against a private literal. So a
+ * second host had to pass a bare number or copy the app's enum -- and the
+ * failure mode is silent, because every value that is not exactly RGB falls
+ * through to the RYB branch. A host that passed the string 'rgb' would get the
+ * subtractive model with no error anywhere.
+ *
+ * RYB is David Li's subtractive pigment cube and the default; RGB is the
+ * additive comparison. The RYB path is protected -- see §3b of the plan and
+ * docs/COLOR-MODEL.md. Do not "fix" RYB into RGB.
+ */
+const COLOR_MODEL = Object.freeze({
+  RYB: 0,
+  RGB: 1,
+});
+
 /**
  * An opaque handle to a saved paint state.
  *
@@ -408,4 +464,36 @@ class FluidEngine {
       area * BYTES_PER_RGBA_TEXEL * (SIMULATION_RENDER_TARGETS + historyDepth);
     return Math.sqrt(budgetBytes / perUnitScale);
   }
+}
+
+/*
+ * The two things a host must know BEFORE it can construct an engine, published
+ * on the class for the same reason the budget arithmetic is static: the host
+ * needs them at a moment when no instance exists.
+ *
+ * SHADER_FILES is what to load; COLOR_MODEL is what to pass to renderToTexture.
+ * Both were app-owned until Phase 9 built a second host and found that hosting
+ * the engine required copying pieces of the first host. See examples/minimal/.
+ */
+FluidEngine.SHADER_FILES = ENGINE_SHADER_FILES;
+FluidEngine.COLOR_MODEL = COLOR_MODEL;
+
+/*
+ * COLOR_MODEL.RGB is the name; renderer.js's private ColorModelRGB is the value
+ * actually compared against. They are two declarations of one number, because
+ * there is no module system here and renderer.js loads first -- so this checks
+ * at startup that they still agree.
+ *
+ * It throws rather than warns. A disagreement means every host passing
+ * COLOR_MODEL.RGB silently gets the RYB path instead, since the renderer's test
+ * is an equality and everything that fails it falls through to RYB. That is a
+ * wrong picture with no error, which is the failure mode this whole phase kept
+ * running into. Better to fail at load, loudly, in the one place that can tell.
+ */
+if (typeof ColorModelRGB !== 'undefined' && ColorModelRGB !== COLOR_MODEL.RGB) {
+  throw new Error(
+    `FluidEngine.COLOR_MODEL.RGB (${COLOR_MODEL.RGB}) disagrees with ` +
+    `renderer.js's ColorModelRGB (${ColorModelRGB}); the renderer would ` +
+    'silently composite in RYB. Make them equal.'
+  );
 }

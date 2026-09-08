@@ -2,9 +2,10 @@
 
 What was vendored, from where, at what version, and what was changed.
 
-Started in Phase 6 with the pointer dispatcher. The rest of the inventory
-(`iro.js`, the sliders fork) arrives with Phases 7-8; the licence notes for
-`iro.js` in particular are a Phase 10 deliverable per the extraction plan.
+Started in Phase 6 with the pointer dispatcher; `lib/iro.js` arrived in Phase 8.
+The **sliders fork was deliberately not done** -- see the section at the bottom,
+because a plan item that was dropped on purpose is worth more written down than a
+plan item that was silently skipped.
 
 ## `app/ui/pointer-dispatcher.js`
 
@@ -116,3 +117,123 @@ expected values:
 **Sabotage-verified**: inverting the X delta made `movedX` −50, and dropping the
 `pointerType !== 'pen'` guard made the mouse height 50. Both were caught, so the
 passes mean something. If either path is rewritten, write the probe back.
+
+## `lib/iro.js`
+
+| | |
+|---|---|
+| Source | `D:\work\js-games\ua-dream\tilecraft\lib\iro.js` |
+| Upstream | iro.js **v5.5.2**, (c) 2016-2021 James Daniel, <https://github.com/jaames/iro.js> |
+| Vendored | Phase 8, 2026-09-08 |
+| Size | 1850 lines, UMD build with Preact bundled |
+| **Licence** | **MPL 2.0** |
+| Vendored sha256 | `98223fc8c15b3c576715d8e147ead241ae3fc5f906dc38c56b1857774987589d` |
+
+Supplies the colour wheel and the value/alpha sliders behind `app/ui/color.js`.
+It replaced `colorpicker.js`, its two GL programs (`app/shaders/picker.vert` /
+`picker.frag`, both deleted) and its hand-written circle/box hit tests.
+
+### MPL-2.0 obligations, and how they are met
+
+MPL 2.0 is **file-level** copyleft: the obligation attaches to the file, not to
+the program that links it. Concretely, for this project:
+
+1. **The file keeps its copyright banner.** The `/*! iro.js v5.5.2 ... Licensed
+   under MPL 2.0 */` header at the top of `lib/iro.js` is intact and must stay.
+2. **Source availability.** `lib/iro.js` is the source, it is in this repository
+   unminified, and the upstream URL is recorded above.
+3. **Modifications must be disclosed.** There is one. See below.
+4. **Do not edit it in place.** If behaviour has to change, wrap it in
+   `app/ui/color.js`. That keeps the copyleft boundary where it already is.
+
+### It is NOT pristine -- one upstream modification
+
+**This matters and was nearly missed.** The tilecraft copy carries a local patch
+that sits *outside* the copyright banner and is easy to read past:
+
+```js
+let iroContainerScale = function () { return 1; };   // line 7
+```
+
+...plus three call sites (`var scale = iroContainerScale(props.id);` at roughly
+lines 812, 976 and 1046). It exists so a host can tell iro.js that its container
+is CSS-`scale`d, which iro cannot otherwise detect -- tilecraft overrides the
+global from its own `color-picker.js`.
+
+**In this project it is inert.** Nothing assigns `iroContainerScale`, so it keeps
+its `() => 1` default, and this panel is not CSS-scaled. It is recorded here
+because MPL-2.0 requires modifications to be disclosed, and because a future
+re-sync from pristine upstream would silently drop it -- which would matter to
+anyone who later *does* scale the container.
+
+The alternative was fetching a pristine v5.5.2, which buys a simpler licence note
+at the cost of diverging from the copy tilecraft runs, so a shared fix would then
+have two places to land. Keeping one shared copy and documenting the delta was
+judged the better trade.
+
+### Integration notes -- do not "simplify" these
+
+**iro.js is RGB-native; this simulation is RYB.** The wheel emits HSV/RGB, and
+`app/ui/color.js` reads **only H, S, V and A** out of it, as 0..1, into the app's
+existing `brushColorHSVA`. It deliberately never reads `color.rgb`: that is the
+colour of the *widget*, an RGB rendering of the chosen hue, not the *pigment*
+that hue becomes once `hsvToRyb()` has run. Conflating the two is precisely the
+section 3b mistake, and it produces a plausible-looking wrong picture with no
+error anywhere. `debug/phase8-probe.js` checks the paint texture's raw RYB for
+exactly this, and the check was sabotage-verified by making the control read
+`color.rgb` -- a blue stroke came back grey.
+
+**`color.set()` silently ignores a partial object.** It dispatches on a complete
+model -- `{r,g,b}`, `{h,s,v}`, `{h,s,l}`, `{kelvin}` or a string -- and anything
+else falls through every branch and does nothing at all. No throw, no warning. So
+`color.set({ a: 0.25 })` is a no-op that reads exactly like the app ignoring its
+own control; use `color.setChannel('hsva', 'a', 0.25)` or pass all four channels.
+`ColorControl.setHSVA()` passes all four, which is why it is unaffected -- but the
+first version of the Phase 8 probe hit this and lost two checks to it.
+
+**Units differ on both sides.** iro reports hue in DEGREES (0..360) and
+saturation/value in PERCENT (0..100); this app stores all four channels as 0..1.
+Two separate conversion factors, because one shared factor would be silently
+wrong for hue.
+
+**The echo guard is load-bearing.** `setHSVA()` writes into the widget, which
+makes iro emit `color:change`, which would write straight back -- returning a
+slightly different value after iro's own rounding. `ColorControl.applying` blocks
+that return trip. Without it the hue stripe and the wheel fight each other, and a
+dragged stripe visibly sticks.
+
+**Only the slot's WIDTH is styled.** iro.js takes a single `width` and derives the
+wheel diameter, both sliders and the gaps from it, so `#color-picker-slot` sets no
+height -- a fixed height would either clip the alpha slider or leave dead space,
+and would have to be re-guessed at every breakpoint. `ColorControl` re-measures
+from a `ResizeObserver`, so the breakpoint rules only change the width.
+
+## The sliders fork that was NOT done
+
+Section 5a of the extraction plan specified forking tilecraft's
+`SlidersComponent` (`tilecraft/components.js`, 418 lines) into
+`app/ui/sliders.js`, keeping `components.css` for "the vertical-range styling
+with full vendor-prefix coverage". **Reading the source before writing the fork
+showed the premise does not hold here**, and the item was dropped deliberately:
+
+- It is a **vertical** component -- it positions with `thumb.style.bottom` and
+  `bar.style.height`, over `<input type="range" orient="vertical">`. Every slider
+  in this panel is horizontal, and the compact bar's size slider is explicitly a
+  horizontal strip beside the hue stripe.
+- The vendor-prefixed CSS that justified taking it is ~70 of its 268 lines and is
+  entirely `input[type=range][orient=vertical]` selectors. Ported to horizontal it
+  would be rewritten, not kept.
+- The existing slider is 160 lines, already pointer-event based, already handles
+  pointer capture and `touch-action`, and is device-tested (Phase 6 retest:
+  tablet 5/5 with finger and stylus).
+
+So the fork would have been a vertical-to-horizontal port that discarded the
+asset it was taken for, replacing working device-tested code. `slider.js` was
+instead **moved** to `app/ui/sliders.js` unchanged, and `buttons.js` to
+`app/ui/buttons.js`, so the whole UI now lives under `app/ui/`.
+
+**The one real gap this leaves.** tilecraft's component is built on a native
+`<input type="range">` and therefore gets keyboard and screen-reader support for
+free; ours is a `<div>` with pointer handlers and has neither. That is a genuine
+accessibility gap and a reasonable future task -- but it is an argument for adding
+`role="slider"` and arrow-key handling, not for importing a vertical component.

@@ -618,21 +618,41 @@ rather than by editing the vendored file.
   because `readScreen()` hashes the painting rectangle and the old panel
   overlapped it. Baseline deliberately not re-recorded; see HANDOFF Open items.
 
-### Phase 8 — Controls
-- `app/ui/sliders.js` — the scoped fork per §5a. Brush scale, bristle count,
-  fluidity, quality, opacity.
-- `app/ui/color.js` — iro.js wheel, HSVA -> RYB at the boundary. The natural
-  colour model stays the default; the RGB toggle is a control, not a setting
-  buried in code.
-- The slot is already reserved: Phase 7 draws the GL picker over
-  `#color-picker-slot`'s rect, so this is "fill the slot and delete the GL
-  draw", not "find where the picker lives".
-- The Phase 7 hue stripe stays. It is a compact mid-stroke control, not a
-  colour editor: it sets hue only and is verified to leave saturation, value
-  and alpha untouched. Do not fold it into the wheel.
-- Delete `colorpicker.js`, `slider.js`, `buttons.js`.
-- `brushviewer.js` already moved to `fluid-engine/debug/` in Phase 1; nothing
-  to do here.
+### Phase 8 — Controls — DONE
+
+- `lib/iro.js` — vendored v5.5.2, MPL-2.0, **unmodified by us** but *already*
+  carrying one upstream-local patch (`iroContainerScale`), which is disclosed
+  per the licence in `docs/UI-COMPONENTS.md`. Inert here.
+- `app/ui/color.js` — `ColorControl`: the iro wheel plus value and alpha
+  sliders, mounted into `#color-picker-slot`. HSVA at the boundary and nothing
+  else; `color.rgb` is deliberately never read, because that is the WIDGET's
+  colour, not the pigment.
+- `colorpicker.js` deleted, with `app/shaders/picker.vert` and `picker.frag`.
+  Shader lint went 23 → 21.
+- **`_positionColorPicker()` and `COLOR_PICKER_LEFT`/`TOP` deleted too.** The
+  picker no longer needs telling where its slot is; it IS the slot's content.
+  Same for the picker's `scale`: CSS pixels are a DOM widget's native unit.
+- **Every `colorPicker.onMouse*` forward deleted**, and with them the
+  `isInUse()` early return, the two cursor branches and the `!isInUse()` term
+  in the brush-draw test. The browser hit-tests a real element, so the canvas
+  never sees the pointer — the same trade Phase 7 made for the panel.
+- The RGB toggle now reads `FluidEngine.COLOR_MODEL` (Phase 9 finding 2), so
+  the app's own `ColorModel` enum is deleted. One name for one number.
+- The Phase 7 hue stripe stays and still sets hue only; the wheel pushes it so
+  the two agree when the panel collapses.
+- **The §5a sliders fork was deliberately NOT done.** The tilecraft component
+  is vertical and its valuable CSS is all vertical-specific, so the fork would
+  have been a port that discarded the asset it was taken for, replacing
+  device-tested code. `slider.js` → `app/ui/sliders.js` and `buttons.js` →
+  `app/ui/buttons.js`, both moved unchanged. Reasoning and the one real gap it
+  leaves (keyboard/a11y) are in `docs/UI-COMPONENTS.md`.
+- `brushviewer.js` did **not** move to `fluid-engine/debug/` in Phase 1 — the
+  plan said so twice and was wrong both times. It is still at the repo root and
+  still loaded; §5a's delete-list also names it and then says it is not
+  deleted. Left alone here rather than swept up by accident.
+- Verified by `debug/phase8-probe.js` at **17/17**, sabotage-verified twice.
+  Goldens: all 12 `paint` hashes byte-identical, source and dist — **no RGB
+  leaked into the pigment**, which is the whole risk of this phase.
 
 ### Phase 8a — Bristle re-seeding: identical stamps on repeated taps
 
@@ -688,11 +708,32 @@ each other — today they are near-identical, and the check is that they stop
 being so while a single continuous drag is unchanged. Sabotage it by fixing the
 offset to a constant; the probe must fail.
 
-### Phase 9 — Prove reuse
-- A minimal second host: a bare canvas, `new FluidEngine(canvas)`, three
-  controls. No panel, no picker.
-- If this host needs anything the API does not expose, the API is wrong —
-  and that is the point of building it.
+### Phase 9 — Prove reuse — DONE
+
+- `examples/minimal/` — a bare canvas, `new FluidEngine(...)`, three controls
+  (hue, brush size, fluidity) plus Clear. No panel, no picker, no
+  `paint-setup.js`, no `common.js`, no `app/shaders/`, no `viewport.js`, no
+  `debug/`. Loads the engine and exactly four dependencies.
+- Verified by `debug/phase9-probe.js` at **18/18**, sabotage-verified twice.
+  Goldens: all 12 `paint` hashes byte-identical on source AND dist — the
+  simulation is untouched. Shader lint 23.
+- **It found three things, and one of them was a real bug that broke painting
+  entirely.** Full record in `docs/API-FINDINGS.md`:
+  1. `Brush.update()` read a bare `presenter` global that only `index.html`
+     declares, so in any other host it threw a `ReferenceError` **every frame,
+     before `splat()` was reached** — a healthy-looking canvas that deposits
+     nothing. Fixed with `typeof`. The engine must not require a global its host
+     never heard of.
+  2. The colour-model enum was app-owned while being an engine parameter →
+     `FluidEngine.COLOR_MODEL`, with a load-time assertion that it agrees with
+     `renderer.js`'s private literal (everything failing that equality falls
+     through to RYB, silently).
+  3. The engine's own shader manifest was app-owned → `FluidEngine.SHADER_FILES`.
+     `common.js`'s `SHADER_TREES` became the function `shaderTrees()` because it
+     loads before the engine.
+- The parts of the API that held are recorded too: no host needed
+  `engine.simulator`/`.brush`/`.renderer`, and `canDepositPaint`, the `fluidity`
+  getter and `renderToTexture()`'s host-owned target each earned themselves.
 
 ### Phase 9a — A named stroke API: `beginStroke` / `strokeTo` / `endStroke`
 

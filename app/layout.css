@@ -326,12 +326,33 @@ html, body {
  * element's rect and draws the picker there, which is what lets the picker
  * follow the layout instead of sitting at the hardcoded COLOR_PICKER_TOP 523.
  */
+/* The iro.js colour wheel mounts in here (Phase 8).
+   Only the WIDTH is set. iro.js takes a single `width` option and derives the
+   wheel's diameter, the two sliders and the gaps between them from it, so the
+   height is whatever that layout comes to -- a fixed height here would either
+   clip the alpha slider or leave dead space below it, and would have to be
+   re-guessed at every breakpoint. app/ui/color.js measures this element and
+   calls picker.resize() from a ResizeObserver, so the breakpoint rules below
+   only need to change the width. */
 #color-picker-slot {
   margin-left: 20px;
   margin-top: 6px;
   width: 260px;
-  height: 200px;
   pointer-events: auto;
+}
+
+/* iro.js renders its own markup; these are the few things it cannot know.
+   The wheel is centred in the slot because the slot can be wider than the
+   picker at some breakpoints, and touch-action:none stops a drag on the wheel
+   from being claimed by the browser as a scroll -- the same rule the sliders
+   and the canvas need. */
+#color-picker-slot .IroColorPicker {
+  margin: 0 auto;
+}
+
+#color-picker-slot .IroWheel,
+#color-picker-slot .IroSlider {
+  touch-action: none;
 }
 
 #undo-button { margin-left: var(--edge-pad); }
@@ -412,7 +433,7 @@ html, body {
   .button { margin-top: 12px; }
   .control-label { margin-top: 6px; }
   .slider { width: 200px; }
-  #color-picker-slot { width: 190px; height: 150px; margin-left: 12px; }
+  #color-picker-slot { width: 190px; margin-left: 12px; }
   #models div { width: 92px; }
   #qualities div { width: 62px; }
 }
@@ -432,6 +453,6 @@ html, body {
   }
 
   .slider { width: calc(100% - 2 * var(--edge-pad)); }
-  #color-picker-slot { width: 200px; height: 160px; margin-left: var(--edge-pad); }
+  #color-picker-slot { width: 200px; margin-left: var(--edge-pad); }
   #models div { width: 100px; }
 }

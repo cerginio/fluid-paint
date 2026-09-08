@@ -1,4 +1,33 @@
-// ES6 class version of Slider (Pointer Events)
+// Slider -- a horizontal pointer-driven slider. Moved here from the repo root
+// in Phase 8, otherwise unchanged.
+//
+// THE TILECRAFT FORK THE PLAN CALLED FOR WAS DELIBERATELY NOT DONE, and the
+// reason is worth keeping so nobody "finishes" it later.
+//
+// §5a of the extraction plan specified forking tilecraft's `SlidersComponent`
+// (components.js, 418 lines) into this file, keeping components.css for "the
+// vertical-range styling with full vendor-prefix coverage". Reading the source
+// before writing the fork showed the premise does not hold here:
+//
+//   - It is a VERTICAL component. It positions with `thumb.style.bottom` and
+//     `bar.style.height`, and its markup is `<input type="range" orient=
+//     "vertical">`. Every slider in this panel is horizontal, and the compact
+//     bar's size slider is explicitly a horizontal strip beside the hue stripe.
+//   - The vendor-prefixed CSS that justified taking it is ~70 of its 268 lines
+//     and is entirely `input[type=range][orient=vertical]` selectors. Ported to
+//     horizontal it would be rewritten, not kept.
+//   - This file is 160 lines, already pointer-event based, already handles
+//     pointer capture and touch-action, and is device-tested (Phase 6 retest,
+//     tablet 5/5 with finger and stylus).
+//
+// So the fork would have been a vertical-to-horizontal port that discarded the
+// asset it was taken for, replacing working device-tested code. The plan's §5a
+// was written before the source was read; this is the correction.
+//
+// What tilecraft's component genuinely has that this does not is native
+// `<input type=range>` semantics -- keyboard and screen-reader support. That is
+// a real gap and a real future task, but it is an accessibility feature, not a
+// reason to import a vertical component. See docs/UI-COMPONENTS.md.
 
 const SLIDER_THICKNESS = 2;
 const LEFT_COLOR = 'white';

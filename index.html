@@ -61,9 +61,12 @@
             <div class="control-label">Brush Size</div>
             <div id="size-slider" class="slider"></div>
             <div class="control-label">Paint Color</div>
-            <!-- A reserved box, not the widget: the picker is still GL-drawn
-                 into the main canvas until Phase 8 replaces it. paint.js reads
-                 this element's rect so the picker follows the panel. -->
+            <!-- The iro.js wheel mounts HERE (Phase 8). Until Phase 8 this was a
+                 reserved empty box that the GL picker was drawn on top of; now
+                 it holds the real widget, so the picker is laid out by the
+                 document like everything else and paint.js no longer positions
+                 it by hand. app/ui/color.js converts HSVA at the boundary --
+                 iro.js is RGB-native and the simulation is RYB. -->
             <div id="color-picker-slot"></div>
             <div id="undo-button" class="button">Undo</div>
             <div id="redo-button" class="button">Redo</div>
@@ -104,9 +107,12 @@
     <script src="fluid-engine/simulation.js"></script>
     <script src="fluid-engine/renderer.js"></script>
     <script src="fluid-engine/index.js"></script>
-    <script src="colorpicker.js"></script>
-    <script src="slider.js"></script>
-    <script src="buttons.js"></script>
+    <!-- colorpicker.js is GONE (Phase 8): the GL hue ring, its two programs and
+         its hand-written hit tests are replaced by the iro.js wheel below. -->
+    <script src="lib/iro.js"></script>
+    <script src="app/ui/color.js"></script>
+    <script src="app/ui/sliders.js"></script>
+    <script src="app/ui/buttons.js"></script>
     <script src="brushviewer.js"></script>
     <script src="app/ui/pointer-dispatcher.js"></script>
     <script src="app/ui/panel.js"></script>

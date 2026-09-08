@@ -194,23 +194,58 @@ function readPaintTexture(painter) {
 }
 
 /*
+ * How much of the painting rectangle the screen readback covers, centred.
+ *
+ * The screen hash exists to catch colour-model regressions, NOT to police what
+ * the host draws around the painting -- but until Phase 7 it read the WHOLE
+ * painting rectangle, and the GL tool panel was drawn on top of part of it.
+ * The result: every chrome change moved all 12 screen hashes at once, which is
+ * the worst possible failure mode for a tripwire. It cannot be told apart from
+ * a real regression, so it trains everyone to re-record instead of to look.
+ * Measured after Phase 7: painting rect starts at x=20, the old panel covered
+ * x=0..300, so the overlap was real and every hash moved.
+ *
+ * 0.6 keeps the middle 60% on each axis and drops a 20% margin all round. That
+ * margin is where a host is allowed to put chrome; the centre is the painting
+ * and nothing else. The number is deliberately generous rather than tight --
+ * a floating panel can be dragged anywhere, so the guarantee is "the centre is
+ * yours", not "chrome fits in exactly this border".
+ */
+const SCREEN_SAMPLE_FRACTION = 0.6;
+
+/*
  * Read the composited canvas -- what the eye actually sees.
  *
  * This is the only place rybToRgb() has been applied. The paint texture holds
  * raw RYB, so a change to the colour cube is invisible there: sabotaging
  * rybToRgb left the paint-texture hash byte-identical, which is exactly the
- * blind spot this second readback closes.
+ * blind spot this second readback closes. Phase 8 drops an RGB colour picker
+ * (iro.js) next to a protected subtractive model, so this readback matters
+ * more in the next phase than it did in the last one -- do not weaken it.
  *
- * Returned in painting-rect fractions so the sampling stays meaningful when
- * the chrome around the canvas changes in Phases 6-8.
+ * Only the CENTRE of the painting is read, per SCREEN_SAMPLE_FRACTION above.
+ *
+ * The returned buffer still addresses in PAINTING fractions, not in fractions
+ * of the cropped region: `at` is remapped in sampleRegionScreen(). Keeping the
+ * coordinate system means assertGreen's [0.658, 0.335] keeps pointing at the
+ * same paint it always did -- silently re-basing those fractions would move
+ * every sample point and the checks would still "pass" while measuring
+ * somewhere else entirely.
  */
 function readScreen(painter) {
   const wgl = painter.wgl;
   const rect = painter.paintingRectangle;
-  const x = Math.round(rect.left);
-  const y = Math.round(rect.bottom);
-  const width = Math.round(rect.width);
-  const height = Math.round(rect.height);
+
+  const fullWidth = Math.round(rect.width);
+  const fullHeight = Math.round(rect.height);
+
+  const width = Math.max(1, Math.round(fullWidth * SCREEN_SAMPLE_FRACTION));
+  const height = Math.max(1, Math.round(fullHeight * SCREEN_SAMPLE_FRACTION));
+  const offsetX = Math.round((fullWidth - width) / 2);
+  const offsetY = Math.round((fullHeight - height) / 2);
+
+  const x = Math.round(rect.left) + offsetX;
+  const y = Math.round(rect.bottom) + offsetY;
 
   const pixels = new Uint8Array(width * height * 4);
   wgl.readPixels(wgl.createReadState().bindFramebuffer(null),
@@ -219,7 +254,37 @@ function readScreen(painter) {
   // Normalise to 0..1 floats so sampleRegion can be shared with the RYB path.
   const floats = new Float32Array(pixels.length);
   for (let i = 0; i < pixels.length; ++i) floats[i] = pixels[i] / 255;
-  return { width, height, pixels: floats };
+
+  return {
+    width,
+    height,
+    pixels: floats,
+    // What this crop is, in painting fractions -- sampleRegionScreen needs it
+    // to translate a painting fraction into a pixel inside this buffer.
+    cropOrigin: [offsetX / fullWidth, offsetY / fullHeight],
+    cropSize: [width / fullWidth, height / fullHeight],
+  };
+}
+
+/*
+ * sampleRegion, for a screen buffer that covers only part of the painting.
+ *
+ * Takes the SAME painting fractions every other sampler takes, and maps them
+ * into the cropped buffer. A point outside the crop returns null rather than
+ * being clamped to an edge: a silently clamped sample would report the colour
+ * of whatever happens to be at the border and read as a pass.
+ */
+function sampleRegionScreen(buffer, at, radius) {
+  const [ox, oy] = buffer.cropOrigin;
+  const [sw, sh] = buffer.cropSize;
+
+  const localX = (at[0] - ox) / sw;
+  const localY = (at[1] - oy) / sh;
+
+  if (localX < 0 || localX > 1 || localY < 0 || localY > 1) return null;
+
+  // The radius is a painting fraction too, so it scales by the same factor.
+  return sampleRegion(buffer, [localX, localY], radius / sw);
 }
 
 /*
@@ -230,8 +295,20 @@ function readScreen(painter) {
  * the check that survives someone "simplifying" rybToRgb.
  */
 function assertGreenOnScreen(buffer, spec) {
-  const mean = sampleRegion(buffer, spec.at, spec.radius);
-  if (!mean) return { pass: false, reason: 'sample region empty' };
+  // sampleRegionScreen, not sampleRegion: the screen buffer covers only the
+  // centre of the painting, so spec.at (a PAINTING fraction, shared with the
+  // RYB check on the paint texture) has to be remapped into it. Using the raw
+  // sampler here would silently read a different point than assertGreenMix,
+  // and the two checks would stop describing the same paint.
+  const mean = sampleRegionScreen(buffer, spec.at, spec.radius);
+  if (!mean) {
+    return {
+      pass: false,
+      reason: `sample point [${spec.at}] is outside the screen readback's ` +
+              `centre crop -- move the scenario inward or raise ` +
+              `SCREEN_SAMPLE_FRACTION`,
+    };
+  }
 
   const [r, g, b] = mean;
 

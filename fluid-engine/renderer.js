@@ -43,6 +43,14 @@ const RESIZING_FEATHER_SIZE = 8;
 // subtractive pigment cube and the default; RGB is the additive comparison, and
 // the only one worth naming here because RYB is what every branch falls back
 // to. See docs -- the RYB path is protected and must not be "fixed" into RGB.
+//
+// This value MUST equal FluidEngine.COLOR_MODEL.RGB, which is the name hosts
+// use (fluid-engine/index.js). It is duplicated rather than referenced only
+// because this project has no module system and renderer.js is loaded before
+// index.js, so the class does not exist yet at this line. The assertion at the
+// bottom of index.js checks the two agree at startup -- Phase 9 added the enum
+// after finding that a host had no public name for it at all, and a silent
+// disagreement here would composite the wrong colour model with no error.
 const ColorModelRGB = 1;
 
 class PaintingRenderer {

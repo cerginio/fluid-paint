@@ -111,43 +111,46 @@ function cursorForResizingSide(side) {
 // on an engine asset is the right direction for that arrow.
 const ENGINE_SHADER_BASE_PATH = 'fluid-engine/';
 
-const ENGINE_SHADERS = [
-  'shaders/splat.vert', 'shaders/splat.frag',
-  'shaders/fullscreen.vert',
-  'shaders/advect.frag',
-  'shaders/divergence.frag',
-  'shaders/jacobi.frag',
-  'shaders/subtract.frag',
-  'shaders/resize.frag',
-
-  'shaders/project.frag',
-  'shaders/distanceconstraint.frag',
-  'shaders/planeconstraint.frag',
-  'shaders/bendingconstraint.frag',
-  'shaders/setbristles.frag',
-  'shaders/updatevelocity.frag',
-
-  'shaders/brush.vert', 'shaders/brush.frag',
-  'shaders/painting.vert', 'shaders/painting.frag',
-  'shaders/output.frag',
-];
-
 const APP_SHADER_BASE_PATH = 'app/';
 
 const APP_SHADERS = [
-  'shaders/picker.vert', 'shaders/picker.frag',
   // 'shaders/panel.frag' was here until Phase 7; the panel is DOM now.
+  // 'shaders/picker.vert' / 'shaders/picker.frag' went the same way in Phase 8:
+  // the colour wheel is iro.js DOM, so the hue ring, the saturation/value square
+  // and the alpha slider are no longer drawn in GL. Two of the four remaining
+  // app shaders are the painting's own shadow and rect outline, which are
+  // presentation of the PAINTING rather than chrome -- so this list is not on
+  // its way to empty.
   'shaders/shadow.frag',
   'shaders/rectborder.frag',
 ];
 
-// Load both trees and merge them into the single flat shaderSources object the
-// rest of the code expects. Keys collide across trees only if a name is
-// duplicated, which SHADER_TREES makes visible in one place.
-const SHADER_TREES = [
-  { files: ENGINE_SHADERS, basePath: ENGINE_SHADER_BASE_PATH },
-  { files: APP_SHADERS, basePath: APP_SHADER_BASE_PATH },
-];
+/*
+ * The two trees to load, paired each with its own base path.
+ *
+ * A FUNCTION rather than the array constant it was until Phase 9, and the
+ * reason is load order, not taste. The engine's manifest now lives in the
+ * engine as `FluidEngine.SHADER_FILES` -- building a second host showed that
+ * hosting the engine otherwise means copying an inventory of engine internals
+ * into every host, which goes stale the moment a pass is added. But this file
+ * is loaded BEFORE fluid-engine/index.js (there is no module system; see
+ * index.html and gulpfile.js), so `FluidEngine` does not exist at the top level
+ * here. Reading it inside a function defers the lookup to call time, by which
+ * point every script has run.
+ *
+ * Do not "simplify" this back to a top-level const. It would be `undefined` at
+ * evaluation, and the failure -- a tree whose file list is undefined -- surfaces
+ * as shaders compiled from nothing, deep inside a constructor.
+ *
+ * Only the BASE PATHS are the app's, because only a host knows where it serves
+ * the files from. That is the split: the engine says which, the host says where.
+ */
+function shaderTrees() {
+  return [
+    { files: FluidEngine.SHADER_FILES, basePath: ENGINE_SHADER_BASE_PATH },
+    { files: APP_SHADERS, basePath: APP_SHADER_BASE_PATH },
+  ];
+}
 
 function loadShaderTrees(trees, onLoaded) {
   const merged = {};

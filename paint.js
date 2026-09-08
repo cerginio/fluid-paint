@@ -35,8 +35,10 @@ class Paint {
         // Load both shader trees -- the engine's and the app chrome's -- and
         // merge them into one flat sources object. The keys are unchanged from
         // when there was a single tree; only the base paths know where the
-        // files actually live. See SHADER_TREES in common.js.
-        loadShaderTrees(SHADER_TREES, (shaderSources) => {
+        // files actually live. See shaderTrees() in common.js -- it is a
+        // function, not a constant, because the engine now owns its own
+        // manifest and this file is loaded before the engine (Phase 9).
+        loadShaderTrees(shaderTrees(), (shaderSources) => {
             this._start(shaderSources);
         });
     }
@@ -185,7 +187,12 @@ class Paint {
         // with, so a resize scales from its origin rather than compounding.
         this.pinchStartSpan = null;
         this.pinchStartRectangle = null;
-        this.colorModel = ColorModel.RYB;
+        // FluidEngine.COLOR_MODEL, not the app's own enum (Phase 9 finding 2).
+        // The value is handed straight to renderToTexture(), and the renderer's
+        // test is an equality -- anything that is not exactly RGB falls silently
+        // through to RYB. Reading the name from the engine that consumes it is
+        // what makes that impossible to get wrong.
+        this.colorModel = FluidEngine.COLOR_MODEL.RYB;
 
         this.needsRedraw = true; // whether we need to redraw the painting
 
@@ -250,22 +257,43 @@ class Paint {
             0,
             (index) => {
                 if (index === 0) {
-                    this.colorModel = ColorModel.RYB;
+                    this.colorModel = FluidEngine.COLOR_MODEL.RYB;
                 } else if (index === 1) {
-                    this.colorModel = ColorModel.RGB;
+                    this.colorModel = FluidEngine.COLOR_MODEL.RGB;
                 }
                 this.needsRedraw = true;
             }
         );
 
-        this.colorPicker = new ColorPicker(
-            () => this.brushColorHSVA,
-            wgl,
-            canvas,
-            shaderSources,
-            COLOR_PICKER_LEFT,
-            0
-        );
+        /*
+         * The colour editor (Phase 8). Real DOM in #color-picker-slot, replacing
+         * the GL hue ring that used to be drawn into this canvas.
+         *
+         * It takes the same ACCESSOR the GL picker took -- `() => this.brush
+         * ColorHSVA` -- and mutates that array in place, because several other
+         * readers hold a reference to it (the splat colour, the brush preview,
+         * the panel's hue stripe). Handing over the object, or replacing the
+         * array, would silently orphan them.
+         *
+         * Null when the slot is absent: the no-support page has no panel, and a
+         * second host may bring its own markup. Every call site below is guarded
+         * rather than assuming the control exists.
+         */
+        const colorSlot = document.getElementById('color-picker-slot');
+        this.colorControl = colorSlot
+            ? new ColorControl({
+                element: colorSlot,
+                getHSVA: () => this.brushColorHSVA,
+                onChange: () => {
+                    // The compact bar's hue stripe shows the same hue, so it has
+                    // to follow the wheel or the two disagree the moment the
+                    // panel is collapsed -- the same rule the two size sliders
+                    // follow.
+                    if (this.toolPanel) this.toolPanel.setHue(this.brushColorHSVA[0]);
+                    this.needsRedraw = true;
+                },
+            })
+            : null;
 
         // Live bristle preview -- constructed only when its flag is on, so with
         // ?debug=-brushViewer nothing is allocated and the per-frame draw below
@@ -290,8 +318,13 @@ class Paint {
                 this.canvas.height
             );
 
-            this.colorPicker.scale = this.viewport.pixelRatio;
-            this._positionColorPicker();
+            // The colour wheel needs neither a DPR scale nor positioning any
+            // more (Phase 8). It was GL-drawn into the canvas, so it carried its
+            // own `scale` to convert CSS-authored constants into backing-store
+            // pixels, and had to be told where its slot was. It is a real
+            // element now: CSS pixels are its native unit and the document lays
+            // it out. It only has to re-measure, which its own ResizeObserver
+            // does.
             if (this.brushViewer !== null) this.brushViewer.bottom = this.canvas.height - 150;
 
             this.rebuildProjectionMatrix();
@@ -716,10 +749,17 @@ class Paint {
         }
 
         // draw brush to screen
+        //
+        // The `!colorPicker.isInUse()` term is GONE (Phase 8). It existed
+        // because the GL picker was painted INTO this canvas, so a pointer
+        // dragging its hue ring was, as far as the canvas knew, a pointer over
+        // the painting -- and the brush cursor had to be suppressed by hand.
+        // The wheel is a real element now, so the browser hit-tests it and the
+        // pointer never reaches the canvas at all. Same trade Phase 7 made when
+        // it deleted the panel's geometric hit test.
         if (
             this.interactionState === InteractionMode.PAINTING ||
-            (!this.colorPicker.isInUse() &&
-                this.interactionState === InteractionMode.NONE &&
+            (this.interactionState === InteractionMode.NONE &&
                 this.desiredInteractionMode(this.mouseX, this.mouseY) === InteractionMode.PAINTING)
         ) {
             // The bristle preview is chrome, but it is drawn from the engine's
@@ -761,12 +801,11 @@ class Paint {
         }
 
         // cursor logic
+        // The two colour-picker branches are GONE (Phase 8): the wheel is an
+        // element with its own CSS cursor, so the canvas no longer has to guess
+        // whether the pointer is over it.
         let desiredCursor = '';
-        if (this.colorPicker.isInUse()) {
-            desiredCursor = 'pointer';
-        } else if (this.colorPicker.overControl(this.mouseX, this.mouseY)) {
-            desiredCursor = 'pointer';
-        } else if (this.interactionState === InteractionMode.NONE) {
+        if (this.interactionState === InteractionMode.NONE) {
             const desiredMode = this.desiredInteractionMode(this.mouseX, this.mouseY);
             if (desiredMode === InteractionMode.PAINTING) {
                 desiredCursor = 'none';
@@ -808,12 +847,13 @@ class Paint {
         // consumed it is what makes that impossible to reintroduce.
         this.needsRedraw = false;
 
-        if (PaintState.showPanel) {
-            // The colour picker is still GL-drawn into this canvas -- iro.js
-            // replaces it in Phase 8 -- but it is positioned from its DOM slot
-            // now, so it follows the layout instead of a hardcoded offset.
-            this.colorPicker.draw(this.colorModel === ColorModel.RGB);
-        }
+        // The colour picker's per-frame GL draw is GONE (Phase 8), along with
+        // the `if (PaintState.showPanel)` that guarded it. iro.js renders itself
+        // as DOM, so there is nothing to draw here and nothing to hide when the
+        // panel collapses -- the element's own visibility handles that.
+        //
+        // This was the LAST chrome drawn into the canvas. What remains below is
+        // the painting's own shadow and the debug overlays.
         if (this.brushViewer !== null) {
             const hsva = this.brushColorHSVA;
             const H = fixHueForPreview(hsva[0]);
@@ -893,59 +933,26 @@ class Paint {
      */
     _syncPanelState() {
         PaintState.showPanel = this.toolPanel ? !this.toolPanel.isCollapsed() : true;
-        // The picker follows the panel, so a move or a collapse has to reposition
-        // it before the next draw.
-        if (this.colorPicker) this._positionColorPicker();
+        // The picker no longer needs repositioning on a move or a collapse
+        // (Phase 8): it is inside the panel, so it moves with it for free.
         this.needsRedraw = true;
     }
 
-    /**
-     * Place the GL colour picker over its DOM slot.
+    /*
+     * _positionColorPicker() is GONE (Phase 8), and its absence is the point.
      *
-     * The picker is still drawn into the main canvas by GL (iro.js replaces it
-     * in Phase 8), so it cannot simply BE the slot -- but it can be positioned
-     * from it. Before Phase 7 it sat at COLOR_PICKER_LEFT/COLOR_PICKER_TOP,
-     * fixed CSS offsets from the top-left of a window-sized canvas, which is
-     * exactly the kind of hardcoded geometry that made the layout unresponsive:
-     * at any breakpoint that moved the panel, the picker stayed put.
+     * The picker used to be GL-drawn into the main canvas, so it had to be told
+     * where its DOM slot was: read the slot's rect, subtract the canvas origin,
+     * flip Y, subtract the box height. Phase 7 wrote that method so the picker
+     * would at least FOLLOW the layout instead of sitting at a hardcoded
+     * COLOR_PICKER_LEFT/TOP.
      *
-     * Reading the slot's rect each resize means the picker follows the layout
-     * for free -- including the phone-portrait drawer, where the panel is at
-     * the BOTTOM of the screen and the old constants would have drawn the
-     * picker off the top of the canvas entirely.
-     *
-     * The rect is relative to the canvas, because that is the surface the
-     * picker draws into; the canvas no longer starts at the window origin, so
-     * clientX/clientY offsets alone would be wrong by the panel's width.
+     * The picker is now a real element inside the slot, so the document lays it
+     * out and there is nothing to position. The whole method, both of its
+     * coordinate conversions, and the two constants they used are deleted --
+     * which is what "chrome becomes DOM" is supposed to buy, and is the same
+     * trade Phase 7 made for the panel itself.
      */
-    _positionColorPicker() {
-        const slot = document.getElementById('color-picker-slot');
-
-        if (slot === null) {
-            // No slot: keep the pre-Phase-7 placement so a host that uses its
-            // own markup (or the no-support page) still gets a usable picker
-            // rather than one at the origin.
-            this.colorPicker.bottom =
-                this.canvas.height - this.viewport.cssLengthToScreen(COLOR_PICKER_TOP);
-            this.colorPicker.left = this.viewport.cssLengthToScreen(COLOR_PICKER_LEFT);
-            return;
-        }
-
-        const slotRect = slot.getBoundingClientRect();
-        const canvasRect = this.canvas.getBoundingClientRect();
-
-        // CSS pixels relative to the canvas's top-left...
-        const cssLeft = slotRect.left - canvasRect.left;
-        const cssTop = slotRect.top - canvasRect.top;
-
-        // ...converted to the picker's space, which is screen pixels measured
-        // from the BOTTOM. cssToScreen() would be the natural call, but it
-        // returns the flip of a POINT and the picker wants the bottom edge of a
-        // box, so the box height has to come off after the flip.
-        const screen = this.viewport.cssToScreen(cssLeft, cssTop);
-        this.colorPicker.left = screen.x;
-        this.colorPicker.bottom = screen.y - this.viewport.cssLengthToScreen(slotRect.height);
-    }
 
     // what interaction mode would be triggered if we clicked with given mouse position
     desiredInteractionMode(mouseX, mouseY) {
@@ -1114,12 +1121,14 @@ class Paint {
         this.brushX = mouseX;
         this.brushY = mouseY;
 
-        if (PaintState.showPanel) {
-            this.colorPicker.onMouseDown(mouseX, mouseY);
-        }
-
-        if (this.colorPicker.isInUse()) return;
-
+        // The colour picker's three pointer forwards are GONE (Phase 8) -- this
+        // one, the move, and the up. The GL picker was pixels in the canvas, so
+        // every canvas pointer event had to be offered to it first, and the
+        // early return below existed to stop a hue drag from also starting a
+        // stroke. iro.js is a real element: the browser routes the event to it
+        // and this handler never runs. That deletes a whole class of ordering
+        // bug -- the canvas can no longer disagree with the picker about who
+        // owns a pointer.
         const mode = this.desiredInteractionMode(mouseX, mouseY);
 
         if (mode === InteractionMode.PANNING) {
@@ -1205,8 +1214,6 @@ class Paint {
         } else if (this.interactionState === InteractionMode.RESIZING) {
             this._resizePaintingTo(mx, my);
         }
-
-        this.colorPicker.onMouseMove(mx, my);
 
         this.mouseX = mx;
         this.mouseY = my;
@@ -1304,8 +1311,6 @@ class Paint {
     };
 
     onGestureEnd = (event) => {
-        this.colorPicker.onMouseUp(this.mouseX, this.mouseY);
-
         // The next two-finger gesture measures its span from scratch.
         this.pinchStartSpan = null;
         this.pinchStartRectangle = null;

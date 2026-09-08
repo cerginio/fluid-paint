@@ -1,20 +1,34 @@
-# Handoff — Phases 0-7 done; goldens need a decision
+# Handoff — Phases 0-9 done; goldens still need a decision
 
-Written 2026-09-07. Read this, then `docs/FLUID-ENGINE-EXTRACTION-PLAN.md`.
+Written 2026-09-07, updated 2026-09-08 for Phases 9 and 8 (done in that order).
+Read this, then `docs/FLUID-ENGINE-EXTRACTION-PLAN.md`.
 
 ## Where things stand
 
-Branch: **`fluid-engine-v1`**, working tree **dirty — Phase 7 is uncommitted**.
-**Phases 0-7 are done.** The Phase 6 device retest with a stylus passed; its
-three UX findings are **still open** and are not what Phase 7 addressed.
+Branch: **`fluid-engine-v1`**. Phase 7 is committed (`9f846f3`); the working tree
+is **dirty with Phases 8 and 9**, plus one earlier uncommitted change to
+`debug/golden-harness.js` (see the goldens item below).
 
-Golden images after Phase 7: **`paint` byte-identical on all 12** (the
-simulation is untouched), **`screen` moved on all 12** because the panel is no
-longer drawn into the canvas. The baseline was deliberately **not** re-recorded
-— that decision is the first Open item. Phase 7's own behaviour is covered by
-`debug/phase7-probe.js` at **30/30**. Shader lint passes, reporting
-**23** shaders across two trees — one fewer than Phase 6, because
-`app/shaders/panel.frag` went with the GL panel.
+**Phases 0-9 are done**, though 8 and 9 were done in the reverse order — Phase 9
+was taken first at the user's direction, then Phase 8. That worked out well and
+is worth knowing: Phase 9 published `FluidEngine.COLOR_MODEL`, and Phase 8 then
+consumed it for the Natural/Digital toggle, which let the app's duplicate
+`ColorModel` enum be deleted rather than left as a second name for one number.
+
+**Phase 8a (bristle re-seeding) and 9a (the stroke API) are NOT done.** Neither
+is 10 (documentation). The Phase 6 retest's three UX findings are **still open**.
+
+Golden images: **`paint` byte-identical on all 12, source AND dist** — re-verified
+after Phase 8, which matters more there than anywhere else: an RGB triple leaking
+from the new colour picker into the simulation would move exactly these hashes.
+They did not move. **`screen` moved on all 12**, drift inherited from Phase 7 and
+now also from Phase 8 (the GL picker is no longer painted into the canvas).
+
+Shader lint: **21** shaders, down from 23 — `picker.vert` and `picker.frag` went
+with the GL colour picker.
+
+Phase-specific probes: `debug/phase7-probe.js` **30/30**,
+`debug/phase8-probe.js` **17/17**, `debug/phase9-probe.js` **18/18**.
 
 ```
 6d5e6d3  Phase 5: add the FluidEngine facade and split undo out of the engine
@@ -56,7 +70,14 @@ fluid-paint/              <- git repo root
   paint-setup.js          app constants (lighting left in P4, budget in P5)
   viewport.js             coordinate spaces + DPR
   common.js               the two shader manifests + loadShaderTrees()
-  colorpicker.js slider.js buttons.js brushviewer.js rectangle.js utilities.js
+  brushviewer.js rectangle.js utilities.js
+  lib/
+    iro.js                vendored v5.5.2, MPL-2.0 (Phase 8)
+  app/ui/
+    color.js              ColorControl: the iro wheel, HSVA at the boundary
+    sliders.js buttons.js moved here in Phase 8, unchanged
+  examples/
+    minimal/              the SECOND HOST (Phase 9) -- run from source, not dist
   debug/                  harnesses and probes
   docs/
 ```
@@ -550,6 +571,195 @@ a small, well-defined addition and it belongs with **Phase 9 ("prove reuse")**,
 whose whole purpose is that a second host finding something missing is a finding
 about the API. This is that finding, recorded before the host exists.
 
+## Phase 8 — DONE (the DOM colour control)
+
+The colour picker is real DOM. `colorpicker.js`, its two GL programs and its
+hand-written circle/box hit tests are gone; `app/ui/color.js` mounts an iro.js
+wheel plus value and alpha sliders into `#color-picker-slot` — the box Phase 7
+reserved for exactly this.
+
+### The rule this phase is actually about
+
+**iro.js is RGB-native. The simulation is RYB.** That is the whole risk, and it
+is a silent one: an RGB triple handed to `splat()` paints something plausible and
+wrong (§3b — yellow over blue is green in the pigment cube and grey in RGB), with
+no error at any layer.
+
+`ColorControl` therefore reads **only H, S, V and A** out of the widget, as 0..1,
+and deliberately **never reads `color.rgb`**. That property is the colour of the
+*widget* — an RGB rendering of the chosen hue — not the *pigment* that hue becomes
+once `hsvToRyb()` has run. Conflating them is the mistake §3b warns about.
+
+Sabotage-verified: making `_readFromWidget()` read `color.rgb` broke 5 checks and
+turned a blue stroke grey in the paint texture. The canvas looked fine either way.
+
+### What that bought — the deletions are the point
+
+- `_positionColorPicker()`, `COLOR_PICKER_LEFT`/`TOP`, and the picker's `scale`.
+  A GL picker had to be told where its slot was and what a CSS pixel meant. A DOM
+  widget *is* the slot's content and CSS pixels are its native unit.
+- **Every `colorPicker.onMouse*` forward**, plus the `isInUse()` early return in
+  `onGestureStart`, the two cursor branches, and the `!isInUse()` term in the
+  brush-draw test. Those all existed because the picker was pixels in the canvas,
+  so a hue drag was also a canvas pointer-down and had to be suppressed by hand.
+  The browser hit-tests a real element — same trade Phase 7 made for the panel.
+- `ColorModel` in `paint-setup.js`. The toggle now reads
+  `FluidEngine.COLOR_MODEL` (Phase 9's finding 2), so there is one name for one
+  number instead of two, in different files, with a silent failure mode.
+- `app/shaders/picker.vert` / `picker.frag`. Shader lint 23 → 21.
+
+### The §5a sliders fork was deliberately NOT done
+
+The plan said to fork tilecraft's `SlidersComponent`. Reading it first showed the
+premise did not hold: it is a **vertical** component (`thumb.style.bottom`,
+`orient="vertical"`), and the vendor-prefixed CSS that justified taking it is ~70
+of 268 lines, all vertical-specific. Every slider here is horizontal. So the fork
+would have been a port that discarded the asset it was taken for, replacing
+device-tested code (Phase 6 retest: tablet 5/5 with finger and stylus).
+
+`slider.js` → `app/ui/sliders.js` and `buttons.js` → `app/ui/buttons.js`, both
+moved unchanged. Full reasoning is in `docs/UI-COMPONENTS.md` and at the top of
+`sliders.js`. **The one real gap it leaves is keyboard/a11y** — tilecraft's is
+built on a native `<input type=range>` and gets that free; ours is a `<div>`.
+That is an argument for adding `role="slider"`, not for importing a vertical
+component.
+
+### iro.js is NOT pristine, and the licence needs that recorded
+
+The tilecraft copy carries an upstream-local patch **outside** the copyright
+banner and easy to read past: `let iroContainerScale = function () { return 1; }`
+at line 7, plus three call sites (~812, ~976, ~1046). It lets a host declare that
+its container is CSS-`scale`d.
+
+**Inert here** — nothing assigns it, and this panel is not scaled. Recorded in
+`docs/UI-COMPONENTS.md` because MPL-2.0 requires modifications to be disclosed,
+and because a re-sync from pristine upstream would silently drop it. The file
+keeps its banner and must not be edited in place; wrap it in `color.js` instead.
+
+### Two traps worth carrying forward
+
+**`iro.color.set()` silently ignores a partial object.** It dispatches on a
+complete model — `{r,g,b}`, `{h,s,v}`, `{h,s,l}`, `{kelvin}` or a string — and
+anything else falls through every branch and does *nothing*. No throw, no
+warning. `color.set({a: 0.25})` is a no-op that reads exactly like the app
+ignoring its own control; the first Phase 8 probe lost two checks to it. Use
+`setChannel()`, or pass all four channels as `setHSVA()` does.
+
+**The echo guard is load-bearing.** `setHSVA()` writes into the widget, iro emits
+`color:change`, and without `this.applying` that writes straight back — slightly
+different after iro's rounding. The stripe and the wheel would fight, and a
+dragged stripe would visibly stick.
+
+### How Phase 8 was verified
+
+`debug/phase8-probe.js`, **17/17**. The goldens cannot see any of it: they use a
+fixed seeded colour and never touch a control, so the entire picker could be
+missing and all 12 hashes would stay identical.
+
+**Sabotage-verified twice, and the second one found a bug in the probe itself.**
+Leaking `color.rgb` into the pigment was caught (5 checks). But deleting the
+wheel→stripe push was **not** caught at first — the stripe handle already happened
+to sit near the target hue from construction and an earlier click, so a sync check
+that never started out of sync passed on a coincidence. Fixed by parking the
+stripe at 0.9 first, and there is now an explicit check that it *is* parked. **A
+sync check has to start out of sync**; this one did not, and only sabotage said so.
+
+Expected values: hue 0.667 → RYB ≈ `[0.001, 0, 0.53]`; hue 0.333 → `[0.001, 0.52,
+0]`; a wheel drag deposits 0 paint while the same drag on the canvas deposits
+~100000.
+
+**The Phase 7 probe needed updating, not just re-running.** It read
+`__painter.colorPicker.left` to prove the GL picker followed its DOM slot. There
+is no such pair now, so those three checks became containment checks — is the
+widget's box inside the slot's box — which the browser guarantees structurally.
+Still 30/30.
+
+## Phase 9 — DONE (prove reuse), and it found a real bug
+
+`examples/minimal/` is a second host: a bare canvas, `new FluidEngine(...)`,
+three controls (hue, brush size, fluidity) and Clear. It loads the engine's four
+files plus `glsl3`, `wrappedgl`, `utilities`, `rectangle` — and **nothing else**.
+No `paint-setup.js`, no `common.js`, no `viewport.js`, no `app/shaders/`, no
+`debug/`, no picker, no panel.
+
+Each of those absences is a test rather than a simplification. The full record of
+what the host demanded is **`docs/API-FINDINGS.md`**; read it before Phase 9a.
+
+### The bug: the engine required a global only `index.html` declares
+
+`Brush.update()` — which runs every frame of every stroke — ended with
+
+```js
+if (presenter) { presenter.presentTextureToCanvas2D({ ... }); }
+```
+
+`presenter` is `let presenter;` in `index.html`. Inside that page the bare test
+is a safe undefined check, which is why it survived four phases of extraction. In
+**any other host the identifier is not declared at all**, and reading an
+undeclared name is a `ReferenceError` — thrown inside `update()`, unwinding
+**before `splat()` is reached**.
+
+So the second host booted cleanly, reported `canDepositPaint: true`, ran its
+controls, and **painted nothing**, with no visible cause. Diagnosed by
+instrumenting `engine.splat` and counting the calls: **0**.
+
+That is the third time this project has produced a healthy-looking app that
+deposits nothing (the iPhone float-blend gap and the synthetic-`PointerEvent`
+gap were the others). **When paint does not land, count the splat calls before
+looking at the shaders.**
+
+Fixed with `typeof presenter !== 'undefined' && presenter`. Do not simplify it
+back. The rule: the engine must not read a bare global its host never heard of.
+
+### Two gaps, now closed, both app-owned by accident
+
+- **`FluidEngine.COLOR_MODEL`.** `renderToTexture({ colorModel })` was an engine
+  parameter whose only public name lived in the app's `paint-setup.js` while the
+  renderer compared against a private literal. The danger is that the renderer's
+  test is an equality and **everything that fails it falls through to RYB** — so
+  a host passing `'rgb'` gets the protected model with no error anywhere.
+  `index.js` now **throws at load** if its enum and `renderer.js`'s literal
+  disagree, because a comment claiming they match is not worth the line.
+- **`FluidEngine.SHADER_FILES`.** The list of the engine's own 19 shader files
+  lived in the app's `common.js`, so every host had to carry an inventory of
+  engine internals that goes stale when a pass is added.
+
+**The trap that came with the second fix:** `common.js` loads *before*
+`fluid-engine/index.js` (no module system), so `SHADER_TREES` could not stay a
+top-level constant reading `FluidEngine.SHADER_FILES` — it would be `undefined`.
+It is now the **function `shaderTrees()`**, called from `paint.js`. If someone
+"simplifies" it back to a const, shaders compile from nothing inside a
+constructor. The dist golden run is what proves the bundle order still works.
+
+### What held, which is the other half of the result
+
+No host needed `engine.simulator` / `.brush` / `.renderer` — the Phase 5 rule
+survived contact with a second host, and the probe checks it at **runtime** as
+well as by grep, because an example that reaches past the API is a licence rather
+than a demonstration. `capabilities.canDepositPaint`, the `fluidity` getter, and
+`renderToTexture()` taking its target as an argument each earned themselves.
+
+### How Phase 9 was verified
+
+`debug/phase9-probe.js`, **18/18**. It checks what the goldens structurally
+cannot: the goldens drive `index.html`, so a second host that never loaded would
+leave all 12 hashes byte-identical.
+
+**Sabotage-verified twice.** Reverting the `presenter` guard broke 5 checks while
+the main app stayed green — reproducing the bug's exact asymmetry. Swapping the
+host's `hsvToRyb` for an RGB mapping broke both colour checks while "a drag
+deposits paint" stayed green, which is the point: the two measure different
+things, and only the colour checks can see §3b being violated.
+
+The probe is a throwaway per the `debug/` convention. Expected values: paint sum
+~62000-70000 after a centre drag; blue at hue 0.667 ≈ `[0.001, 0, 0.54]` in RYB;
+yellow at hue 0.333 ≈ `[0.001, 0.55, 0]`.
+
+**The example is deliberately not built into `dist/`** — it loads the engine as
+separate source files on purpose, and `dist/` only has `bundle.js`, so a copy
+would 404 four times. The gulpfile says so where the copy would have gone. Run it
+from source: `npm run dev`, then `/examples/minimal/index.html`.
+
 ## UX findings from the Phase 6 device retest — STILL OPEN after Phase 7
 
 These came from real-device use, not from a harness. They are **the** reason
@@ -701,6 +911,43 @@ deposition, not just apparent latency — it reads as ~2% noise in the goldens.
 `pressure: 0.5` for hardware with no pressure sensor, so any unconditional
 `* pressure` halves the brush for every mouse user. Scale pens only.
 
+**The engine must not read a bare global its host never heard of.** `if (x)` on
+an undeclared identifier is a `ReferenceError`, not a falsy test — it only looked
+safe because `index.html` happened to declare `let presenter;`. In `Brush.update()`
+that threw every frame before `splat()` ran, so the second host painted nothing
+while looking entirely healthy. Use `typeof x !== 'undefined'`, or better, do not
+reach for a global at all. Found in Phase 9; there is exactly one such read left
+and it is guarded.
+
+**When paint does not land, count the splat calls before reading shaders.**
+Wrapping `engine.splat` and counting is two lines and separates "the stroke never
+reached the engine" from "the engine deposited nothing". Three separate bugs in
+this project have presented as a healthy app that paints nothing, and only one of
+them was in a shader.
+
+**`common.js` loads before `fluid-engine/index.js`.** So anything in `common.js`
+that reads `FluidEngine.*` must do it inside a function, not at the top level.
+That is why `SHADER_TREES` is now the function `shaderTrees()`. A top-level
+constant would be `undefined` and the failure is a shader compiled from nothing,
+deep inside a constructor.
+
+**`iro.color.set()` does nothing when handed a partial object.** It dispatches on
+a COMPLETE colour model and anything else falls through every branch silently —
+no throw, no warning. `set({a: 0.25})` reads exactly like the app ignoring its own
+control. Use `setChannel()` or pass all four channels.
+
+**A sync check has to START out of sync.** Phase 8 had a "the hue stripe follows
+the wheel" check that passed with the wheel-to-stripe push deleted outright,
+because the handle already sat near the target from an earlier interaction. Only
+sabotage caught it. Any check of the form "does A follow B" must first put A
+somewhere B is definitely not, and should assert that it got there.
+
+**The widget's colour is not the pigment.** `iro`'s `color.rgb` is an RGB
+rendering of the chosen hue; the paint is RYB and only becomes so at `hsvToRyb()`.
+Reading `color.rgb` into the app paints a plausible wrong picture with no error —
+verified by sabotage: a blue stroke came back grey. Only H, S, V and A may cross
+that boundary.
+
 Still true from earlier phases: the RYB colour model is protected;
 `hsvToRgb`/`hsvToRyb` being identical is not a bug; hue maps onto RYB channels
 (`0.333` yellow, `0.667` blue); bristles need settling frames after
@@ -744,15 +991,28 @@ Useful query parameters: `?diag=1` (on-device capability panel), `?gpu=<profile>
 - ~~Phase 6 device retest with a stylus~~ — **done, 2026-09-07. It passed.**
   Tablet 5/5 with finger and stylus; phones 3.7/5. The pressure curve was not
   reported as top-heavy, so leave it linear until someone says otherwise.
-- **The golden baseline needs a decision — the blocking one.** After Phase 7 all
-  12 `screen` hashes moved while all 12 `paint` hashes stayed byte-identical.
-  The cause is measured, not assumed: `readScreen()` hashes the painting
-  rectangle, which starts at x=20, and the old GL panel covered x=0..300. So the
-  drift is exactly the removed chrome. Re-recording is defensible **and has not
-  been done**, because re-recording is the one move that would also hide an
-  unrelated regression riding along in the same change. Decide, then either
-  `npm run test:golden:record` or narrow `readScreen()` to a region the chrome
-  never touched.
+- **The golden baseline still needs a decision — the blocking one, and there is
+  half-finished work in the tree for it.** All 12 `screen` hashes moved after
+  Phase 7 while all 12 `paint` hashes stayed byte-identical; the cause is
+  measured, not assumed (`readScreen()` hashes the painting rectangle, which
+  starts at x=20, and the old GL panel covered x=0..300).
+
+  **`debug/golden-harness.js` is uncommitted and implements the second option** —
+  narrowing `readScreen()` to the centre 60% of the painting (`SCREEN_SAMPLE_
+  FRACTION`), with `sampleRegionScreen()` remapping painting fractions into the
+  crop so `assertGreen`'s sample points keep pointing at the same paint. It was
+  written before Phase 9 and is not mine; it looks complete and self-consistent,
+  but it has **not been decided on and the baseline has not been re-recorded**,
+  so the suite still reports 12 drifts either way.
+
+  Confirmed during Phase 9: the drift is unchanged by everything since Phase 7.
+  Running the suite with the Phase 9 changes applied and only the harness change
+  reverted reproduced the Phase 7 screen hashes exactly. So whichever way this is
+  decided, it is a Phase 7 decision, not a Phase 9 one.
+
+  Decide, then either `npm run test:golden:record` or finish the narrowing and
+  record once. Re-recording is the one move that can also hide an unrelated
+  regression riding along, which is why it is still not done.
 - **Pinch zoom-out crops the image** — still open, unchanged by Phase 7. Zoom and
   canvas resize are the same gesture, so zooming out destroys paint. Separate
   view zoom from the painting rectangle; see UX finding 1. This one loses user
@@ -771,12 +1031,32 @@ Useful query parameters: `?diag=1` (on-device capability panel), `?gpu=<profile>
   is a per-press rotation/offset seeded from the engine's seedable RNG — not
   `Math.random()`, or `?seed=` reproducibility dies. A real brush is not spun
   between strokes, so keep it small.
-- **A named stroke API (`beginStroke`/`strokeTo`/`endStroke`)** — now
-  **Phase 9a** in the plan. The primitives are public and sufficient today, but
-  the settling and point-spacing rules are a caller's to get wrong silently.
-  Wanted for the tilecraft tracing use case; see the Phase 7 answers above and
-  `docs/api-usecases.md`. Interacts with 8a: the per-press re-seed belongs
-  inside `beginStroke()`.
+- **A named stroke API (`beginStroke`/`strokeTo`/`endStroke`)** — **Phase 9a, and
+  now the obvious next piece of engine work.** The plan said to build the second
+  host first in case the two disagreed about the shape. They do not: Phase 9
+  confirmed the need rather than changing it. `examples/minimal` gets the
+  settling and point-spacing rules right only because it drives from live pointer
+  events at frame rate, which is the easy case — a caller replaying recorded
+  vector art has none of that structure handed to it, and all four rules are
+  silent when got wrong. See `docs/API-FINDINGS.md`'s closing section and
+  `docs/api-usecases.md`. Interacts with 8a: the per-press re-seed belongs inside
+  `beginStroke()`.
+
+- ~~Phase 8 (controls / iro.js)~~ — **done, 2026-09-08**, after Phase 9 rather
+  than before it. See the Phase 8 section above.
+- **Sliders have no keyboard or screen-reader support.** Opened by Phase 8: the
+  §5a fork that would have brought it was dropped for good reasons (it is a
+  vertical component), but the gap it would have closed is real. `app/ui/
+  sliders.js` is a `<div>` with pointer handlers; it wants `role="slider"`,
+  `aria-valuenow/min/max`, `tabindex`, and arrow/Home/End keys. Small, isolated,
+  and it does not need the tilecraft component.
+- **`brushviewer.js`'s status is contradictory in the plan and both claims are
+  wrong.** Phase 8's text says it "already moved to `fluid-engine/debug/` in
+  Phase 1"; §5a's delete-list names it and then says it is not deleted. Neither
+  happened: it is still at the repo root, still in `index.html` and the gulpfile,
+  still constructed behind the `brushViewer` debug flag. Phase 8 left it alone
+  rather than sweeping it up by accident. Decide what it is before something
+  deletes it on the strength of that stale line.
 - The two Phase 5 extension points (Renderer interface, `simulate()` pass list)
   are deferred, not dropped. Neither blocks Phase 8.
 - ~~Re-test the iPhone 14~~ — **done, 2026-09-07. It paints.** No banding

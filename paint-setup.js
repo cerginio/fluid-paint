@@ -84,10 +84,13 @@ const ResizingSide = {
     BOTTOM_RIGHT: 8
 };
 
-const ColorModel = {
-    RYB: 0,
-    RGB: 1
-};
+// ColorModel is GONE (Phase 8/9). It was this app's private name for a value it
+// hands straight to the engine's renderToTexture(), while the engine compared
+// against a literal of its own -- two declarations of one number, in different
+// files, with a silent failure mode (anything not exactly RGB composites as
+// RYB). It is now FluidEngine.COLOR_MODEL, published by the code that consumes
+// it, and index.js asserts at load that the two halves still agree.
+// See docs/API-FINDINGS.md.
 
 
 const QUALITIES = [
@@ -151,12 +154,10 @@ const THICK_MAX_ALPHA = 0.025;
 // is nothing left here to keep in sync with it -- which is the point: two
 // declarations of one dimension is how the old layout drifted.
 //
-// COLOR_PICKER_LEFT/TOP survive only as the fallback placement for a host with
-// no #color-picker-slot in its markup. The normal path reads the slot's rect
-// (Paint._positionColorPicker), so the picker follows the layout instead of
-// sitting at a fixed offset from a window-sized canvas.
-const COLOR_PICKER_LEFT = 20;
-const COLOR_PICKER_TOP = 523;
+// COLOR_PICKER_LEFT/TOP are GONE (Phase 8). They were the fallback placement
+// for the GL picker, which had to be told where to draw itself. The picker is
+// an element inside #color-picker-slot now, so the document places it and there
+// is no offset left to fall back to.
 
 const RESIZING_RADIUS_CSS = 20;   // CSS pixels -- convert with viewport.cssLengthToScreen
 

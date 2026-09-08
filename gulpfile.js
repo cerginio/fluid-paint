@@ -51,9 +51,13 @@ const paths = {
     'fluid-engine/renderer.js',
     // The facade: must load after the three modules it composes.
     'fluid-engine/index.js',
-    'colorpicker.js',
-    'slider.js',
-    'buttons.js',
+    // iro.js before app/ui/color.js, which constructs an iro.ColorPicker.
+    // Vendored verbatim, MPL-2.0 -- see docs/UI-COMPONENTS.md. colorpicker.js
+    // and its two GL programs are gone (Phase 8).
+    'lib/iro.js',
+    'app/ui/color.js',
+    'app/ui/sliders.js',
+    'app/ui/buttons.js',
     'brushviewer.js',
     // Vendored from tilecraft with one local patch; see docs/UI-COMPONENTS.md.
     // Reports Y-down CSS-relative coords, so paint.js adapts them via viewport.
@@ -163,6 +167,21 @@ function staticFiles() {
   return src(paths.static, { allowEmpty: true })
     .pipe(dest(paths.dist));
 }
+
+// examples/ is deliberately NOT built into dist/, and that is a decision rather
+// than an omission (Phase 9).
+//
+// examples/minimal/ loads the engine as SEPARATE SOURCE FILES -- four <script>
+// tags at ../../fluid-engine/*.js -- because its whole purpose is to show what a
+// host must pull in to run the engine, and a single bundle.js hides exactly
+// that. dist/ has no such files: scripts() concatenates everything into one
+// bundle. So copying the example into dist/ would ship a page that 404s four
+// times and renders nothing, which is worse than not shipping it.
+//
+// The example is run from source (`npm run dev`, then
+// /examples/minimal/index.html) and is verified there by debug/phase9-probe.js,
+// which serves the repo root rather than dist. If a bundled example is ever
+// wanted, it needs its own concat target -- not a copy of this directory.
 
 // ---------- SERVE ----------
 function startServer(done) {

@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <title>FluidEngine — minimal host</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+    <link rel="stylesheet" href="minimal.css">
+</head>
+
+<body>
+    <!--
+      Phase 9 — prove reuse.
+
+      A SECOND HOST for FluidEngine: a bare canvas, `new FluidEngine(...)`, and
+      three controls. It exists to answer one question that the main app cannot
+      answer about itself -- is the Phase 5 boundary a real API, or just the
+      shape `paint.js` happens to need?
+
+      What this page deliberately does NOT have, and why each absence is a test:
+
+        - No ToolPanel, no colour wheel, no app/ui/sliders.js, no buttons. If the
+          engine needed any of that chrome to function, the omission would show
+          up here as something that does not work.
+        - No `paint-setup.js`. Every constant this host needs it defines for
+          itself or reads from the engine -- so a constant the engine silently
+          depends on the app owning becomes a visible finding rather than an
+          inherited default. (It found one: ColorModel. See minimal.js.)
+        - No `app/shaders/`. Only the ENGINE shader tree is loaded, which is the
+          Phase 4 split being cashed in: if an engine file reached for a chrome
+          shader, this page would fail to start.
+        - No undo, no save, no resize handles, no gestures, no DPR handling.
+          Those are host policy by design (see fluid-engine/index.js's header),
+          and leaving them out is how we check that claim is true.
+
+      Read `examples/minimal/minimal.js` -- the findings this host produced about
+      the API are recorded there, at the line that provoked each one.
+    -->
+    <div id="frame">
+        <div id="canvas-cell"></div>
+
+        <div id="controls">
+            <span class="title">FluidEngine · minimal host</span>
+
+            <label>Hue
+                <input id="hue" type="range" min="0" max="1" step="0.001" value="0.6">
+            </label>
+
+            <label>Brush size
+                <input id="size" type="range" min="5" max="75" step="1" value="50">
+            </label>
+
+            <label>Fluidity
+                <input id="fluidity" type="range" min="0.6" max="0.9" step="0.001">
+            </label>
+
+            <button id="clear" type="button">Clear</button>
+
+            <span id="status">starting…</span>
+        </div>
+    </div>
+
+    <!--
+      The engine and exactly its dependencies, in dependency order (this project
+      uses globals and no module system, so order matters).
+
+      glsl3      -- shader source translation for the WebGL 2 path
+      wrappedgl  -- the GL state wrapper the engine draws through
+      utilities  -- Utilities.swap, used by brush.js and simulation.js
+      rectangle  -- the Rectangle the engine takes and returns
+
+      Then the four engine files. Note what is NOT here: viewport.js, debug/*,
+      lib/iro.js, app/ui/color.js, app/ui/sliders.js, app/ui/buttons.js,
+      app/ui/panel.js, app/ui/pointer-dispatcher.js,
+      paint-setup.js, paint.js, common.js. This host writes its own ~10 lines of
+      hsvToRyb and shader loading rather than pulling in common.js, so that the
+      list below is exactly "the engine and nothing else".
+    -->
+    <script src="../../fluid-engine/gl/glsl3.js"></script>
+    <script src="../../fluid-engine/gl/wrappedgl.js"></script>
+    <script src="../../utilities.js"></script>
+    <script src="../../rectangle.js"></script>
+
+    <script src="../../fluid-engine/brush.js"></script>
+    <script src="../../fluid-engine/simulation.js"></script>
+    <script src="../../fluid-engine/renderer.js"></script>
+    <script src="../../fluid-engine/index.js"></script>
+
+    <script src="minimal.js"></script>
+</body>
+
+</html>
