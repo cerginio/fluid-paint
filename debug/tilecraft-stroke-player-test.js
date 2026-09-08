@@ -97,6 +97,29 @@ console.log('tilecraft stroke player: PASS (polyline paths before polygon spots)
   assert.equal(frames, 6, 'each point target and spot waits the requested number of frames');
   assert.deepEqual(liveStats, { layers: 2, strokes: 2, spots: 1, points: 3, skipped: 0 });
   console.log('tilecraft live player: PASS (RAF-fed polyline then spots)');
+
+  const fastCalls = [];
+  let fastFrames = 0, fastTicks = 0, clockResets = 0;
+  await new TilecraftStrokePlayer({
+    beginStroke() { fastCalls.push('begin'); },
+    strokeTo() { fastCalls.push('to'); },
+    endStroke() { fastCalls.push('end'); },
+  }).play({ layers: [{ visible: true, tileShape: 'polyline', gridSize: 2, tiles: [
+    { x: 0, y: 0, c: '#ff0000', g: 1 },
+    { x: 1, y: 0, c: '#ff0000', g: 1 },
+    { x: 2, y: 0, c: '#ff0000', g: 1 },
+  ] }] }, {
+    paintingRectangle: { left: 0, bottom: 0, width: 10, height: 10 },
+    ticksPerFrame: 2,
+    advanceTick: () => { fastTicks++; },
+    resetAdvanceClock: () => { clockResets++; },
+    waitFrame: async () => { fastFrames++; },
+  });
+  assert.deepEqual(fastCalls, ['begin', 'to', 'to', 'end']);
+  assert.equal(fastTicks, 2, 'fast mode advances one complete tick for every retained point');
+  assert.equal(fastFrames, 1, 'two ticks share one displayed frame at 2x speed');
+  assert.equal(clockResets, 1, 'synthetic playback time is returned to the host clock');
+  console.log('tilecraft fast player: PASS (ticks retained at accelerated display rate)');
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;

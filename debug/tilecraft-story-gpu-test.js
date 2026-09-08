@@ -32,7 +32,7 @@ const server = http.createServer((request, response) => {
     const page = await browser.newPage({ viewport: { width: 900, height: 650 }, deviceScaleFactor: 1 });
     const errors = [];
     page.on('pageerror', (error) => errors.push(error.message));
-    await page.goto(`http://127.0.0.1:${server.address().port}/index.html?debug=none&diag=0&story=1&storySpeed=1`);
+    await page.goto(`http://127.0.0.1:${server.address().port}/index.html?debug=none&diag=0&story=1&storySpeed=8`);
     await page.waitForFunction(() => window.__tilecraftStoryStarted && window.__tilecraftStoryPlayer);
     await page.waitForTimeout(100);
     const result = await page.evaluate(() => ({

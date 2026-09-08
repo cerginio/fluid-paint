@@ -94,11 +94,16 @@ its brush size.
 
 ## Live fixture demo
 
+User-facing playback controls, speed semantics and the UI roadmap are in
+[`TILECRAFT-STORY-PLAYBACK.md`](TILECRAFT-STORY-PLAYBACK.md).
+
 With the development server running, open `/?story=1`. The main app fetches
 `docs/story-2026-09-08-4-frames.json`, fits its selected frame — or the union
 of all four frames when none is selected — into the current painting rectangle,
 clears the canvas and feeds the resulting live stroke input to the app RAF. The
 result is visible fluid simulation, not an instant import; reloading the URL
-restarts the story. `?story=1` uses eight browser frames per model point for
-the large fixture (8× the one-frame baseline). Override it with
-`?story=1&storyFramesPerStep=N`; the older `storySpeed=N` remains an alias.
+restarts the story. `?story=1` uses `storySpeed=8`: eight complete model ticks
+per displayed browser frame, while retaining every model point. Override it
+with `?story=1&storySpeed=N` (`1` is real-time, `8` is 8× faster). For a
+deliberate slow-motion diagnostic, use `?story=1&storyFramesPerStep=N`; this
+means N browser frames per model point and takes precedence over `storySpeed`.

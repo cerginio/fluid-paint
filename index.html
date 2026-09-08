@@ -284,14 +284,29 @@
                         const player = new TilecraftStrokePlayer(painter.engine);
                         window.__tilecraftStoryPlayer = player;
                         window.__tilecraftStoryStarted = true;
-                        // storyFramesPerStep is explicit; storySpeed remains a
-                        // backwards-compatible alias from the first demo.
-                        // Eight frames per model point is intentionally slow
-                        // enough for this 22k-point story to be watchable.
-                        const requestedSpeed = Number(params.get('storyFramesPerStep') || params.get('storySpeed'));
-                        const framesPerStep = Number.isInteger(requestedSpeed) && requestedSpeed > 0
-                            ? requestedSpeed
-                            : 8;
+                        // Speed is a true multiplier: storySpeed=8 advances
+                        // eight complete model ticks per displayed RAF. The
+                        // explicitly named storyFramesPerStep is the separate,
+                        // intentionally slower diagnostic mode.
+                        const hasSlowMode = params.has('storyFramesPerStep');
+                        const requestedSlowFrames = Number(params.get('storyFramesPerStep'));
+                        const framesPerStep = Number.isInteger(requestedSlowFrames) && requestedSlowFrames > 0
+                            ? requestedSlowFrames
+                            : 1;
+                        const requestedSpeed = Number(params.get('storySpeed'));
+                        const ticksPerFrame = !hasSlowMode
+                            ? (Number.isInteger(requestedSpeed) && requestedSpeed > 0 ? requestedSpeed : 8)
+                            : 1;
+                        let storyClock;
+                        const advanceStoryTick = () => {
+                            const wallNow = performance.now() / 1000;
+                            storyClock = Math.max(storyClock === undefined ? wallNow : storyClock, wallNow) + 1 / 60;
+                            painter.engine.advance(storyClock);
+                        };
+                        const resetStoryClock = () => {
+                            painter.engine.resetClock(performance.now() / 1000);
+                            storyClock = undefined;
+                        };
                         const stats = await player.play(story, {
                             paintingRectangle: target,
                             resolutionScale: painter.getEffectiveResolutionScale(),
@@ -307,6 +322,9 @@
                                 y: offsetY + (bottom - tile.y) * scale,
                             }),
                             framesPerStep,
+                            ticksPerFrame,
+                            advanceTick: advanceStoryTick,
+                            resetAdvanceClock: resetStoryClock,
                             onPaint: () => { painter.needsRedraw = true; },
                         });
                         window.__tilecraftStoryStats = stats;

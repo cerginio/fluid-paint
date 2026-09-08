@@ -42,8 +42,10 @@ class TilecraftStrokePlayer {
   /**
    * Animate the same model through live strokes. A host's normal RAF loop must
    * call engine.advance(); this method deliberately only feeds its input
-   * mailbox once per supplied frame. `onPaint` is where a host marks its
-   * presentation dirty after a programmatic input update.
+   * mailbox once per supplied frame. A host may opt into `ticksPerFrame` with
+   * its public `advance()` clock to fast-forward a non-interactive story
+   * without dropping its intermediate points. `onPaint` is where a host marks
+   * its presentation dirty after a programmatic input update.
    */
   async play(model, options) {
     const context = this._context(model, options);
@@ -55,32 +57,64 @@ class TilecraftStrokePlayer {
     if (!Number.isInteger(framesPerStep) || framesPerStep < 1) {
       throw new TypeError('Tilecraft live playback framesPerStep must be a positive integer.');
     }
+    const ticksPerFrame = options.ticksPerFrame === undefined ? 1 : options.ticksPerFrame;
+    if (!Number.isInteger(ticksPerFrame) || ticksPerFrame < 1) {
+      throw new TypeError('Tilecraft live playback ticksPerFrame must be a positive integer.');
+    }
+    if (ticksPerFrame > 1 && framesPerStep !== 1) {
+      throw new TypeError('Use either ticksPerFrame (fast) or framesPerStep (slow), not both.');
+    }
+    if (ticksPerFrame > 1 && typeof options.advanceTick !== 'function') {
+      throw new TypeError('Fast Tilecraft playback requires options.advanceTick().');
+    }
     const waitStep = async () => {
       for (let i = 0; i < framesPerStep; i++) await waitFrame();
+    };
+    let ticksThisFrame = 0;
+    const fastTick = ticksPerFrame === 1 ? null : async () => {
+      await options.advanceTick();
+      ticksThisFrame++;
+      if (ticksThisFrame === ticksPerFrame) {
+        // The host returns the engine clock to wall time before yielding, so
+        // its ordinary RAF cannot see a synthetic future timestamp.
+        if (typeof options.resetAdvanceClock === 'function') options.resetAdvanceClock();
+        ticksThisFrame = 0;
+        await waitFrame();
+      }
+    };
+    const finishFastTicks = () => {
+      if (fastTick && ticksThisFrame > 0 && typeof options.resetAdvanceClock === 'function') {
+        options.resetAdvanceClock();
+      }
     };
     const onPaint = options.onPaint || (() => {});
     const { stats } = context;
     const visible = model.layers.filter((layer) => layer && layer.visible);
 
-    for (const layer of visible.filter((candidate) => candidate.tileShape === 'polyline')) {
-      stats.layers++;
-      for (const segment of this._polylineSegments(layer, stats, context)) {
-        await this._playPolylineSegment(segment, layer, context, waitStep, onPaint);
+    try {
+      for (const layer of visible.filter((candidate) => candidate.tileShape === 'polyline')) {
+        stats.layers++;
+        for (const segment of this._polylineSegments(layer, stats, context)) {
+          await this._playPolylineSegment(segment, layer, context, waitStep, onPaint, fastTick);
+        }
       }
-    }
-    for (const layer of visible.filter((candidate) => candidate.tileShape === 'polygon')) {
-      stats.layers++;
-      for (const tile of layer.tiles || []) {
-        if (!this._isDrawableTile(tile)) { stats.skipped++; continue; }
-        const point = this._map(tile, layer, context);
-        if (!point) { stats.skipped++; continue; }
-        await waitStep();
-        this._begin(point, tile, this._tileSize(tile, layer, context), layer, context,
-          tile.s === undefined ? 1 : tile.s, 'live');
-        this.engine.endStroke();
-        stats.spots++;
-        onPaint();
+      for (const layer of visible.filter((candidate) => candidate.tileShape === 'polygon')) {
+        stats.layers++;
+        for (const tile of layer.tiles || []) {
+          if (!this._isDrawableTile(tile)) { stats.skipped++; continue; }
+          const point = this._map(tile, layer, context);
+          if (!point) { stats.skipped++; continue; }
+          if (!fastTick) await waitStep();
+          this._begin(point, tile, this._tileSize(tile, layer, context), layer, context,
+            tile.s === undefined ? 1 : tile.s, 'live');
+          this.engine.endStroke();
+          stats.spots++;
+          onPaint();
+          if (fastTick) await fastTick();
+        }
       }
+    } finally {
+      finishFastTicks();
     }
     return stats;
   }
@@ -202,7 +236,7 @@ class TilecraftStrokePlayer {
     }
   }
 
-  async _playPolylineSegment(segment, layer, context, waitFrame, onPaint) {
+  async _playPolylineSegment(segment, layer, context, waitFrame, onPaint, fastTick) {
     const { tiles, closes, groupScale } = segment;
     const sizes = tiles.map((tile) => this._tileSize(tile, layer, context, groupScale));
     const maximumSize = Math.max(...sizes);
@@ -214,24 +248,26 @@ class TilecraftStrokePlayer {
     onPaint();
     try {
       for (let i = 1; i < tiles.length; i++) {
-        await waitFrame();
+        if (!fastTick) await waitFrame();
         const point = this._map(tiles[i], layer, context);
         if (!point) { context.stats.skipped++; continue; }
         this.engine.strokeTo({ x: point.x, y: point.y,
           pressure: this._pressure(tiles[i], maximumRelativeSize, context) });
         context.stats.points++;
         onPaint();
+        if (fastTick) await fastTick();
       }
       if (closes && tiles.length > 2) {
-        await waitFrame();
+        if (!fastTick) await waitFrame();
         this.engine.strokeTo({ x: first.x, y: first.y,
           pressure: this._pressure(tiles[0], maximumRelativeSize, context) });
         context.stats.points++;
         onPaint();
+        if (fastTick) await fastTick();
       }
       // The final target needs one host frame before lift; otherwise live mode
       // would turn it into an immediate endpoint flush instead of a timed tick.
-      await waitFrame();
+      if (!fastTick) await waitFrame();
     } finally {
       this.engine.endStroke();
       onPaint();
