@@ -3,6 +3,14 @@
 Written 2026-09-08 after reviewing the implementation, the Phase 9 reuse host,
 the golden harness, and the Tilecraft render schema.
 
+> **УВАГА (2026-09-08):** часову модель Phase 9a в цьому файлі виправлено
+> документом `docs/STROKE-TIMING-CONTRACT.md`. Вимоги «each method performs all
+> … fluid steps before it returns», заборона `frame()` під час мазка і
+> «changing caller timing … does not change output» **скасовані**: вони
+> ототожнюють просторовий крок із кроком фізичного часу. Читати §"Scope and API
+> level", §"Exact step order" і §"Phase 9a verification" тільки разом із тим
+> документом.
+
 This document supersedes only the incomplete Phase 8a and Phase 9a sections of
 `FLUID-ENGINE-EXTRACTION-PLAN.md`. It does not claim that either phase has been
 implemented. The current code still exposes only `initializeBrush`,
