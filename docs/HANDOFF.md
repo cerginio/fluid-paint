@@ -3,6 +3,8 @@
 Written 2026-09-07, updated 2026-09-08 for Phases 9 and 8 (done in that order).
 Read this, then `docs/FLUID-ENGINE-EXTRACTION-PLAN.md`.
 
+> **Далі:** docs/HANDOFF2.md — специфікації Phase 8a/9a, які заміняють відповідні секції цього файлу.
+
 ## Where things stand
 
 Branch: **`fluid-engine-v1`**. Phase 7 is committed (`9f846f3`); the working tree

@@ -14,7 +14,19 @@ const STIFFNESS_VARIATION = 0.3;
 
 // the radius of a brush is equal to the scale
 class Brush {
-  constructor(wgl, shaderSources, maxBristleCount) {
+  /**
+   * @param {function} [random]  engine-owned source returning [0,1). Injected
+   *   so a seeded host or test gets reproducible bristle layouts; see
+   *   FluidEngine's constructor for why the engine owns it rather than Brush
+   *   calling Math.random() directly.
+   */
+  constructor(wgl, shaderSources, maxBristleCount, random) {
+    this.random = typeof random === 'function' ? random : Math.random;
+
+    /* Drawn once per press by initialize(), never per frame, per bristle or
+     * per splat -- a redraw mid-stroke would make one press wander. */
+    this.strokeVariation = 0;
+
     this.wgl = wgl;
 
     this.maxBristleCount = maxBristleCount;
@@ -102,7 +114,7 @@ class Brush {
     // randoms texture
     const randoms = [];
     for (let i = 0; i < maxBristleCount * VERTICES_PER_BRISTLE * 4; ++i) {
-      randoms.push(Math.random());
+      randoms.push(this._nextRandom());
     }
     this.randomsTexture = wgl.buildTexture(
       wgl.RGBA, wgl.FLOAT, maxBristleCount, VERTICES_PER_BRISTLE,
@@ -187,8 +199,34 @@ class Brush {
     );
   }
 
+  /**
+   * One draw from the engine-owned source, validated.
+   *
+   * A bad injected generator must fail loudly here rather than silently fall
+   * back to Math.random(): a test that thinks it is seeded but is not would
+   * report false reproducibility, which is worse than a crash.
+   */
+  _nextRandom() {
+    const value = this.random();
+    if (typeof value !== 'number' || !isFinite(value) || value < 0 || value >= 1) {
+      const error = new Error(
+        'FluidEngine: the injected random() returned ' + value +
+        '; expected a finite number in [0, 1).'
+      );
+      error.name = 'RandomSourceError';
+      throw error;
+    }
+    return value;
+  }
+
   // sets all the bristle vertices
+  //
+  // Also draws this press's bristle-layout variation (Phase 8a). Every call is
+  // a new press: the caller of the low-level primitive owns that decision, and
+  // FluidEngine.beginStroke() calls this exactly once per stroke.
   initialize(x, y, z, scale) {
+    this.strokeVariation = this._nextRandom();
+
     this.positionX = x;
     this.positionY = y;
     this.positionZ = z;
@@ -210,6 +248,7 @@ class Brush {
       .uniform1f('u_bristleLength', BRISTLE_LENGTH)
       .uniform1f('u_verticesPerBristle', VERTICES_PER_BRISTLE)
       .uniform1f('u_jitter', BRISTLE_JITTER)
+      .uniform1f('u_strokeVariation', this.strokeVariation)
       .uniform2f('u_resolution', this.maxBristleCount, VERTICES_PER_BRISTLE)
       .uniformTexture('u_randomsTexture', 2, wgl.TEXTURE_2D, this.randomsTexture)
       .vertexAttribPointer(

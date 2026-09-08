@@ -752,14 +752,15 @@ class Paint {
 
         this._syncBrushToPointer();
 
-        // update brush
+        // Phase 9a: while a named stroke is active the engine owns brush
+        // movement, deposition and simulation stepping -- it did all of that
+        // synchronously inside strokeTo(). Running the old
+        // positionBrush/splat/frame path here as well would deposit twice and
+        // double-step the fluid, so this loop only advances IDLE fluid now.
         //
-        // brushHeight carries pen pressure (Phase 6). It is applied here rather
-        // than at the input event because the bristles are advanced every frame
-        // and only this call reaches them -- a height set on the event alone
-        // would never be read. It defaults to the unscaled height, so a mouse,
-        // a finger, and a pen at full pressure all behave exactly as before.
-        if (this.brushInitialized) {
+        // The brush is still positioned for a non-painting pointer, because the
+        // bristle overlay draws from live brush state.
+        if (!this.engine.strokeActive && this.brushInitialized) {
             this.engine.positionBrush(
                 this.brushX,
                 this.brushY,
@@ -768,41 +769,8 @@ class Paint {
             );
         }
 
-        // splat into paint and velocity textures
-        if (this.interactionState === InteractionMode.PAINTING) {
-            const splatRadius = SPLAT_RADIUS * this.brushScale;
-            const splatColor = hsvToRyb(
-                this.brushColorHSVA[0],
-                this.brushColorHSVA[1],
-                this.brushColorHSVA[2]
-            );
-            const alphaT = this.brushColorHSVA[3];
-
-            // scale alpha based on the number of bristles
-            const bristleT =
-                (this.engine.bristleCount - MIN_BRISTLE_COUNT) /
-                (MAX_BRISTLE_COUNT - MIN_BRISTLE_COUNT);
-            const minAlpha = mix(THIN_MIN_ALPHA, THICK_MIN_ALPHA, bristleT);
-            const maxAlpha = mix(THIN_MAX_ALPHA, THICK_MAX_ALPHA, bristleT);
-            const alpha = mix(minAlpha, maxAlpha, alphaT);
-            splatColor[3] = alpha;
-
-            const splatVelocityScale =
-                SPLAT_VELOCITY_SCALE * splatColor[3] * this.resolutionScale;
-
-            // Splat paint. The brush's coordinates are screen pixels, so the
-            // painting rectangle is handed over in that same space -- the
-            // engine transforms brush space to simulation space and knows
-            // nothing about the screen.
-            this.engine.splat(this.paintingRectangle, {
-                zThreshold: Z_THRESHOLD * this.brushScale,
-                color: splatColor,
-                radius: splatRadius,
-                velocityScale: splatVelocityScale,
-            });
-        }
-
-        const simulationUpdated = this.engine.frame();
+        // Only when no stroke is running: the stroke already stepped the fluid.
+        const simulationUpdated = this.engine.strokeActive ? false : this.engine.frame();
         if (simulationUpdated) this.needsRedraw = true;
 
         // the rectangle we end up drawing the painting into
@@ -1223,6 +1191,58 @@ class Paint {
         return BRUSH_HEIGHT * this.brushScale * this._pressureScale(pressure, pointerType);
     }
 
+    /**
+     * The engine's pigment payload for the current brush colour.
+     *
+     * Colour conversion stays here, in the host: the engine takes pigment
+     * coordinates and refuses anything else, so an RGB triple can no longer
+     * reach the simulation by looking plausible. The alpha curve is the app's
+     * own bristle-count rule, unchanged from the pre-9a splat path.
+     */
+    _strokeColor() {
+        const channels = hsvToRyb(
+            this.brushColorHSVA[0],
+            this.brushColorHSVA[1],
+            this.brushColorHSVA[2]
+        );
+        const bristleT =
+            (this.engine.bristleCount - MIN_BRISTLE_COUNT) /
+            (MAX_BRISTLE_COUNT - MIN_BRISTLE_COUNT);
+        const minAlpha = mix(THIN_MIN_ALPHA, THICK_MIN_ALPHA, bristleT);
+        const maxAlpha = mix(THIN_MAX_ALPHA, THICK_MAX_ALPHA, bristleT);
+        return {
+            space: 'pigment',
+            channels: [channels[0], channels[1], channels[2]],
+            alpha: mix(minAlpha, maxAlpha, this.brushColorHSVA[3]),
+        };
+    }
+
+    /** Start the named stroke for a press that is actually painting. */
+    _beginPaintStroke(pressure, pointerType) {
+        if (this.engine.strokeActive) this.engine.endStroke();
+        this.engine.beginStroke({
+            x: this.brushX,
+            y: this.brushY,
+            pressure: this._pressureScale(pressure, pointerType),
+            brushSize: this.brushScale,
+            paintingRectangle: this.paintingRectangle,
+            color: this._strokeColor(),
+            resolutionScale: this.resolutionScale,
+            /* brushX/brushY are SCREEN pixels (CSS * devicePixelRatio) but
+             * brushScale is a CSS-space size that does not scale with DPR. The
+             * engine's default spacing is derived from brushSize, so on a dpr2
+             * display the same gesture is twice as long in engine units and
+             * would emit twice the samples. Scaling spacing by the same ratio
+             * as the coordinates keeps a stroke identical across displays. */
+            spacing: Math.max(
+                1,
+                0.15 * this.brushScale * (this.viewport.pixelRatio || 1)
+            ),
+        });
+        this.brushInitialized = true;
+        this.needsRedraw = true;
+    }
+
     onGestureStart = (event) => {
         // Right-click collapses/expands the panel; it never starts a stroke.
         // It goes through the panel rather than setting showPanel directly, so
@@ -1264,9 +1284,19 @@ class Paint {
             this.saveSnapshot();
         }
 
-        // panstart carries no pressure -- it fires on pointerdown, before any
-        // move sample. The first pan event supplies the real value.
-        if (!this.brushInitialized) {
+        // Phase 9a: a painting press opens a named stroke, which reseeds the
+        // bristles (a fresh Phase 8a variation) and settles them while
+        // depositing -- so a bare tap is visible without a dot primitive.
+        //
+        // panstart carries no pressure: it fires on pointerdown, before any
+        // move sample, so the stroke opens at full height and the first pan
+        // event supplies the real value.
+        //
+        // Panning and resizing must NOT start a stroke; they only need the
+        // brush placed, which is what the primitive is still for.
+        if (this.interactionState === InteractionMode.PAINTING) {
+            this._beginPaintStroke(1, event.pointerType);
+        } else if (!this.brushInitialized) {
             this.engine.initializeBrush(
                 this.brushX,
                 this.brushY,
@@ -1315,7 +1345,25 @@ class Paint {
         this.brushX = mx;
         this.brushY = my;
 
-        if (!this.brushInitialized) {
+        // Pen pressure reaches the stroke here: recorded per sample so it tracks
+        // the pen through the stroke, not just at the moment of contact.
+        this.brushPressure = this._pressureScale(event.pressure, event.pointerType);
+
+        if (this.interactionState === InteractionMode.PAINTING) {
+            // The engine resamples this segment at its own fixed spacing and
+            // performs every step synchronously, so coalesced or bursty pointer
+            // events produce the same paint as evenly spaced ones.
+            if (!this.engine.strokeActive) {
+                this._beginPaintStroke(event.pressure, event.pointerType);
+            } else {
+                this.engine.strokeTo({
+                    x: this.brushX,
+                    y: this.brushY,
+                    pressure: this.brushPressure,
+                });
+                this.needsRedraw = true;
+            }
+        } else if (!this.brushInitialized) {
             this.engine.initializeBrush(
                 this.brushX,
                 this.brushY,
@@ -1324,10 +1372,6 @@ class Paint {
             );
             this.brushInitialized = true;
         }
-
-        // Pen pressure reaches the stroke here: recorded per sample so it tracks
-        // the pen through the stroke, not just at the moment of contact.
-        this.brushPressure = this._pressureScale(event.pressure, event.pointerType);
 
         if (this.interactionState === InteractionMode.PANNING) {
             const delta = this._deltaToScreen(event.dx, event.dy);
@@ -1422,16 +1466,40 @@ class Paint {
         this.mouseX = position.x;
         this.mouseY = position.y;
 
-        this.engine.initializeBrush(
-            this.brushX,
-            this.brushY,
-            this._brushHeight(event.pressure, event.pointerType),
-            this.brushScale
-        );
-        this.brushInitialized = true;
+        // Hover only places the brush. initializeBrush() would draw a new
+        // Phase 8a variation on every mouse move -- harmless to the picture,
+        // but it would burn the seeded random sequence a golden run depends on,
+        // and it must never touch an active stroke.
+        if (this.engine.strokeActive) return;
+
+        if (!this.brushInitialized) {
+            this.engine.initializeBrush(
+                this.brushX,
+                this.brushY,
+                this._brushHeight(event.pressure, event.pointerType),
+                this.brushScale
+            );
+            this.brushInitialized = true;
+        } else {
+            this.engine.positionBrush(
+                this.brushX,
+                this.brushY,
+                this._brushHeight(event.pressure, event.pointerType),
+                this.brushScale
+            );
+        }
     };
 
     onGestureEnd = (event) => {
+        // Lift first: endStroke() flushes the final pointer position, so the
+        // stroke reaches where the finger actually stopped rather than the last
+        // resampled point. Also covers pointercancel and pointer loss, both of
+        // which the dispatcher reports as panend.
+        if (this.engine.strokeActive) {
+            this.engine.endStroke();
+            this.needsRedraw = true;
+        }
+
         // The next two-finger gesture measures its span from scratch.
         this.pinchStartSpan = null;
         this.pinchStartRectangle = null;

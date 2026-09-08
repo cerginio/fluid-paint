@@ -85,6 +85,16 @@ async function runOne(browser, port, scenario, webglVersion, dpr) {
   } catch (err) {
     results = [{ scenario, error: 'timeout: ' + err.message, logs: logs.slice(-12) }];
   }
+  /* GOLDEN_SHOTS=<dir> saves what each scenario actually painted. Hashes say
+   * THAT something changed; only an image says whether the change is
+   * acceptable, which is what re-recording a baseline requires. */
+  if (process.env.GOLDEN_SHOTS && !results.some((r) => r.error)) {
+    const dir = path.resolve(process.env.GOLDEN_SHOTS);
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `${scenario}-webgl${webglVersion}-dpr${dpr}.png`);
+    await page.screenshot({ path: file });
+  }
+
   await page.close();
   return results.map((r) => Object.assign({ webglRequested: webglVersion, dpr }, r));
 }
@@ -126,6 +136,15 @@ async function main() {
           process.stdout.write(`ERROR\n    ${r.error}\n`);
         } else {
           process.stdout.write(`paint=${r.paintHash} screen=${r.screenHash}`);
+          if (process.env.GOLDEN_AGGREGATE && r.aggregate) {
+            const g = r.aggregate;
+            process.stdout.write(
+              `
+      alpha=${g.totalAlpha} texels=${g.paintedTexels} ` +
+              `cov=${g.coverage} meanRYB=[${g.meanRYB.join(', ')}] ` +
+              `bounds=[${(g.bounds || []).join(',')}]`
+            );
+          }
           if (r.greenCheck) {
             process.stdout.write(`  green=${r.greenCheck} mean(R,Y,B)=[${r.greenMean}]`);
           }

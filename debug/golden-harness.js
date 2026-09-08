@@ -186,6 +186,38 @@ async function runStroke(painter, stroke, opts) {
  * chrome -- which is what lets the same baseline survive the UI replacement in
  * Phases 6-8.
  */
+/*
+ * Total deposited alpha, alpha-weighted mean pigment, painted area and the
+ * bounding box of paint, over the whole painting.
+ *
+ * Deliberately alpha-weighted: an unweighted mean is dominated by the vast
+ * empty region and barely moves however the paint changes, which would make
+ * this look like a strong check while being a weak one.
+ */
+function paintAggregate(buffer) {
+  const px = buffer.pixels;
+  let totalAlpha = 0, sr = 0, sy = 0, sb = 0, painted = 0;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (let i = 0, n = px.length / 4; i < n; ++i) {
+    const a = px[i * 4 + 3];
+    if (!(a > 0.001)) continue;
+    totalAlpha += a;
+    sr += px[i * 4] * a; sy += px[i * 4 + 1] * a; sb += px[i * 4 + 2] * a;
+    painted++;
+    const x = i % buffer.width, y = (i / buffer.width) | 0;
+    if (x < minX) minX = x; if (x > maxX) maxX = x;
+    if (y < minY) minY = y; if (y > maxY) maxY = y;
+  }
+  const w = totalAlpha > 0 ? totalAlpha : 1;
+  return {
+    totalAlpha: +totalAlpha.toFixed(3),
+    paintedTexels: painted,
+    coverage: +(painted / (buffer.width * buffer.height)).toFixed(5),
+    meanRYB: [+(sr / w).toFixed(4), +(sy / w).toFixed(4), +(sb / w).toFixed(4)],
+    bounds: painted ? [minX, minY, maxX, maxY] : null,
+  };
+}
+
 function readPaintTexture(painter) {
   // Through the engine's API rather than reaching for simulator.paintTexture.
   // The harness is a host like any other: if it needs something the API does
@@ -495,6 +527,12 @@ async function runGoldenScenario(painter, name) {
     resolution: buffer.width + 'x' + buffer.height,
     paintHash: hashPixels(buffer.pixels),
     screenHash: hashPixels(screen.pixels),
+    /* Aggregates, not hashes. A hash answers "did anything change"; these
+     * answer "did the PICTURE change" -- how much pigment landed, of what
+     * colour, over what area. A deliberate change to stroke sampling moves
+     * every hash while leaving these within a percent, which is the evidence
+     * required before a baseline may be re-recorded. */
+    aggregate: paintAggregate(buffer),
   };
 
   if (window.__goldenProbe) {

@@ -31,6 +31,21 @@ const SIMULATION_RENDER_TARGETS = 7;
 const BYTES_PER_RGBA_TEXEL = 16;
 
 /*
+ * Phase 9a stroke dynamics. These were duplicated in every host that painted;
+ * the named API owns them now. They are VERSIONED constants -- changing one
+ * changes the look of every stroke and every golden, so do not tune them to
+ * make a single test pass. The low-level primitives are unaffected.
+ */
+const STROKE_HEIGHT_SCALE = 2.0;      // brush height over the canvas
+const STROKE_MIN_PRESSURE = 0.15;     // a light touch still paints
+const STROKE_Z_THRESHOLD = 0.13333;   // bristle contact depth
+const STROKE_SPLAT_RADIUS = 0.05;
+const STROKE_VELOCITY_SCALE = 0.14;
+const STROKE_SETTLE_STEPS = 10;       // matches the harness's ten-RAF wait
+const STROKE_SPACING_FRACTION = 0.15; // 7.5 engine px at brush size 50
+const STROKE_MIN_SPACING = 1;         // never below one engine pixel
+
+/*
  * The engine's own shader files, relative to fluid-engine/.
  *
  * Phase 9 finding. Until the second host existed this list lived only in the
@@ -139,11 +154,17 @@ class FluidEngine {
    *   Fixed at construction; see PaintingRenderer for why it cannot flip
    *   mid-session.
    */
-  constructor(wgl, shaderSources, { resolutionWidth, resolutionHeight, maxBristleCount, blackPigment }) {
+  constructor(wgl, shaderSources, { resolutionWidth, resolutionHeight, maxBristleCount, blackPigment, random }) {
     this.wgl = wgl;
 
+    /* Phase 8a. Captured once so a host that swaps Math.random after
+     * construction cannot make one engine nondeterministic halfway through.
+     * The ?seed= golden harness installs its Math.random BEFORE the engine is
+     * built, so it keeps working untouched. */
+    this.random = typeof random === 'function' ? random : Math.random;
+
     this.simulator = new Simulator(wgl, shaderSources, resolutionWidth, resolutionHeight);
-    this.brush = new Brush(wgl, shaderSources, maxBristleCount);
+    this.brush = new Brush(wgl, shaderSources, maxBristleCount, this.random);
     this.renderer = new PaintingRenderer(wgl, shaderSources, { blackPigment: blackPigment });
 
     /* Hosts (and the UI's colour conversion) need to know which cube is live.
@@ -205,6 +226,7 @@ class FluidEngine {
    * @param {number} [params.bristleCount]
    */
   setBrush({ bristleCount } = {}) {
+    this._assertNoStroke('setBrush()');
     if (bristleCount !== undefined) this.brush.setBristleCount(bristleCount);
   }
 
@@ -225,11 +247,18 @@ class FluidEngine {
    * that the two agree. See splat()'s note on brush space.
    */
   positionBrush(x, y, height, scale) {
+    this._assertNoStroke('positionBrush()');
     this.brush.update(x, y, height, scale);
   }
 
-  /** Settle the bristles at a position, before a stroke begins. */
+  /**
+   * Place and reseed the bristles at a position, drawing this press's Phase 8a
+   * layout variation. It does NOT settle them: settling needs repeated
+   * positionBrush() calls, which callers of this low-level primitive must
+   * advance themselves. beginStroke() is the public operation that owns both.
+   */
   initializeBrush(x, y, height, scale) {
+    this._assertNoStroke('initializeBrush()');
     this.brush.initialize(x, y, height, scale);
   }
 
@@ -240,11 +269,278 @@ class FluidEngine {
    * @param {number[]}  color           RYB or RGB triple plus alpha
    */
   splat(brushRectangle, { zThreshold, color, radius, velocityScale }) {
+    this._assertNoStroke('splat()');
     this.simulator.splat(this.brush, zThreshold, brushRectangle, color, radius, velocityScale);
   }
 
   /** Advance the fluid one step. Returns whether anything actually moved. */
   frame() {
+    this._assertNoStroke('frame()');
+    return this.simulator.simulate();
+  }
+
+  // --- Named stroke API (Phase 9a) --------------------------------------
+  //
+  // A synchronous, deterministic path for replaying input. Each method performs
+  // every brush, splat and fluid step its portion of the stroke needs before it
+  // returns: no RAF, timer, promise or render is scheduled. The host may render
+  // after any call.
+  //
+  // Because these advance the simulation internally, a host must NOT also call
+  // frame() for an active stroke -- that would double-step the fluid. The
+  // primitives throw while a stroke is active to make that mistake visible.
+
+  /** True while a named stroke is running. */
+  get strokeActive() {
+    return this._stroke !== null && this._stroke !== undefined;
+  }
+
+  _strokeError(message) {
+    const error = new Error(message);
+    error.name = 'StrokeStateError';
+    return error;
+  }
+
+  /* Guard for the low-level primitives and for anything that would change the
+   * geometry a stroke already snapshotted. */
+  _assertNoStroke(what) {
+    if (this.strokeActive) {
+      throw this._strokeError(
+        `FluidEngine: ${what} is not allowed while a named stroke is active; ` +
+        'call endStroke() first.'
+      );
+    }
+  }
+
+  _validateNumber(value, name, { min, max, positive } = {}) {
+    if (typeof value !== 'number' || !isFinite(value)) {
+      throw this._strokeError(`FluidEngine: ${name} must be a finite number, got ${value}.`);
+    }
+    if (positive && value <= 0) {
+      throw this._strokeError(`FluidEngine: ${name} must be greater than zero, got ${value}.`);
+    }
+    if (min !== undefined && value < min) {
+      throw this._strokeError(`FluidEngine: ${name} must be >= ${min}, got ${value}.`);
+    }
+    if (max !== undefined && value > max) {
+      throw this._strokeError(`FluidEngine: ${name} must be <= ${max}, got ${value}.`);
+    }
+    return value;
+  }
+
+  /**
+   * Begin a stroke: validate, reseed the bristles, and settle them at the press
+   * point while depositing.
+   *
+   * The settling samples splat. That is what makes a bare
+   * beginStroke(); endStroke() leave a visible tap -- the first samples deposit
+   * nothing because the bristles have not yet crossed the threshold, and later
+   * ones do. No separate dot primitive is needed.
+   */
+  beginStroke({ x, y, pressure = 1, brushSize, paintingRectangle, color, resolutionScale = 1, spacing }) {
+    if (this.strokeActive) {
+      throw this._strokeError('FluidEngine: a stroke is already active; call endStroke() first.');
+    }
+
+    // Everything below runs BEFORE any GPU mutation or random draw, so a
+    // rejected begin leaves the engine idle and consumes no variation.
+    this._validateNumber(x, 'x');
+    this._validateNumber(y, 'y');
+    this._validateNumber(pressure, 'pressure', { min: 0, max: 1 });
+    this._validateNumber(brushSize, 'brushSize', { positive: true });
+    this._validateNumber(resolutionScale, 'resolutionScale', { positive: true });
+    if (spacing !== undefined) this._validateNumber(spacing, 'spacing', { positive: true });
+
+    if (!paintingRectangle) {
+      throw this._strokeError('FluidEngine: paintingRectangle is required.');
+    }
+    this._validateNumber(paintingRectangle.width, 'paintingRectangle.width', { positive: true });
+    this._validateNumber(paintingRectangle.height, 'paintingRectangle.height', { positive: true });
+    this._validateNumber(paintingRectangle.left, 'paintingRectangle.left');
+    this._validateNumber(paintingRectangle.bottom, 'paintingRectangle.bottom');
+
+    if (!color || color.space !== 'pigment') {
+      // Deliberately loud: an RGB triple would mix plausibly but wrongly, and
+      // the picker bugs of Phases 8-10 were all this failure wearing a hat.
+      throw this._strokeError(
+        "FluidEngine: color.space must be the literal 'pigment'; got " +
+        (color ? String(color.space) : 'no color object') +
+        '. Convert display colour in the host, not the engine.'
+      );
+    }
+    if (!Array.isArray(color.channels) || color.channels.length !== 3) {
+      throw this._strokeError('FluidEngine: color.channels must be three pigment coordinates.');
+    }
+    color.channels.forEach(
+      (c, i) => this._validateNumber(c, `color.channels[${i}]`, { min: 0, max: 1 })
+    );
+    this._validateNumber(color.alpha, 'color.alpha', { min: 0, max: 1 });
+
+    // Snapshot the rectangle's numbers: a host that mutates its own Rectangle
+    // mid-stroke must not change the second half of a stroke's geometry.
+    const rectangle = paintingRectangle.clone
+      ? paintingRectangle.clone()
+      : {
+          left: paintingRectangle.left,
+          bottom: paintingRectangle.bottom,
+          width: paintingRectangle.width,
+          height: paintingRectangle.height,
+        };
+
+    const alpha = color.alpha;
+    this._stroke = {
+      brushSize,
+      rectangle,
+      resolutionScale,
+      color: [color.channels[0], color.channels[1], color.channels[2], alpha],
+      /* Spacing must be expressed in the SAME space as x/y. It defaults to a
+       * fraction of brushSize, which is right whenever the two share a space.
+       * A host whose coordinates are device pixels while brushSize is a CSS
+       * measure (the main app at devicePixelRatio > 1) must pass its own, or
+       * the same gesture emits a different number of samples per device --
+       * measured as +247% deposited alpha at dpr2 before this existed. */
+      spacing: spacing !== undefined
+        ? spacing
+        : Math.max(STROKE_MIN_SPACING, STROKE_SPACING_FRACTION * brushSize),
+      zThreshold: STROKE_Z_THRESHOLD * brushSize,
+      splatRadius: STROKE_SPLAT_RADIUS * brushSize,
+      velocityScale: STROKE_VELOCITY_SCALE * alpha * resolutionScale,
+      // The last point actually pushed into the simulation, and the last point
+      // the caller gave us. They differ whenever a segment was shorter than the
+      // remaining spacing; endStroke() flushes the difference.
+      emitted: { x, y, pressure },
+      pending: { x, y, pressure },
+      remainder: 0,
+    };
+
+    let steps = 0;
+    let simulationUpdated = false;
+    try {
+      // Private, not this.initializeBrush(): the public primitive is guarded
+      // against reentry and _stroke is already set. This also draws the Phase
+      // 8a variation -- exactly one per press.
+      this.brush.initialize(x, y, this._strokeHeight(pressure), brushSize);
+      for (let i = 0; i < STROKE_SETTLE_STEPS; ++i) {
+        if (this._strokeSample(x, y, pressure)) simulationUpdated = true;
+        steps++;
+      }
+    } catch (e) {
+      // A GPU failure mid-begin must not strand the machine active; the partial
+      // deposit cannot be rolled back, but the caller can start a new stroke.
+      this._stroke = null;
+      throw e;
+    }
+    return { steps, simulationUpdated };
+  }
+
+  /**
+   * Extend the stroke to a point, arc-length resampled at the fixed spacing.
+   *
+   * The unused distance carries across calls, so splitting one straight segment
+   * into twenty caller points emits exactly the same samples as passing its
+   * endpoint once. That is what makes output independent of input timing and
+   * event coalescing.
+   */
+  strokeTo({ x, y, pressure }) {
+    if (!this.strokeActive) {
+      throw this._strokeError('FluidEngine: strokeTo() called with no active stroke.');
+    }
+    const stroke = this._stroke;
+    this._validateNumber(x, 'x');
+    this._validateNumber(y, 'y');
+    if (pressure === undefined) pressure = stroke.pending.pressure;
+    this._validateNumber(pressure, 'pressure', { min: 0, max: 1 });
+
+    const from = stroke.pending;
+    const dx = x - from.x;
+    const dy = y - from.y;
+    const length = Math.sqrt(dx * dx + dy * dy);
+
+    let steps = 0;
+    let simulationUpdated = false;
+
+    if (length > 0) {
+      let travelled = stroke.spacing - stroke.remainder;
+      while (travelled <= length) {
+        const t = travelled / length;
+        const sx = from.x + dx * t;
+        const sy = from.y + dy * t;
+        // Pressure follows arc position, so a pressure ramp does not depend on
+        // how the caller happened to chop the path up.
+        const sp = from.pressure + (pressure - from.pressure) * t;
+        try {
+          if (this._strokeSample(sx, sy, sp)) simulationUpdated = true;
+        } catch (e) {
+          this._stroke = null;
+          throw e;
+        }
+        stroke.emitted = { x: sx, y: sy, pressure: sp };
+        steps++;
+        travelled += stroke.spacing;
+      }
+      stroke.remainder = length - (travelled - stroke.spacing);
+    }
+
+    // Always remember where the caller actually is, even when nothing was
+    // emitted -- endStroke() needs it to reach the path's true endpoint.
+    stroke.pending = { x, y, pressure };
+    return { steps, simulationUpdated };
+  }
+
+  /**
+   * Lift. Flushes the final caller point if the stroke has not reached it yet,
+   * then clears state. It adds no arbitrary settle frames: this bounds live lag
+   * below one spacing interval without letting segmentation affect dynamics.
+   */
+  endStroke() {
+    if (!this.strokeActive) {
+      throw this._strokeError('FluidEngine: endStroke() called with no active stroke.');
+    }
+    const stroke = this._stroke;
+    const pending = stroke.pending;
+    const emitted = stroke.emitted;
+
+    let steps = 0;
+    let simulationUpdated = false;
+    try {
+      if (
+        pending.x !== emitted.x ||
+        pending.y !== emitted.y ||
+        pending.pressure !== emitted.pressure
+      ) {
+        if (this._strokeSample(pending.x, pending.y, pending.pressure)) simulationUpdated = true;
+        steps++;
+      }
+    } finally {
+      this._stroke = null;
+    }
+    return { steps, simulationUpdated };
+  }
+
+  /** Brush height for a pressure, with the floor that keeps a light touch painting. */
+  _strokeHeight(pressure) {
+    return STROKE_HEIGHT_SCALE * this._stroke.brushSize * Math.max(pressure, STROKE_MIN_PRESSURE);
+  }
+
+  /*
+   * One internal sample: position, splat, frame -- in that order.
+   *
+   * Do not swap splat and frame. The application has always deposited into the
+   * pre-step fluid state, and swapping them puts the paint into a different
+   * one. These call the private brush/simulator directly so the public guard
+   * does not reject the API's own samples.
+   */
+  _strokeSample(x, y, pressure) {
+    const stroke = this._stroke;
+    this.brush.update(x, y, this._strokeHeight(pressure), stroke.brushSize);
+    this.simulator.splat(
+      this.brush,
+      stroke.zThreshold,
+      stroke.rectangle,
+      stroke.color,
+      stroke.splatRadius,
+      stroke.velocityScale
+    );
     return this.simulator.simulate();
   }
 
@@ -252,6 +548,7 @@ class FluidEngine {
 
   /** Re-allocate at a new simulation resolution, discarding nothing. */
   changeResolution(width, height) {
+    this._assertNoStroke('changeResolution()');
     this.simulator.changeResolution(width, height);
   }
 
@@ -263,6 +560,7 @@ class FluidEngine {
    * releases the resize handle. The host does not get to choose it.
    */
   resizePainting(width, height, offsetX, offsetY) {
+    this._assertNoStroke('resizePainting()');
     this.simulator.resize(
       width,
       height,
@@ -274,6 +572,7 @@ class FluidEngine {
 
   /** Discard all paint. Velocity is not cleared; a following frame settles it. */
   clear() {
+    this._assertNoStroke('clear()');
     this.simulator.clear();
   }
 
@@ -363,6 +662,7 @@ class FluidEngine {
    * because it does not own them.
    */
   restoreSnapshot(snapshot, resolutionWidth, resolutionHeight) {
+    this._assertNoStroke('restoreSnapshot()');
     if (
       this.simulator.resolutionWidth !== resolutionWidth ||
       this.simulator.resolutionHeight !== resolutionHeight

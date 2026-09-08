@@ -41,23 +41,16 @@ const MAX_BRISTLE_COUNT = 100;
 const BRISTLE_COUNT = 50;
 
 /*
- * Brush geometry. These four are handed to the engine on every frame and their
- * meanings are NOT interchangeable:
+ * Brush hover height, for placing the brush when NOT painting (hover preview).
  *
- *   BRUSH_HEIGHT  how high the brush hovers over the canvas, scaled by size
- *   Z_THRESHOLD   how far a bristle must dip below that to deposit, scaled too
- *   SPLAT_RADIUS  the deposited dab's radius, scaled by size
- *
- * The pairing of BRUSH_HEIGHT and Z_THRESHOLD is what decides whether a stroke
- * paints at all: raise the height without raising the threshold and the bristles
- * never reach the paper. Both are copied from the main app because they are
- * tuned together, and a host inventing its own pair gets a brush that either
+ * Z_THRESHOLD, SPLAT_RADIUS and SPLAT_VELOCITY_SCALE used to live here too,
+ * copied from the main app. Phase 9a moved them into the engine's named stroke
+ * API, which is where they belonged: they are tuned together -- raise the
+ * height without raising the threshold and the bristles never reach the paper
+ * -- and every host that copied them was one edit away from a brush that either
  * floods or lays nothing.
  */
 const BRUSH_HEIGHT = 2.0;
-const Z_THRESHOLD = 0.13333;
-const SPLAT_RADIUS = 0.05;
-const SPLAT_VELOCITY_SCALE = 0.14;
 
 // Deposited alpha, at this bristle count. The main app interpolates between a
 // thin-brush and a thick-brush curve; one fixed midpoint is enough here.
@@ -342,25 +335,44 @@ class MinimalHost {
       this.brushY = p.y;
 
       /*
-       * initializeBrush() places the bristles AND settles them. It is the
-       * "press" -- and it is separate from positionBrush() because a stroke
-       * that begins with a move rather than a press drags the bristles in from
-       * wherever they were last, laying a tail no one asked for.
+       * beginStroke() is the press: it reseeds the bristles with this press's
+       * own layout variation and settles them while depositing, so even a bare
+       * tap leaves a mark. It does all of that synchronously before returning
+       * -- there is no "wait ten frames for the bristles to fall" for a host to
+       * get wrong, which is what this whole API is for.
        */
-      this.engine.initializeBrush(
-        this.brushX,
-        this.brushY,
-        BRUSH_HEIGHT * this.brushScale,
-        this.brushScale
-      );
+      const color = hsvToRyb(this.hue, 1, 1);
+      this.engine.beginStroke({
+        x: this.brushX,
+        y: this.brushY,
+        brushSize: this.brushScale,
+        paintingRectangle: this.paintingRectangle,
+        // The engine takes pigment coordinates, never display RGB: conversion
+        // is the host's job and an RGB triple is rejected rather than mixed.
+        color: {
+          space: 'pigment',
+          channels: [color[0], color[1], color[2]],
+          alpha: SPLAT_ALPHA,
+        },
+        resolutionScale: RESOLUTION_SCALE,
+      });
       this.brushPlaced = true;
       this.painting = true;
+      this.needsRedraw = true;
     });
 
     canvas.addEventListener('pointermove', (event) => {
       const p = this._toEngineSpace(event.clientX, event.clientY);
       this.brushX = p.x;
       this.brushY = p.y;
+
+      if (this.engine.strokeActive) {
+        // The engine resamples the segment at its own spacing, so however the
+        // browser happens to deliver these events, the paint is the same.
+        this.engine.strokeTo({ x: this.brushX, y: this.brushY });
+        this.needsRedraw = true;
+        return;
+      }
 
       // Hover moves the brush but does not paint, so the bristles are already
       // where the stroke will start when the user does press.
@@ -372,10 +384,25 @@ class MinimalHost {
           this.brushScale
         );
         this.brushPlaced = true;
+      } else {
+        this.engine.positionBrush(
+          this.brushX,
+          this.brushY,
+          BRUSH_HEIGHT * this.brushScale,
+          this.brushScale
+        );
       }
     });
 
-    const end = () => { this.painting = false; };
+    const end = () => {
+      // endStroke() flushes the last pointer position, so the stroke ends where
+      // the finger did rather than at the last resampled point.
+      if (this.engine.strokeActive) {
+        this.engine.endStroke();
+        this.needsRedraw = true;
+      }
+      this.painting = false;
+    };
     canvas.addEventListener('pointerup', end);
     canvas.addEventListener('pointercancel', end);
     canvas.addEventListener('pointerleave', end);
@@ -385,12 +412,13 @@ class MinimalHost {
 
   /*
    * The RAF loop is the HOST's, per the engine's header: `frame()` advances one
-   * step and when to call it is not the engine's business. So this is a plain
-   * requestAnimationFrame, and the ordering inside it is the whole contract:
+   * step and when to call it is not the engine's business.
    *
-   *   position the brush  ->  splat  ->  frame  ->  render  ->  present
-   *
-   * Swapping splat and frame lays this frame's paint into last frame's fluid.
+   * Since Phase 9a the loop no longer drives strokes. beginStroke/strokeTo did
+   * every position/splat/frame step already, synchronously; calling frame()
+   * again for an active stroke would double-step the fluid, and the engine
+   * throws if this loop tries. What is left here is idle fluid and rendering:
+   * paint keeps flowing after the finger lifts.
    */
   _start() {
     const loop = () => {
@@ -408,31 +436,14 @@ class MinimalHost {
      * spacing of these calls is the stroke's dynamics (Phase 6 measured a
      * one-frame-stale position as ~2% more paint; it reads exactly like noise).
      */
-    if (this.brushPlaced) {
-      this.engine.positionBrush(
-        this.brushX,
-        this.brushY,
-        BRUSH_HEIGHT * this.brushScale,
-        this.brushScale
-      );
+    // Nothing to do here while a stroke runs -- it advanced the simulation
+    // itself, and both of these would be rejected.
+    if (!this.engine.strokeActive) {
+      // frame() reports whether anything actually moved, which is what lets a
+      // still canvas stop re-rendering instead of burning a GPU on settled
+      // paint.
+      if (this.engine.frame()) this.needsRedraw = true;
     }
-
-    if (this.painting) {
-      const color = hsvToRyb(this.hue, 1, 1);
-      color[3] = SPLAT_ALPHA;
-
-      this.engine.splat(this.paintingRectangle, {
-        zThreshold: Z_THRESHOLD * this.brushScale,
-        color,
-        radius: SPLAT_RADIUS * this.brushScale,
-        velocityScale: SPLAT_VELOCITY_SCALE * color[3] * RESOLUTION_SCALE,
-      });
-      this.needsRedraw = true;
-    }
-
-    // frame() reports whether anything actually moved, which is what lets a
-    // still canvas stop re-rendering instead of burning a GPU on settled paint.
-    if (this.engine.frame()) this.needsRedraw = true;
 
     const clipped = this.paintingRectangle
       .clone()
