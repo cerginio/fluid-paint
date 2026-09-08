@@ -149,10 +149,25 @@ class Paint {
         // golden hash shifts for no reason anyone could see in the diff.
         this.brushColorHSVA = [Math.random(), 1, 1, 0.8];
 
+        /* ?black=1 deepens the pigment cube's all-three corner to true black.
+         * Read once here: the engine fixes it at construction, because paint
+         * already on the canvas was composited under whichever corner was live
+         * when it was laid down. See debug/debug-flags.js. */
+        this.blackPigment = typeof parseBlackPigmentFlag === 'function'
+            ? parseBlackPigmentFlag()
+            : false;
+
+        /* Point the UI's copy of the cube at the same corner the engine is
+         * about to use. Both boundaries must agree, or the picker goes back to
+         * describing a colour the brush will not deposit -- see
+         * docs/COLOR-PICKER-PAINT-PARITY-SPEC.md. Before any surface renders. */
+        if (typeof setPigmentBlack === 'function') setPigmentBlack(this.blackPigment);
+
         this.engine = new FluidEngine(wgl, shaderSources, {
             resolutionWidth: this.getPaintingResolutionWidth(),
             resolutionHeight: this.getPaintingResolutionHeight(),
             maxBristleCount: MAX_BRISTLE_COUNT,
+            blackPigment: this.blackPigment,
         });
 
         // The undo ring. Depth is this app's decision, not the engine's -- the
@@ -945,9 +960,12 @@ class Paint {
              * PIGMENT, not hsvToRgb (Phase 10).
              *
              * This preview shows the bristles that are about to deposit paint,
-             * so it has to be the colour that paint will BE -- the same two
-             * steps the splat takes (hsvToRyb, then the cube), which is what
-             * the wheel now shows too.
+             * so it has to be the colour that paint will BE. hsvToPigmentRgb()
+             * IS those two steps -- hsvToRyb() then the cube -- so the preview,
+             * the picker and the splat all derive from one contract. (An
+             * earlier version of this comment claimed the same thing while the
+             * function behind it did something else; see
+             * docs/COLOR-PICKER-PAINT-PARITY-SPEC.md.)
              *
              * `fixHueForPreview()` used to sit here doing `1.0 - h`. That was a
              * hand-tuned compensation for this exact mismatch: hsvToRgb is

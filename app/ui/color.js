@@ -220,12 +220,18 @@ class ColorControl {
    * avoid editing a vendored file. That worked, but it meant re-deriving in CSS
    * what iro already computes internally, and racing its re-renders to do it.
    *
-   * The colour space now lives where it belongs: `IroColor.hsvToRgb` in
-   * lib/iro.js goes through the pigment cube, and every surface derives from
-   * that one function -- so the ring, the sliders, the handles and `color.rgb`
-   * are all pigment with no help from here. lib/iro.js is this project's own
-   * long-standing fork, not a pristine upstream drop, so fixing it at the
-   * source is the honest place for it.
+   * The colour space now lives where it belongs: `IroColor.pigmentRgb()` in
+   * lib/iro.js is the display adapter, and every surface that must show
+   * pigment -- the disc raster, both slider gradients, the handle fills --
+   * calls it EXPLICITLY. lib/iro.js is this project's own long-standing fork,
+   * not a pristine upstream drop, so fixing it at the source is the honest
+   * place for it.
+   *
+   * Note `color.rgb` is NOT pigment: it is stock iro's additive HSV->RGB, and
+   * deliberately so. An earlier version converted it implicitly, which left
+   * `hexString`/`hslString` quietly returning a different colour space than
+   * their names promise and gave `rgbToHsv` no matching inverse. Read pigment
+   * through the adapter; never through the RGB accessors.
    *
    * What this file still owns is WHICH model is drawn -- see `setAdditive()`.
    */

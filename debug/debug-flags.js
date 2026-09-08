@@ -92,6 +92,45 @@ function parseDebugFlags(search) {
   return flags;
 }
 
+/*
+ * ?black -- the black-pigment flag. Defaults ON.
+ *
+ * Deliberately NOT one of the flags above, even though it now shares their
+ * default: those gate debug INSTRUMENTATION, while this one selects which
+ * pigment cube the paint is composited with. Different kind of switch, so it
+ * keeps the older ?diag= / ?gpu= spelling.
+ *
+ * What it does: deepens the RYB cube's all-three-pigments corner from David
+ * Li's near-black brown (0.2, 0.094, 0) to true black. His cube contains no
+ * black anywhere -- full load on every pigment is the darkest paint it can
+ * make, and the lighting term only brightens -- so with the corner at its
+ * original value there is no black to pick at all.
+ *
+ *   (absent)   true black corner    <- the default
+ *   ?black=0   David Li's original
+ *
+ * It defaults ON because a picker with no black is the worse default; the
+ * original stays reachable for anyone comparing against David Li's model.
+ *
+ * Turning it on did NOT move the paint goldens: all 12 hashes are byte
+ * identical under either corner, because only the x*y*z term of the trilinear
+ * interpolation reads it. Pure hues and two-pigment mixes (orange, green,
+ * purple) are bit-identical, and even the wetBlend scenario -- three
+ * overlapping strokes in red, yellow and blue -- never accumulates enough
+ * three-pigment load to reach the corner. So the baselines still describe both
+ * configurations and were not re-recorded.
+ *
+ * @param {string} [search]  defaults to window.location.search
+ * @returns {boolean}
+ */
+function parseBlackPigmentFlag(search) {
+  const raw = new URLSearchParams(
+    search !== undefined ? search : (typeof window !== 'undefined' ? window.location.search : '')
+  ).get('black');
+  if (raw === null) return true;
+  return raw !== '0' && raw !== 'false' && raw !== 'off';
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { DEBUG_FLAG_DEFAULTS, parseDebugFlags };
+  module.exports = { DEBUG_FLAG_DEFAULTS, parseDebugFlags, parseBlackPigmentFlag };
 }

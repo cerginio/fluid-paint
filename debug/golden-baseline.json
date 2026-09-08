@@ -1,5 +1,5 @@
 {
-  "recorded": "2026-09-08T07:36:32.415Z",
+  "recorded": "2026-09-08T11:12:13.327Z",
   "seed": 20260907,
   "note": "headless SwiftShader; not comparable to real-GPU hashes",
   "entries": {
@@ -13,7 +13,7 @@
     },
     "webgl2/dpr1/colorMix": {
       "paintHash": "8fe5c7ab",
-      "screenHash": "9ea8a5c4",
+      "screenHash": "1fe2d3e0",
       "resolution": "1860x1140",
       "webgl": 2,
       "dpr": 1,
@@ -21,7 +21,7 @@
     },
     "webgl2/dpr1/wetBlend": {
       "paintHash": "06ace8f7",
-      "screenHash": "6f1bf85c",
+      "screenHash": "53b0f82d",
       "resolution": "1860x1140",
       "webgl": 2,
       "dpr": 1,
@@ -37,7 +37,7 @@
     },
     "webgl1/dpr1/colorMix": {
       "paintHash": "80e13791",
-      "screenHash": "811e440b",
+      "screenHash": "35c307cc",
       "resolution": "1860x1140",
       "webgl": 1,
       "dpr": 1,
@@ -45,7 +45,7 @@
     },
     "webgl1/dpr1/wetBlend": {
       "paintHash": "b25c5a04",
-      "screenHash": "c73dfef4",
+      "screenHash": "21663f51",
       "resolution": "1860x1140",
       "webgl": 1,
       "dpr": 1,
@@ -61,7 +61,7 @@
     },
     "webgl2/dpr2/colorMix": {
       "paintHash": "9676d0b9",
-      "screenHash": "d8148cb5",
+      "screenHash": "e8de3562",
       "resolution": "2220x1375",
       "webgl": 2,
       "dpr": 2,
@@ -69,7 +69,7 @@
     },
     "webgl2/dpr2/wetBlend": {
       "paintHash": "407e7e73",
-      "screenHash": "0f30bc85",
+      "screenHash": "08de4ef3",
       "resolution": "2220x1375",
       "webgl": 2,
       "dpr": 2,
@@ -85,7 +85,7 @@
     },
     "webgl1/dpr2/colorMix": {
       "paintHash": "0b4f40c0",
-      "screenHash": "f6b05d55",
+      "screenHash": "435c4b3a",
       "resolution": "2220x1375",
       "webgl": 1,
       "dpr": 2,
@@ -93,7 +93,7 @@
     },
     "webgl1/dpr2/wetBlend": {
       "paintHash": "1399e585",
-      "screenHash": "b4ffd1f3",
+      "screenHash": "3196b35c",
       "resolution": "2220x1375",
       "webgl": 1,
       "dpr": 2,

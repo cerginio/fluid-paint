@@ -51,6 +51,41 @@
  *
  * It also does not change which hue the user picks. Hue stays the app's 0..1
  * `brushColorHSVA[0]`; only its on-screen swatch changes.
+ *
+ * ---------------------------------------------------------------------------
+ * THE PARITY CONTRACT
+ * ---------------------------------------------------------------------------
+ *
+ * Being a rendering aid does NOT license a second mapping. Every UI surface --
+ * disc, handles, sliders, compact strip, brush preview -- must show the colour
+ * the brush will actually deposit, which means exactly:
+ *
+ *     const pigment    = hsvToRyb(h, s, v);
+ *     const displayRgb = rybToRgbDisplay(pigment, additive);
+ *
+ * `hsvToPigmentRgb()` below is precisely that composition. An earlier version
+ * was not, and the widget consequently agreed with the paint only on the rim.
+ * See that function's comment for the measured divergence, and
+ * docs/COLOR-PICKER-PAINT-PARITY-SPEC.md for the full contract.
+ * debug/color-parity-test.js is the durable guard; run it after touching this.
+ *
+ * ---------------------------------------------------------------------------
+ * A NOTE ON THE AXIS NAMES
+ * ---------------------------------------------------------------------------
+ *
+ * The cube's axes are numerically RED, BLUE, YELLOW -- in that channel order.
+ * `(1,0,0)` is red, `(0,1,0)` is slate blue, `(0,0,1)` is yellow. The acronym
+ * "RYB" does not read literally off the channel indices. Do not swap channels
+ * to make it; the shader does not, and the two must agree.
+ *
+ * `(0,0,0)` is white colour DATA, not absence of paint: a splat with nonzero
+ * alpha and zero pigment deposits white paint. Colour and amount are separate.
+ *
+ * David Li's cube has no pure-black corner -- `(1,1,1)` is `(0.2, 0.094, 0)`,
+ * its darkest reachable point, and the lighting term only brightens. So the
+ * stock picker has no black to offer at all. The `?black=1` feature flag
+ * deepens that one corner to `(0,0,0)`; see `setPigmentBlack()` below. It must
+ * be set to match the value the ENGINE was constructed with.
  */
 
 /** The eight corners of David Li's RYB pigment cube.
@@ -67,6 +102,45 @@ const RYB_CUBE = {
   v110: [0.5, 0.0, 0.5],       // red + blue    -> purple
   v111: [0.2, 0.094, 0.0],     // all three     -> near-black brown
 };
+
+/* The same cube with its all-three-pigments corner deepened to true black.
+ * THIS IS THE DEFAULT -- see `activeCube` below.
+ *
+ * David Li's cube above has no black anywhere: v111 is its darkest point and
+ * the lighting term only brightens, so a picker built on it cannot offer a
+ * black at all. The corner is swapped at BOTH boundaries -- painting.frag
+ * takes it as the u_pigmentBlack uniform, and setPigmentBlack() points the UI
+ * at the matching value. The two must agree, or the widget goes back to
+ * describing a colour the brush will not deposit, which is the whole failure
+ * this file exists to prevent. */
+const RYB_CUBE_BLACK = Object.assign({}, RYB_CUBE, { v111: [0.0, 0.0, 0.0] });
+
+/* Which cube the UI is drawing.
+ *
+ * Defaults to the black-corner cube, matching FluidEngine's own default, so a
+ * host that never calls setPigmentBlack() still gets a widget that agrees with
+ * its paint. Getting these two defaults out of step is display/paint
+ * divergence by another route -- the probe asserts they match. */
+let activeCube = RYB_CUBE_BLACK;
+
+/**
+ * Point the UI's conversion at David Li's original cube, or back at the
+ * black-corner default.
+ *
+ * Call this before anything renders, with the SAME value the engine was
+ * constructed with. The engine fixes its corner at construction, so flipping
+ * this alone would desynchronize display from paint.
+ *
+ * @param {boolean} enabled  true (the default) for the true-black corner
+ */
+function setPigmentBlack(enabled) {
+  activeCube = enabled ? RYB_CUBE_BLACK : RYB_CUBE;
+}
+
+/** True while the true-black corner is active. */
+function isPigmentBlack() {
+  return activeCube === RYB_CUBE_BLACK;
+}
 
 /** Trilinear interpolation over the cube. Mirrors picker.frag:17-26 term for
  *  term; the weights are written in the same order so the two can be diffed. */
@@ -101,67 +175,63 @@ function rybToRgbDisplay(ryb, additive) {
   if (additive) {
     return [1 - ryb[1], 1 - ryb[0], 1 - ryb[2]];
   }
-  return trilinearInterpolate(ryb, RYB_CUBE);
-}
-
-/**
- * The pure-hue pigment LOAD for a hue, scaled by saturation.
- *
- * This is the sexagesimal ramp WITHOUT the `m = v - c` white term that
- * `hsvToRyb()` adds. That term is the whole reason a naive
- * `rybToRgbDisplay(hsvToRyb(...))` renders the wheel wrong at its edges, and
- * the reason is worth stating plainly, because it is the opposite of the RGB
- * intuition:
- *
- *   In a SUBTRACTIVE space the channels are how much INK is on the paper.
- *   Zero is not black, it is BLANK PAPER -- the cube's v000 corner is white.
- *   Full load on all three is v111, a near-black brown.
- *
- * `hsvToRyb()` is an additive formula, so it raises all three channels toward
- * 1 as a colour desaturates. Read as ink that means "pile on every pigment",
- * which lands on v111. Hence the two bugs this fixes:
- *
- *   - towards the wheel's CENTRE (s -> 0) it went BLACK instead of white
- *   - the value slider ran BACKWARDS: v=0 gave white (no ink), v=1 the colour
- *
- * The right model is the one a painter would describe: saturation is HOW MUCH
- * pigment (0 = none = paper), and value darkens the mixed result toward black.
- * So saturation scales the load, and value multiplies the resulting colour.
- *
- * @param {number} h  hue, 0..1
- * @param {number} s  saturation, 0..1
- * @returns {number[]} R/Y/B pigment loads, 0..1
- */
-function hueToPigmentLoad(h, s) {
-  const hDash = ((h % 1) + 1) % 1 * 6;   // guard against a negative hue
-  const x = 1 - Math.abs(hDash % 2 - 1);
-  const i = Math.floor(hDash) % 6;
-
-  // The six sectors of the ramp, as (R, Y, B) loads at full saturation.
-  const ramp = [
-    [1, x, 0], [x, 1, 0], [0, 1, x],
-    [0, x, 1], [x, 0, 1], [1, 0, x],
-  ][i];
-
-  return [ramp[0] * s, ramp[1] * s, ramp[2] * s];
+  return trilinearInterpolate(ryb, activeCube);
 }
 
 /**
  * The whole chain, HSV -> the colour the widget should show.
  *
- * NOT `rybToRgbDisplay(hsvToRyb(h, s, v))`. That composition looks right and is
- * wrong away from full saturation and value -- see `hueToPigmentLoad()` above
- * for why, and for the two visible bugs it caused.
+ * This is EXACTLY the two steps the paint takes, and nothing else:
  *
- * This deliberately does NOT call `hsvToRyb()`. That function is the paint
- * path's, and it is correct there: `paint.js` hands its output to `splat()` as
- * the pigment to deposit, and the user only ever picks a colour whose s and v
- * are already baked into the choice. Display has a different job -- rendering
- * the whole s/v space, including its blank-paper and black ends -- so it needs
- * its own mapping rather than a reinterpretation of that one.
+ *     hsvToRyb(h, s, v)    -- common.js, the same call paint.js makes
+ *     rybToRgbDisplay(...) -- the JS twin of the shader's rybToRgb
  *
- * At s=1, v=1 the two agree exactly, which is what keeps the wheel's rim
- * showing the same colours the brush deposits.
+ * Do not multiply the result by value, add white, or invert it afterward. Any
+ * such step makes the widget describe a colour the brush will not deposit.
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT THIS REPLACED, AND WHY THE OLD REASONING WAS WRONG
+ * ---------------------------------------------------------------------------
+ *
+ * An earlier version used a separate `hueToPigmentLoad(h, s)` ramp and then
+ * multiplied the converted RGB by value, on the reasoning that display has "a
+ * different job" from paint: rendering the whole s/v space, blank-paper and
+ * black ends included. That reasoning conflated two questions -- what the
+ * selection model OUGHT to be, and what it IS -- and answered the first while
+ * the paint went on answering the second.
+ *
+ * The result agreed with the brush only on the rim at s=1,v=1, where the two
+ * mappings coincide. Everywhere else it lied, and rim checks could not see it.
+ * Measured at hue 0 (see debug/color-parity-test.js):
+ *
+ *     selection      old widget        actual paint
+ *     s=0,   v=1     (255,255,255)     ( 51, 24,  0)   dark brown, not white
+ *     s=1,   v=0     (  0,  0,  0)     (255,255,255)   white, not black
+ *     s=1,   v=0.5   (128,  0,  0)     (255,128,128)   pink, not dark red
+ *     s=0.5, v=1     (255,128,128)     (172, 38, 32)   dark red, not pink
+ *
+ * The third row is the reported "pink paint, dark-red bristles"; the first two
+ * are the apparent black/white inversion.
+ *
+ * ---------------------------------------------------------------------------
+ * THE CONSEQUENCES ARE INTENDED
+ * ---------------------------------------------------------------------------
+ *
+ * `hsvToRyb()` is an additive formula whose outputs are reinterpreted as ink,
+ * so desaturating raises ALL THREE loads toward 1 -- "pile on every pigment" --
+ * which lands on the cube's v111 near-black brown. So, honestly:
+ *
+ *   - the disc's CENTRE at v=1 is dark brown, not white
+ *   - the zero end of the value coordinate is WHITE, not black
+ *
+ * These are properties of the existing selection mapping, not display errors.
+ * The compatibility policy preserves existing HSVA selections and the pigment
+ * they deposit, so they stay. Do NOT restore a white centre or a black zero end
+ * by painting an unrelated RGB overlay over the disc -- that reintroduces the
+ * exact divergence this function exists to close. A conventional white-centre
+ * picker is a separate selection-model redesign, not a rendering fix.
+ *
+ * See docs/COLOR-PICKER-PAINT-PARITY-SPEC.md.
  *
  * @param {number} h  hue, 0..1
  * @param {number} s  saturation, 0..1
@@ -170,10 +240,7 @@ function hueToPigmentLoad(h, s) {
  * @returns {number[]} rgb, 0..1
  */
 function hsvToPigmentRgb(h, s, v, additive) {
-  const rgb = rybToRgbDisplay(hueToPigmentLoad(h, s), additive);
-  // Value darkens the MIXED result. Doing it to the load instead would mean
-  // "less ink", which is lighter -- the inversion this whole function fixes.
-  return [rgb[0] * v, rgb[1] * v, rgb[2] * v];
+  return rybToRgbDisplay(hsvToRyb(h, s, v), additive);
 }
 
 /** 0..1 rgb -> a CSS rgb() string, clamped and rounded. The cube can return a
@@ -199,16 +266,26 @@ function cssPigment(h, s, v, additive) {
  * again, so this parses the numbers back out of the shader source and compares.
  * The probe calls it with the loaded shader text.
  *
+ * The eighth corner is a special case. Since the black-pigment flag it is a
+ * `u_pigmentBlack` UNIFORM in painting.frag rather than a literal, so there is
+ * no number in the shader body to compare against. Its authoritative values
+ * live in `fluid-engine/renderer.js` instead, and the caller passes that file's
+ * text as `rendererSource` so the last corner can be checked too. Omitting it
+ * checks the first seven and reports the eighth as unverified rather than
+ * silently passing on it.
+ *
  * @param {string} shaderSource  the text of painting.frag or picker.frag
+ * @param {string} [rendererSource]  the text of fluid-engine/renderer.js
  * @returns {{ok: boolean, reason?: string}}
  */
-function assertMatchesShader(shaderSource) {
+function assertMatchesShader(shaderSource, rendererSource) {
   const body = /rybToRgb\s*\([^)]*\)\s*\{([\s\S]*?)\n\}/.exec(shaderSource);
   if (!body) return { ok: false, reason: 'no rybToRgb() found in shader source' };
 
   // Every vec3(...) literal in the function body, in source order. The first
   // argument to trilinearInterpolate is `ryb` itself, not a literal, so these
-  // are exactly the eight corners in the shader's own order.
+  // are the corners in the shader's own order -- all eight in picker.frag,
+  // seven in painting.frag where the last one became a uniform.
   const found = [];
   const vec3 = /vec3\s*\(\s*([-\d.]+)\s*,\s*([-\d.]+)\s*,\s*([-\d.]+)\s*\)/g;
   let m;
@@ -220,6 +297,42 @@ function assertMatchesShader(shaderSource) {
     RYB_CUBE.v000, RYB_CUBE.v100, RYB_CUBE.v010, RYB_CUBE.v001,
     RYB_CUBE.v101, RYB_CUBE.v011, RYB_CUBE.v110, RYB_CUBE.v111,
   ];
+
+  /* The uniform case: seven literals plus u_pigmentBlack in the last slot. The
+   * corner still has to be verified -- it just lives in JS now -- so pull both
+   * of the renderer's declared values and require that they match this file's
+   * two cubes. A drift there is the same failure as a drifted literal. */
+  if (found.length === expected.length - 1 && /u_pigmentBlack/.test(body[1])) {
+    if (rendererSource === undefined) {
+      return {
+        ok: false,
+        reason: 'v111 is the u_pigmentBlack uniform; pass renderer.js source to verify it',
+      };
+    }
+    const readCorner = (name) => {
+      const decl = new RegExp(name + '\\s*=\\s*\\[\\s*([-\\d.]+)\\s*,\\s*([-\\d.]+)\\s*,\\s*([-\\d.]+)\\s*\\]')
+        .exec(rendererSource);
+      return decl ? [parseFloat(decl[1]), parseFloat(decl[2]), parseFloat(decl[3])] : null;
+    };
+    const pairs = [
+      ['PIGMENT_CORNER_DAVID_LI', RYB_CUBE.v111],
+      ['PIGMENT_CORNER_BLACK', RYB_CUBE_BLACK.v111],
+    ];
+    for (const [name, want] of pairs) {
+      const got = readCorner(name);
+      if (!got) return { ok: false, reason: 'no ' + name + ' found in renderer source' };
+      for (let c = 0; c < 3; c++) {
+        if (Math.abs(got[c] - want[c]) > 1e-6) {
+          return {
+            ok: false,
+            reason: name + ' channel ' + c + ': renderer ' + got[c] + ', JS ' + want[c],
+          };
+        }
+      }
+    }
+    // The remaining seven are compared below against the same-length prefix.
+    expected.length = found.length;
+  }
 
   if (found.length !== expected.length) {
     return {

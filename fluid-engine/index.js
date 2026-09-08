@@ -120,13 +120,35 @@ class FluidEngine {
    * @param {number} options.resolutionWidth   initial simulation width, texels
    * @param {number} options.resolutionHeight  initial simulation height, texels
    * @param {number} options.maxBristleCount
+   * @param {boolean} [options.blackPigment=true]  which all-three-pigments
+   *   corner the cube uses. Defaults to TRUE BLACK (0, 0, 0).
+   *
+   *   Pass false for David Li's original near-black brown (0.2, 0.094, 0).
+   *   That cube contains no black anywhere -- full load on every pigment is
+   *   the darkest paint it can make, and the lighting term only brightens --
+   *   so a picker built on it has no black to offer at all, which is why black
+   *   is the default here.
+   *
+   *   The blast radius is small and measured: only the x*y*z term of the
+   *   trilinear interpolation reads this corner, so every pure hue and every
+   *   two-pigment mix (orange, green, purple) is bit-identical either way.
+   *   Deltas appear only where all three pigments are present -- 6/255 at a
+   *   middling three-way mix, 51/255 at the corner itself. The paint goldens
+   *   are unchanged under either value.
+   *
+   *   Fixed at construction; see PaintingRenderer for why it cannot flip
+   *   mid-session.
    */
-  constructor(wgl, shaderSources, { resolutionWidth, resolutionHeight, maxBristleCount }) {
+  constructor(wgl, shaderSources, { resolutionWidth, resolutionHeight, maxBristleCount, blackPigment }) {
     this.wgl = wgl;
 
     this.simulator = new Simulator(wgl, shaderSources, resolutionWidth, resolutionHeight);
     this.brush = new Brush(wgl, shaderSources, maxBristleCount);
-    this.renderer = new PaintingRenderer(wgl, shaderSources);
+    this.renderer = new PaintingRenderer(wgl, shaderSources, { blackPigment: blackPigment });
+
+    /* Hosts (and the UI's colour conversion) need to know which cube is live.
+     * Same `=== false` care as the renderer: an omitted option means default. */
+    this.blackPigment = blackPigment !== false;
 
     // The honesty surface. Computed once here rather than re-derived by each
     // host -- the diag panel and the startup gate previously asked these

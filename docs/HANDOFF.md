@@ -806,11 +806,14 @@ paint takes. That file was restored by the user as the reference.
   `picker.frag`. `assertMatchesShader()` parses the eight corners back out of
   the shader source and compares, so the three copies (JS, picker.frag,
   painting.frag) cannot silently drift.
-- **`lib/iro.js`** — `IroColor.hsvToRgb` now routes through the cube. This is the
-  single choke point: the ring, both slider gradients, the handle fills and
-  `color.rgb` all derive from it. The hue ring's two conic-gradients are sampled
-  at 24 stops (the pigment path between hues is *curved*, so six stops are wrong
-  everywhere between the endpoints), and the value ramp at 8.
+- **`lib/iro.js`** — ~~`IroColor.hsvToRgb` now routes through the cube~~
+  **superseded in Phase 10d.** The global override was reverted: it had no
+  matching inverse, so `color.rgb`, `hexString` and `hslString` quietly stopped
+  meaning what their names say. Pigment now comes from an explicit
+  `IroColor.pigmentRgb()` adapter that each surface calls by name, and the disc
+  is a sampled canvas rather than a conic gradient plus overlays. The slider
+  ramps are still sampled (the pigment path between two colours is *curved*, so
+  two endpoints are wrong everywhere between them).
 - **`app/ui/panel.js` + `layout.css`** — the compact bar's hue stripe had the
   identical bug and the identical "it's only an indicator" comment.
 
@@ -919,6 +922,16 @@ Toggles driven in a real browser, source AND `dist/`: both directions, the probe
 canvas leaving and re-entering the DOM, no page errors. Probes **16/16, 17/17,
 18/18, 30/30**; goldens **12/12 source and dist** with `paint` hashes unchanged.
 
+## Phase 10c — SUPERSEDED by Phase 10d. Its conclusion was wrong.
+
+> **Do not follow this section.** It diagnosed a real set of symptoms and then
+> fixed them by giving DISPLAY a second, different mapping from the one the
+> PAINT uses. That made the widget self-consistent and wrong: it agreed with the
+> brush only on the rim, exactly the blind spot the section itself warns about.
+> The claim below that display and paint "need different mappings" is the error.
+> See **Phase 10d** and `docs/COLOR-PICKER-PAINT-PARITY-SPEC.md`. Kept for the
+> record because the trap it fell into is worth reading.
+
 ## Phase 10c — DONE (the s/v ends: the fix the rim could not see)
 
 Three bugs reported after 10a, all one cause. **The first pass only ever tested
@@ -979,6 +992,194 @@ Two traps found while writing those checks:
    handle and cost a false failure. The probe now settles two frames first.
 2. **A rim-only test cannot see an interior bug.** The new checks assert the
    s=0 and v=0 ends explicitly, plus that the rim did NOT move.
+
+## Phase 10d — DONE (colour parity: display IS what the brush deposits)
+
+Phase 10c's fix was self-consistent and wrong. It is superseded here.
+
+### The cause
+
+Two different mappings, one for paint and one for display:
+
+```text
+paint    brushColorHSVA -> hsvToRyb(h,s,v) -> splat -> painting.frag:rybToRgb
+display  h,s -> hueToPigmentLoad -> rybToRgbDisplay -> multiply RGB by v
+```
+
+They coincide only at s=1, v=1. Everywhere else the widget described a colour
+the brush would not deposit. Measured at hue 0:
+
+| selection | old widget | actual paint |
+|---|---|---|
+| s=0, v=1 | `(255,255,255)` | `(51,24,0)` |
+| s=1, v=0 | `(0,0,0)` | `(255,255,255)` |
+| s=1, v=0.5 | `(128,0,0)` | `(255,128,128)` |
+| s=0.5, v=1 | `(255,128,128)` | `(172,38,32)` |
+
+Row three is the reported "pink paint under dark-red bristles"; rows one and two
+are the apparent black/white inversion.
+
+### The fix
+
+One contract, used at every boundary:
+
+```js
+const pigment    = hsvToRyb(h, s, v);
+const displayRgb = rybToRgbDisplay(pigment, additive);
+```
+
+- `hsvToPigmentRgb()` is now exactly that composition. `hueToPigmentLoad()` is
+  removed; no multiply by value, no added white, no inversion.
+- The disc is a **sampled canvas**, not a conic gradient plus a white radial
+  overlay plus a black value overlay. Those three composite to an HSV disc, and
+  the interior of this one is not HSV. Cached by value, model, size, DPR, angle
+  and direction; redrawn at most once per animation frame; `pointer-events:
+  none` so input still reaches iro's hit test.
+- Surfaces that must show pigment call `IroColor.pigmentRgb()` **explicitly**.
+  `IroColor.hsvToRgb` is stock again — the previous global override had no
+  matching inverse and quietly changed what `hexString`/`hslString` meant.
+  `hslString` returns `hsl(...)` again; handle fills use the adapter.
+
+**Consequences that are intended, not bugs.** The compatibility policy preserves
+existing HSVA selections and the pigment they deposit, so the disc has a dark
+brown centre at v=1 and the zero end of value is white. Do **not** "fix" these
+with an RGB overlay — that is the divergence coming back. A conventional
+white-centre picker is a separate selection-model redesign.
+
+`hsvToRyb()`, splatting, texture storage, mixing and `painting.frag` are
+untouched.
+
+### Verification
+
+- `npm run test:color` — **28/28**. A durable numeric test (not a throwaway
+  probe): the five reported rows, a grid of hue every 15° × s,v ∈ {0,.25,.5,
+  .75,1} in **both** models, and the Digital swizzle endpoints. Expectations
+  come from an **independent** implementation in the test file, never from the
+  code under test; its cube is checked against `painting.frag` too.
+- `debug/phase10-probe.js` — **30/30**, source and `dist`. Now reads actual disc
+  raster pixels at interior radii and off-axis angles, captures the colour
+  reaching `engine.splat`, and captures the brush preview's RGB.
+- Goldens **12/12**, `paint` hashes unchanged, nothing re-recorded.
+
+**Sabotage-tested** — each failure mode reintroduced, then reverted:
+
+| sabotage | caught by |
+|---|---|
+| multiply display RGB by value | half-value red + grid (8 checks) |
+| drop the Digital channel swap | Digital numeric tests |
+| white overlay stacked over the disc | composited screenshot check |
+| stale model cache (drop `additive` from the key) | mode-toggle raster check |
+| pass display RGB to `splat` as pigment | splat-boundary check |
+
+Two traps found while writing those checks, both worth keeping:
+
+1. **`getImageData` cannot see an overlay.** The first version of the disc test
+   read the canvas backing store, so stacking a white gradient *on top* of the
+   canvas passed every check. Reading composited screen pixels is the only way
+   to catch the exact construction this phase removed.
+2. **A mirrored disc looks fine.** An early raster double-counted
+   `wheelDirection`, mirroring hue about the x-axis. Every "is it colourful",
+   "are sectors different" and on-axis check passed; it was wrong by up to
+   104/255 off-axis. Disc geometry must be asserted against the contract at
+   **off-axis** coordinates, which is why the probe samples at 90° and 210°.
+
+
+## Phase 10e — DONE (the black pigment, ON by default)
+
+> ### ⚠ The paint goldens are STALE. This is expected, not a regression.
+>
+> Making the black corner the default moved **8 of the 12 `screen` hashes**.
+> Nothing is broken:
+>
+> - every **`paint` hash is identical** — the deposited pigment did not change
+> - **`colorMix` still asserts `green=pass`** — the RYB model guard holds
+> - only `screen` moved, because `rybToRgb` is applied at RENDER time
+>
+> `npm run test:golden` will therefore report 8 drifts until the baselines are
+> re-recorded. **It is not a gate right now.** Re-record with
+> `npm run test:golden:record` when there is time to review the images, and
+> delete this box.
+>
+> Meanwhile the paint path is still covered independently: `npm run test:color`
+> (42/42) and `debug/phase10-probe.js` (34/34) do not depend on the baselines.
+> What is NOT covered until the re-record is rendering regressions in `screen`.
+
+
+Phase 10d achieved parity honestly and the honest answer was ugly: the disc's
+centre is a **dark brown**, because David Li's cube contains no black. Searched
+the whole cube — `(51,24,0)` at the `v111` corner is its darkest reachable
+point, and the lighting term only ever brightens (`color * diffuse + specular`),
+so no arrangement of the selection model can produce a black.
+
+The pigment system is kept. The corner is deepened instead, behind a flag.
+
+### `?black` — ON by default
+
+The all-three-pigments corner is `(0, 0, 0)` instead of `(0.2, 0.094, 0)`, so
+the disc centre reads true black. `?black=0` restores David Li's original.
+
+Note `v111` is a COORDINATE, not a colour: it names the corner where all three
+pigment loads are 1. What changed is the colour rendered there — `#331800` →
+`#000000`. Confusingly, `(0,0,0)` means opposite things on the two sides: as an
+input it is zero pigment (white paper, the `v000` corner); as an output it is
+black.
+
+It is NOT one of the `?debug=` flags. Those gate debug instrumentation; this
+one selects which pigment cube the paint is composited with, so it keeps the
+older `?diag=` / `?gpu=` spelling.
+
+Defaulting it on is a deliberate reversal: it was introduced opt-in, then
+promoted once the result was reviewed, because a picker that cannot offer black
+is the worse default.
+
+### Why the blast radius is small
+
+Only the `x*y*z` term of the trilinear interpolation touches this corner, so the
+change is invisible unless **all three** pigments are present. Measured:
+
+| mix | delta |
+|---|---|
+| any pure hue (red, yellow, blue) | **0** |
+| any two-pigment mix (orange, green, purple) | **0** |
+| quarter three-way mix | 1/255 |
+| middling three-way mix | 6/255 |
+| the corner itself | 51/255 |
+
+### Implementation
+
+The corner is a **uniform** (`u_pigmentBlack`), not a `#define`. The renderer
+already builds six painting programs from `#define` variants; another dimension
+would have doubled that to twelve. Set in `_applyMaterialUniforms()`, the one
+choke point both the screen and save paths share.
+
+Fixed at construction, deliberately: paint already on the canvas was composited
+under whichever corner was live when it was laid down, so a mid-session flip
+would leave old and new strokes disagreeing. Changing it needs a reload.
+
+`app/ui/ryb.js` carries the matching `setPigmentBlack()`, called from `paint.js`
+with the same value the engine got — both boundaries must agree or the picker
+goes back to describing a colour the brush will not deposit.
+
+### Verification
+
+- `npm run test:color` — **40/40**. Adds the flag's own group: true black at the
+  centre, and proof that pure hues, two-pigment mixes and half-value red are
+  **bit-identical** under either cube.
+- `debug/phase10-probe.js` — **34/34** in four combinations: source and `dist`,
+  each with and without `BLACK=1`.
+- Goldens: **stale, see the box at the top of this phase.** Converting the
+  corner to a uniform is bit-exact while the flag is off, but the flag is now
+  ON by default, which moved 8 of the 12 `screen` hashes. All `paint` hashes
+  are unchanged and `colorMix` still passes its green assertion.
+
+**A trap worth keeping.** An unset GL uniform defaults to `vec3(0)` — which
+would silently make *every* cube the black one, in both flag states, looking
+exactly like the feature working. The GPU test could not see it: that test sets
+`u_pigmentBlack` itself, so it proves the shader *reads* the uniform, not that
+the renderer *writes* it. Neither the goldens nor any other check caught it
+either. The probe now reads the value back off the live program with
+`gl.getUniform`, which does catch it.
+
 
 ## UX findings from the Phase 6 device retest — STILL OPEN after Phase 7
 

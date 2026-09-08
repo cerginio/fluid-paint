@@ -31,6 +31,24 @@ vec3 trilinearInterpolate(vec3 p, vec3 v000, vec3 v100, vec3 v010, vec3 v001, ve
            v111 * p.x * p.y * p.z;
 }
 
+/* The cube's all-three-pigments corner.
+ *
+ * David Li's original is vec3(0.2, 0.094, 0.0) -- a near-black brown, and the
+ * DARKEST colour this cube can produce. There is no black in it at all, so a
+ * picker built on it cannot offer one: mixing every pigment at full load is as
+ * dark as paint gets.
+ *
+ * A host may deepen this corner to true black (the blackPigment feature flag,
+ * see fluid-engine/index.js). It is a uniform rather than a #define so the flag
+ * costs no extra shader programs and can flip at runtime.
+ *
+ * Only the p.x*p.y*p.z term uses it, so the change is invisible unless all
+ * three pigments are present: every pure hue and every two-pigment mix
+ * (orange, green, purple) is bit-identical either way. Measured deltas are 0
+ * for those, 6/255 at a middling three-way mix, 51/255 at the corner itself.
+ */
+uniform vec3 u_pigmentBlack;
+
 vec3 rybToRgb(vec3 ryb) {
 #ifdef RGB
     return 1.0 - ryb.yxz;
@@ -44,7 +62,7 @@ vec3 rybToRgb(vec3 ryb) {
         vec3(1.0, 0.5, 0.0), 
         vec3(0.0, 0.66, 0.2),
         vec3(0.5, 0.0, 0.5),
-        vec3(0.2, 0.094, 0.0));
+        u_pigmentBlack);
 }
 
 

@@ -53,9 +53,44 @@ const RESIZING_FEATHER_SIZE = 8;
 // disagreement here would composite the wrong colour model with no error.
 const ColorModelRGB = 1;
 
+/* The cube's all-three-pigments corner, and the flag that deepens it.
+ *
+ * PIGMENT_CORNER_DAVID_LI is his original: a near-black brown that is the
+ * darkest colour that cube can reach. There is no black anywhere in it, so a
+ * picker built on it cannot offer one.
+ *
+ * PIGMENT_CORNER_BLACK deepens that one corner to real black, and is the
+ * DEFAULT -- a picker that cannot offer black is the worse default. Pass
+ * blackPigment: false for David Li's original.
+ *
+ * (Named for what they ARE, not which is default: an earlier pair called
+ * PIGMENT_BLACK_DEFAULT/_TRUE became actively misleading the moment the
+ * default moved.)
+ *
+ * Only the x*y*z term of the interpolation touches this corner, so every pure
+ * hue and every two-pigment mix is bit-identical under either value; only
+ * mixes containing ALL THREE pigments move at all. That is why the paint
+ * goldens did not shift when the default changed.
+ */
+const PIGMENT_CORNER_DAVID_LI = [0.2, 0.094, 0.0];
+const PIGMENT_CORNER_BLACK = [0.0, 0.0, 0.0];
+
 class PaintingRenderer {
-  constructor(wgl, shaderSources) {
+  constructor(wgl, shaderSources, options) {
     this.wgl = wgl;
+
+    /* Read once, here, rather than per frame. The corner is a uniform so the
+     * choice costs no extra shader programs, but it is fixed at construction:
+     * a mid-session flip would leave already-deposited paint composited under
+     * the old corner and new strokes under the new one.
+     *
+     * Defaults to true black. Note the explicit `=== false` rather than a
+     * truthy test: an omitted option must get the DEFAULT, and a plain
+     * `options.blackPigment ? ... : ...` would silently hand every host that
+     * does not pass the option the non-default cube. */
+    this.pigmentBlack = (options && options.blackPigment === false)
+      ? PIGMENT_CORNER_DAVID_LI
+      : PIGMENT_CORNER_BLACK;
 
     // The six painting programs. All are painting.vert + painting.frag with a
     // different #define, so they are built together here rather than scattered
@@ -128,6 +163,12 @@ class PaintingRenderer {
       .uniform1f('u_diffuseScale', DIFFUSE_SCALE)
       .uniform1f('u_specularScale', SPECULAR_SCALE)
       .uniform1f('u_F0', F0)
+      .uniform3f(
+        'u_pigmentBlack',
+        this.pigmentBlack[0],
+        this.pigmentBlack[1],
+        this.pigmentBlack[2]
+      )
       .uniform3f(
         'u_lightDirection',
         LIGHT_DIRECTION[0],

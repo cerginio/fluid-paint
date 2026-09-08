@@ -125,9 +125,9 @@ passes mean something. If either path is rewritten, write the probe back.
 | Source | `D:\work\js-games\ua-dream\tilecraft\lib\iro.js` |
 | Upstream | iro.js **v5.5.2**, (c) 2016-2021 James Daniel, <https://github.com/jaames/iro.js> |
 | Vendored | Phase 8, 2026-09-08 |
-| Size | 1850 lines, UMD build with Preact bundled |
+| Size | 1850 lines as vendored, UMD build with Preact bundled (2131 after the Phase 10 patches) |
 | **Licence** | **MPL 2.0** |
-| Vendored sha256 | `98223fc8c15b3c576715d8e147ead241ae3fc5f906dc38c56b1857774987589d` |
+| Vendored sha256 | `98223fc8c15b3c576715d8e147ead241ae3fc5f906dc38c56b1857774987589d` — the **as-vendored** file. The working copy is patched and will not match; see the modifications below. |
 
 Supplies the colour wheel and the value/alpha sliders behind `app/ui/color.js`.
 It replaced `colorpicker.js`, its two GL programs (`app/shaders/picker.vert` /
@@ -143,10 +143,15 @@ the program that links it. Concretely, for this project:
 2. **Source availability.** `lib/iro.js` is the source, it is in this repository
    unminified, and the upstream URL is recorded above.
 3. **Modifications must be disclosed.** There is one. See below.
-4. **Do not edit it in place.** If behaviour has to change, wrap it in
-   `app/ui/color.js`. That keeps the copyleft boundary where it already is.
+4. ~~**Do not edit it in place.**~~ **Superseded in Phase 10.** This rule was
+   followed until restyling iro's rendered DOM from outside meant re-deriving in
+   CSS what iro computes internally, and racing its re-renders to do it. The
+   file is now patched directly. MPL-2.0 permits this — it requires the
+   modifications be *disclosed*, not avoided — so they are listed below and the
+   banner stays. Keep patches marked `@creg` so they can be found and re-applied
+   across an upstream re-sync.
 
-### It is NOT pristine -- one upstream modification
+### It is NOT pristine -- the local modifications
 
 **This matters and was nearly missed.** The tilecraft copy carries a local patch
 that sits *outside* the copyright banner and is easy to read past:
@@ -170,6 +175,34 @@ The alternative was fetching a pristine v5.5.2, which buys a simpler licence not
 at the cost of diverging from the copy tilecraft runs, so a shared fix would then
 have two places to land. Keeping one shared copy and documenting the delta was
 judged the better trade.
+
+### Phase 10 modifications -- the pigment fork
+
+Every one is marked `@creg` in the source. The widget draws a **subtractive**
+paint model, so a surface must show the pigment the brush deposits:
+
+```js
+rybToRgbDisplay(hsvToRyb(h, s, v), additive)   // app/ui/ryb.js
+```
+
+| What | Where | Why |
+|---|---|---|
+| `IroColor.pigmentRgb()` / `pigmentCss()` | after the `IroColor` methods | The display adapter. Normalizes iro's degrees/percent and applies the contract above. |
+| Sampled disc canvas | `iroRenderWheelCanvas()`, `iroWheelCanvasRef()`, and `IroWheel`'s render | Replaces the conic hue gradient + white radial + black value overlays. Those composite to an **HSV** disc; this picker's interior is not HSV. |
+| Sampled slider/ring stops | `getSliderGradient()`, `iroHueGradient()` | The pigment path between two colours is *curved* through the cube, so two endpoints are right only at the ends. |
+| Explicit handle fills | `IroWheel` / `IroBox` handle props | Were `color.hslString`, a second additive path, so a handle showed a different colour from the disc beneath it. |
+| `iroAdditiveModel` global | line 13 | Lets the host tell iro which model (Natural/Digital) the paint is compositing with. |
+
+**Reverted in Phase 10d**, and worth not re-doing: an earlier patch overrode
+`IroColor.hsvToRgb` globally so every surface converted implicitly. It had no
+matching inverse (`rgbToHsv` stayed additive), which left `color.rgb`,
+`hexString` and `hslString` silently returning a different colour space than
+their names promise. Surfaces now ask for pigment **by name**; the stock RGB/HSL
+accessors mean what they say. Never route host synchronization through them —
+`app/ui/color.js` reads and writes H, S, V, A only.
+
+See `docs/COLOR-PICKER-PAINT-PARITY-SPEC.md`. Guarded by `npm run test:color`
+(numeric, no browser) and `debug/phase10-probe.js` (rendered surfaces).
 
 ### Integration notes -- do not "simplify" these
 
