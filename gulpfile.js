@@ -51,6 +51,9 @@ const paths = {
     'fluid-engine/renderer.js',
     // The facade: must load after the three modules it composes.
     'fluid-engine/index.js',
+    // Optional Tilecraft story-model adapter. It only uses FluidEngine's public
+    // Stroke API and is inert until a host constructs it.
+    'fluid-engine/tilecraft-stroke-player.js',
     // iro.js before app/ui/color.js, which constructs an iro.ColorPicker.
     // Vendored verbatim, MPL-2.0 -- see docs/UI-COMPONENTS.md. colorpicker.js
     // and its two GL programs are gone (Phase 8).

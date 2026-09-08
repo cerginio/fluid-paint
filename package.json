@@ -29,6 +29,8 @@
     "test:golden:record": "node debug/golden-run.js --record",
     "test:golden:dist": "cross-env GOLDEN_ROOT=dist node debug/golden-run.js",
     "test:timing": "node debug/live-timing-test.js",
+    "test:tilecraft": "node debug/tilecraft-stroke-player-test.js",
+    "test:tilecraft:gpu": "node debug/tilecraft-story-gpu-test.js",
     "test:live-gpu": "node debug/live-gpu-test.js"
   },
   "overrides": {

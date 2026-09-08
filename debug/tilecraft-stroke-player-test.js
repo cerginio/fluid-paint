@@ -1,0 +1,103 @@
+const assert = require('node:assert/strict');
+const TilecraftStrokePlayer = require('../fluid-engine/tilecraft-stroke-player.js');
+
+const calls = [];
+const engine = {
+  beginStroke(options) { calls.push(['begin', options]); },
+  strokeTo(options) { calls.push(['to', options]); },
+  endStroke() { calls.push(['end']); },
+};
+const story = {
+  layers: [
+    { visible: true, tileShape: 'polygon', gridSize: 10, scale: 2, opacity: 128,
+      tiles: [{ x: 5, y: 5, c: '#0000ff80', s: 3 }] },
+    { visible: true, tileShape: 'polyline', gridSize: 4, tiles: [
+      { x: 0, y: 0, c: '#ff0000', g: 1, s: 1 },
+      { x: 10, y: 0, c: '#ff0000', g: 1, s: 2 },
+      { x: 10, y: 10, c: '#ff0000', g: 1, s: 1, gz: 1 },
+      { x: 30, y: 0, c: '#00ff00', g: 2, s: 1 },
+      { x: 40, y: 0, c: '#00ff00', g: 2, s: 1, b: 1 },
+      { x: 50, y: 0, c: '#00ff00', g: 2, s: 1 },
+    ] },
+    { visible: false, tileShape: 'polyline', gridSize: 1,
+      tiles: [{ x: 1, y: 1, c: '#ffffff' }] },
+  ],
+};
+const stats = new TilecraftStrokePlayer(engine).replay(story, {
+  paintingRectangle: { left: 0, bottom: 0, width: 100, height: 100 },
+  resolutionScale: 2,
+  alpha: 0.1,
+  mapPoint: (tile) => ({ x: tile.x + 100, y: 200 - tile.y }),
+});
+
+assert.deepEqual(calls.map(([kind]) => kind), [
+  'begin', 'to', 'to', 'to', 'end', // closed g=1 polyline
+  'begin', 'end',                   // g=2 before b
+  'begin', 'to', 'end',             // g=2 after b
+  'begin', 'end',                   // polygon spot, after every polyline
+]);
+assert.equal(calls[0][1].timing, 'replay');
+assert.deepEqual(calls[0][1].color.channels, [1, 0, 0]);
+assert.equal(calls[0][1].brushSize, 8, 'polyline uses its largest tile scale');
+assert.equal(calls[1][1].pressure, 1);
+assert.deepEqual(calls[3][1], { x: 100, y: 200, pressure: 0.5 }, 'gz closes to first point');
+assert.equal(calls.at(-2)[1].brushSize, 60, 'polygon tile size creates one spot');
+assert.equal(calls.at(-2)[1].timing, 'live', 'polygon spot is an immediate live tap');
+assert.ok(TilecraftStrokePlayer.rybToRgb(calls.at(-2)[1].color.channels)
+  .every((value) => Number.isFinite(value)), 'RGB input is converted to finite RYB pigment loads');
+assert.ok(Math.abs(calls.at(-2)[1].color.alpha - 0.1 * (128 / 255) * (128 / 255)) < 1e-12);
+assert.deepEqual(stats, { layers: 2, strokes: 4, spots: 1, points: 8, skipped: 0 });
+assert.deepEqual(TilecraftStrokePlayer.hexToPigment('#ffffff'), [0, 0, 0, 1], 'white is no RYB pigment');
+assert.deepEqual(TilecraftStrokePlayer.hexToPigment('#000000'), [1, 1, 1, 1], 'black uses all pigments');
+assert.deepEqual(TilecraftStrokePlayer.hexToPigment('#ff0000'), [1, 0, 0, 1], 'red is a cube corner');
+assert.throws(() => TilecraftStrokePlayer.hexToPigment('#bad'), /#RRGGBB/);
+
+const scaledCalls = [];
+new TilecraftStrokePlayer({
+  beginStroke(options) { scaledCalls.push(options); },
+  strokeTo() {}, endStroke() {},
+}).replay({ layers: [{ visible: true, tileShape: 'polyline', gridSize: 10, tiles: [
+  { x: 0, y: 0, c: '#ff0000', g: 7, gd: 40, s: 1 },
+  { x: 20, y: 0, c: '#ff0000', g: 7, s: 2 },
+] }] }, {
+  paintingRectangle: { left: 0, bottom: 0, width: 100, height: 100 },
+  canvasSize: { width: 1500, height: 900 },
+  coordinateScale: 0.5,
+});
+assert.equal(scaledCalls[0].brushSize, 2.5,
+  'width applies Tilecraft gd scale, 3000px canvas ratio, and map coordinate scale');
+console.log('tilecraft stroke player: PASS (polyline paths before polygon spots)');
+
+(async () => {
+  const liveCalls = [];
+  const liveEngine = {
+    beginStroke(options) { liveCalls.push(['begin', options.timing]); },
+    strokeTo() { liveCalls.push(['to']); },
+    endStroke() { liveCalls.push(['end']); },
+  };
+  let frames = 0;
+  const liveStats = await new TilecraftStrokePlayer(liveEngine).play({
+    layers: [
+      { visible: true, tileShape: 'polyline', gridSize: 2, tiles: [
+        { x: 0, y: 0, c: '#ff0000', g: 1 },
+        { x: 1, y: 0, c: '#ff0000', g: 1 },
+      ] },
+      { visible: true, tileShape: 'polygon', gridSize: 2,
+        tiles: [{ x: 2, y: 2, c: '#00ff00' }] },
+    ],
+  }, {
+    paintingRectangle: { left: 0, bottom: 0, width: 10, height: 10 },
+    framesPerStep: 2,
+    waitFrame: async () => { frames++; },
+  });
+  assert.deepEqual(liveCalls, [
+    ['begin', 'live'], ['to'], ['end'], // polyline: one target per frame
+    ['begin', 'live'], ['end'],         // polygon: one live tap
+  ]);
+  assert.equal(frames, 6, 'each point target and spot waits the requested number of frames');
+  assert.deepEqual(liveStats, { layers: 2, strokes: 2, spots: 1, points: 3, skipped: 0 });
+  console.log('tilecraft live player: PASS (RAF-fed polyline then spots)');
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

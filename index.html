@@ -119,6 +119,7 @@
     <script src="fluid-engine/simulation.js"></script>
     <script src="fluid-engine/renderer.js"></script>
     <script src="fluid-engine/index.js"></script>
+    <script src="fluid-engine/tilecraft-stroke-player.js"></script>
     <!-- colorpicker.js is GONE (Phase 8): the GL hue ring, its two programs and
          its hand-written hit tests are replaced by the iro.js wheel below. -->
     <!-- ryb.js BEFORE iro.js, not merely before color.js: iro builds its hue
@@ -244,10 +245,82 @@
                     const painter = new Paint(canvas, wgl, { container: canvasCell });
                     window.__painter = painter;   // handle for the golden harness
 
+                    /*
+                     * Tilecraft demonstration player. `?story=1` is purposely
+                     * pinned to the checked-in fixture rather than accepting an
+                     * arbitrary URL: it is a reproducible demo of the Story
+                     * Model Schema, not an unbounded fetch proxy. It drives the
+                     * existing app RAF through TilecraftStrokePlayer.play(), so
+                     * the paint develops visibly instead of appearing as a
+                     * synchronous final replay.
+                     */
+                    window.playTilecraftStory = async () => {
+                        while (!painter.engine) {
+                            await new Promise(requestAnimationFrame);
+                        }
+                        const story = await fetch('docs/story-2026-09-08-4-frames.json')
+                            .then((response) => {
+                                if (!response.ok) throw new Error(`Story fixture: HTTP ${response.status}`);
+                                return response.json();
+                            });
+                        const selectedFrame = story.frames.find((candidate) => candidate.selected);
+                        const framePoints = selectedFrame
+                            ? selectedFrame.points
+                            : story.frames.flatMap((frame) => frame.points || []);
+                        if (framePoints.length < 4) {
+                            throw new Error('Story fixture needs rectangular frame points.');
+                        }
+                        const sourceX = framePoints.map((point) => point.x);
+                        const sourceY = framePoints.map((point) => point.y);
+                        const left = Math.min(...sourceX), right = Math.max(...sourceX);
+                        const top = Math.min(...sourceY), bottom = Math.max(...sourceY);
+                        const target = painter.paintingRectangle;
+                        const scale = Math.min(target.width / (right - left), target.height / (bottom - top));
+                        const offsetX = target.left + (target.width - (right - left) * scale) / 2;
+                        const offsetY = target.bottom + (target.height - (bottom - top) * scale) / 2;
+
+                        painter.engine.clear();
+                        painter.needsRedraw = true;
+                        const player = new TilecraftStrokePlayer(painter.engine);
+                        window.__tilecraftStoryPlayer = player;
+                        window.__tilecraftStoryStarted = true;
+                        // storyFramesPerStep is explicit; storySpeed remains a
+                        // backwards-compatible alias from the first demo.
+                        // Eight frames per model point is intentionally slow
+                        // enough for this 22k-point story to be watchable.
+                        const requestedSpeed = Number(params.get('storyFramesPerStep') || params.get('storySpeed'));
+                        const framesPerStep = Number.isInteger(requestedSpeed) && requestedSpeed > 0
+                            ? requestedSpeed
+                            : 8;
+                        const stats = await player.play(story, {
+                            paintingRectangle: target,
+                            resolutionScale: painter.getEffectiveResolutionScale(),
+                            // Mirrors polyline-lcr.js' responsive `cw`/`ch`
+                            // stroke factor. mapPoint below has its own source
+                            // -> target scale, supplied separately.
+                            canvasSize: { width: target.width, height: target.height },
+                            coordinateScale: scale,
+                            // Tilecraft's canvas y-axis is down; FluidEngine's
+                            // painting rectangle is bottom-left-origin.
+                            mapPoint: (tile) => ({
+                                x: offsetX + (tile.x - left) * scale,
+                                y: offsetY + (bottom - tile.y) * scale,
+                            }),
+                            framesPerStep,
+                            onPaint: () => { painter.needsRedraw = true; },
+                        });
+                        window.__tilecraftStoryStats = stats;
+                        return stats;
+                    };
+
                     // ?golden=basic|colorMix|wetBlend|all -- scripted stroke, hashed readback
                     const goldenScenario = params.get('golden');
                     if (goldenScenario) {
                         scheduleGoldenSuite(() => window.__painter, goldenScenario);
+                    }
+                    if (params.get('story') === '1') {
+                        window.__tilecraftStoryPromise = window.playTilecraftStory()
+                            .catch((error) => console.error('Tilecraft story playback failed:', error));
                     }
                 } else {
                     //required features unsupported
