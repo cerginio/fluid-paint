@@ -19,6 +19,8 @@ varying vec2 v_coordinates;
 
 float distanceToLine(vec2 a, vec2 b, vec2 p) {
     float dist = distance(a, b);
+    // A held brush or an initial contact is a point, not a line.
+    if (dist < 1e-6) return distance(a, p);
     vec2 direction = (b - a) / dist;
 
     float projectedDistance = dot(p - a, direction);

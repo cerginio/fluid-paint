@@ -334,15 +334,10 @@ class MinimalHost {
       this.brushX = p.x;
       this.brushY = p.y;
 
-      /*
-       * beginStroke() is the press: it reseeds the bristles with this press's
-       * own layout variation and settles them while depositing, so even a bare
-       * tap leaves a mark. It does all of that synchronously before returning
-       * -- there is no "wait ten frames for the bristles to fall" for a host to
-       * get wrong, which is what this whole API is for.
-       */
+      // A live press deposits once; the clock drives subsequent paint.
       const color = hsvToRyb(this.hue, 1, 1);
       this.engine.beginStroke({
+        timing: 'live',
         x: this.brushX,
         y: this.brushY,
         brushSize: this.brushScale,
@@ -367,8 +362,7 @@ class MinimalHost {
       this.brushY = p.y;
 
       if (this.engine.strokeActive) {
-        // The engine resamples the segment at its own spacing, so however the
-        // browser happens to deliver these events, the paint is the same.
+        // Input stays cheap; advance() owns the physical clock.
         this.engine.strokeTo({ x: this.brushX, y: this.brushY });
         this.needsRedraw = true;
         return;
@@ -384,17 +378,14 @@ class MinimalHost {
           this.brushScale
         );
         this.brushPlaced = true;
-      } else {
-        this.engine.positionBrush(
-          this.brushX,
-          this.brushY,
-          BRUSH_HEIGHT * this.brushScale,
-          this.brushScale
-        );
       }
     });
 
-    const end = () => {
+    const end = (event) => {
+      if (this.engine.strokeActive && event.type === 'pointerup') {
+        const p = this._toEngineSpace(event.clientX, event.clientY);
+        this.engine.strokeTo({ x: p.x, y: p.y });
+      }
       // endStroke() flushes the last pointer position, so the stroke ends where
       // the finger did rather than at the last resampled point.
       if (this.engine.strokeActive) {
@@ -410,40 +401,20 @@ class MinimalHost {
 
   // --- The loop ---------------------------------------------------------
 
-  /*
-   * The RAF loop is the HOST's, per the engine's header: `frame()` advances one
-   * step and when to call it is not the engine's business.
-   *
-   * Since Phase 9a the loop no longer drives strokes. beginStroke/strokeTo did
-   * every position/splat/frame step already, synchronously; calling frame()
-   * again for an active stroke would double-step the fluid, and the engine
-   * throws if this loop tries. What is left here is idle fluid and rendering:
-   * paint keeps flowing after the finger lifts.
-   */
   _start() {
+    document.addEventListener('visibilitychange', () => this.engine.resetClock(performance.now() / 1000));
     const loop = () => {
-      this._update();
+      if (!document.hidden) this._update();
       requestAnimationFrame(loop);
     };
     requestAnimationFrame(loop);
   }
 
   _update() {
-    /*
-     * The brush advances every frame whether or not paint is being deposited --
-     * that is what makes the bristles trail and settle rather than teleport.
-     * Brush.update() derives bristle SPEED from the delta it is handed, so the
-     * spacing of these calls is the stroke's dynamics (Phase 6 measured a
-     * one-frame-stale position as ~2% more paint; it reads exactly like noise).
-     */
-    // Nothing to do here while a stroke runs -- it advanced the simulation
-    // itself, and both of these would be rejected.
-    if (!this.engine.strokeActive) {
-      // frame() reports whether anything actually moved, which is what lets a
-      // still canvas stop re-rendering instead of burning a GPU on settled
-      // paint.
-      if (this.engine.frame()) this.needsRedraw = true;
-    }
+    const result = this.engine.advance(performance.now() / 1000,
+      this.brushPlaced ? { x: this.brushX, y: this.brushY,
+        height: BRUSH_HEIGHT * this.brushScale, scale: this.brushScale } : undefined);
+    if (result.simulationUpdated) this.needsRedraw = true;
 
     const clipped = this.paintingRectangle
       .clone()

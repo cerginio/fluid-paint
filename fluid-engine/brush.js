@@ -224,7 +224,7 @@ class Brush {
   // Also draws this press's bristle-layout variation (Phase 8a). Every call is
   // a new press: the caller of the low-level primitive owns that decision, and
   // FluidEngine.beginStroke() calls this exactly once per stroke.
-  initialize(x, y, z, scale) {
+  initialize(x, y, z, scale, resetDynamics = false) {
     this.strokeVariation = this._nextRandom();
 
     this.positionX = x;
@@ -270,6 +270,16 @@ class Brush {
       0
     );
     wgl.drawArrays(setBristlesDrawState, wgl.TRIANGLE_STRIP, 0, 4);
+    if (resetDynamics) {
+      wgl.framebufferTexture2D(this.simulationFramebuffer, wgl.FRAMEBUFFER,
+        wgl.COLOR_ATTACHMENT0, wgl.TEXTURE_2D, this.previousPositionsTexture, 0);
+      wgl.drawArrays(setBristlesDrawState, wgl.TRIANGLE_STRIP, 0, 4);
+      for (const texture of [this.velocitiesTexture, this.previousVelocitiesTexture]) {
+        wgl.framebufferTexture2D(this.simulationFramebuffer, wgl.FRAMEBUFFER,
+          wgl.COLOR_ATTACHMENT0, wgl.TEXTURE_2D, texture, 0);
+        wgl.clear(wgl.createClearState().bindFramebuffer(this.simulationFramebuffer), wgl.COLOR_BUFFER_BIT);
+      }
+    }
   }
 
   setBristleCount(newBristleCount) {

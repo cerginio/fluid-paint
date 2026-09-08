@@ -281,14 +281,11 @@ class FluidEngine {
 
   // --- Named stroke API (Phase 9a) --------------------------------------
   //
-  // A synchronous, deterministic path for replaying input. Each method performs
-  // every brush, splat and fluid step its portion of the stroke needs before it
-  // returns: no RAF, timer, promise or render is scheduled. The host may render
-  // after any call.
-  //
-  // Because these advance the simulation internally, a host must NOT also call
-  // frame() for an active stroke -- that would double-step the fluid. The
-  // primitives throw while a stroke is active to make that mistake visible.
+  // timing:'live' uses a latest-input mailbox and advance(now) at 60 ticks/s.
+  // The default 'replay' preserves the old synchronous spatial replay API for
+  // existing offline callers. Never use that mode for interactive painting.
+  // Low-level primitives are guarded during either mode; use advance() for
+  // live strokes, and let the synchronous replay own its steps.
 
   /** True while a named stroke is running. */
   get strokeActive() {
@@ -329,18 +326,16 @@ class FluidEngine {
   }
 
   /**
-   * Begin a stroke: validate, reseed the bristles, and settle them at the press
-   * point while depositing.
-   *
-   * The settling samples splat. That is what makes a bare
-   * beginStroke(); endStroke() leave a visible tap -- the first samples deposit
-   * nothing because the bristles have not yet crossed the threshold, and later
-   * ones do. No separate dot primitive is needed.
+   * Begin a stroke. Live mode reseeds and makes one contact without advancing
+   * time; legacy replay mode settles synchronously for offline compatibility.
+   * @param {object} options Pass timing:'live' in interactive hosts.
    */
-  beginStroke({ x, y, pressure = 1, brushSize, paintingRectangle, color, resolutionScale = 1, spacing }) {
+  beginStroke({ x, y, pressure = 1, brushSize, paintingRectangle, color, resolutionScale = 1, spacing, timing = 'replay' }) {
     if (this.strokeActive) {
       throw this._strokeError('FluidEngine: a stroke is already active; call endStroke() first.');
     }
+
+    if (timing !== 'live' && timing !== 'replay') throw this._strokeError('Unknown stroke timing.');
 
     // Everything below runs BEFORE any GPU mutation or random draw, so a
     // rejected begin leaves the engine idle and consumes no variation.
@@ -389,6 +384,7 @@ class FluidEngine {
 
     const alpha = color.alpha;
     this._stroke = {
+      timing,
       brushSize,
       rectangle,
       resolutionScale,
@@ -413,6 +409,22 @@ class FluidEngine {
       remainder: 0,
     };
 
+    if (timing === 'live') {
+      try {
+        this.brush.initialize(x, y, this._strokeHeight(pressure), brushSize, true);
+        this._liveTarget = { x, y, height: this._strokeHeight(pressure), scale: brushSize };
+        this._previousLiveTarget = this._liveTarget;
+        // A sub-tick tap makes one contact, without settling or fluid time.
+        this._liveContact(true);
+      } catch (error) {
+        this._stroke = null;
+        throw error;
+      }
+      return { steps: 0, simulationUpdated: true };
+    }
+    this._liveTarget = undefined;
+    this._previousLiveTarget = undefined;
+
     let steps = 0;
     let simulationUpdated = false;
     try {
@@ -434,7 +446,8 @@ class FluidEngine {
   }
 
   /**
-   * Extend the stroke to a point, arc-length resampled at the fixed spacing.
+   * Extend a stroke. Live mode only replaces the latest target (O(1)).
+   * Replay mode arc-length resamples synchronously at fixed spacing.
    *
    * The unused distance carries across calls, so splitting one straight segment
    * into twenty caller points emits exactly the same samples as passing its
@@ -450,6 +463,12 @@ class FluidEngine {
     this._validateNumber(y, 'y');
     if (pressure === undefined) pressure = stroke.pending.pressure;
     this._validateNumber(pressure, 'pressure', { min: 0, max: 1 });
+
+    if (stroke.timing === 'live') {
+      stroke.pending = { x, y, pressure };
+      this._liveTarget = { x, y, height: this._strokeHeight(pressure), scale: stroke.brushSize };
+      return { steps: 0, simulationUpdated: false };
+    }
 
     const from = stroke.pending;
     const dx = x - from.x;
@@ -500,6 +519,15 @@ class FluidEngine {
     const pending = stroke.pending;
     const emitted = stroke.emitted;
 
+    if (stroke.timing === 'live') {
+      const changed = pending.x !== emitted.x || pending.y !== emitted.y || pending.pressure !== emitted.pressure;
+      // Preserve the final endpoint even if pointerup precedes the next RAF.
+      // A swept final contact does not integrate either physical system.
+      if (changed) this._liveContact(true);
+      this._stroke = null;
+      return { steps: 0, simulationUpdated: changed };
+    }
+
     let steps = 0;
     let simulationUpdated = false;
     try {
@@ -542,6 +570,80 @@ class FluidEngine {
       stroke.velocityScale
     );
     return this.simulator.simulate();
+  }
+
+  /**
+   * Interactive clock. One brush/splat/fluid step per 1/60 second, at most
+   * five per call. Input is a latest-position mailbox, not a work queue.
+   * The existing splat shader sweeps between bristle positions each tick.
+   * Replay methods retain their legacy spatial semantics unless timing:'live'.
+   */
+  advance(now, target) {
+    this._validateNumber(now, 'now', { min: 0 });
+    if (this.strokeActive && this._stroke.timing !== 'live') {
+      throw this._strokeError('advance() cannot run a legacy replay stroke.');
+    }
+    if (target && !this.strokeActive) this._liveTarget = { ...target };
+    const current = this._liveTarget;
+    if (this._lastAdvance === undefined) this.resetClock(now);
+    if (now < this._lastAdvance) throw this._strokeError('Clock must be monotonic.');
+    const elapsed = now - this._lastAdvance;
+    const previousTime = this._lastAdvance;
+    this._lastAdvance = now;
+    const dt = 1 / 60;
+    this._accumulator += elapsed;
+    const due = Math.floor((this._accumulator + 1e-10) / dt);
+    const steps = Math.min(due, 5);
+    const droppedSeconds = (due - steps) * dt;
+    // Drop the oldest excess ticks, then consume the latest interval. There
+    // is no unfinished stamp batch that can hold simulation time hostage.
+    this._accumulator = Math.max(0, this._accumulator - due * dt);
+    const previous = this._previousLiveTarget || current;
+    let simulationUpdated = false;
+    for (let i = 0; i < steps; i++) {
+      if (current) {
+        const tickTime = now - this._accumulator - (steps - 1 - i) * dt;
+        const t = droppedSeconds > 0 || elapsed === 0 ? 1
+          : Math.max(0, Math.min(1, (tickTime - previousTime) / elapsed));
+        this.brush.update(
+          previous.x + (current.x - previous.x) * t,
+          previous.y + (current.y - previous.y) * t,
+          previous.height + (current.height - previous.height) * t,
+          current.scale
+        );
+        if (this.strokeActive) this._liveContact(false);
+      }
+      if (this.simulator.simulate()) simulationUpdated = true;
+    }
+    this._previousLiveTarget = current;
+    this._simulatedSeconds = (this._simulatedSeconds || 0) + steps * dt;
+    this._droppedSeconds = (this._droppedSeconds || 0) + droppedSeconds;
+    this.timingStats = {
+      steps, stamps: this.strokeActive ? steps : 0, droppedSeconds,
+      simulatedSeconds: this._simulatedSeconds, totalDroppedSeconds: this._droppedSeconds,
+      accumulator: this._accumulator, simulationUpdated,
+    };
+    return this.timingStats;
+  }
+
+  /** Forget suspended wall time without transforming event timestamps. */
+  resetClock(now) {
+    this._lastAdvance = now;
+    this._accumulator = 0;
+    this._previousLiveTarget = this._liveTarget;
+  }
+
+  _liveContact(stationary) {
+    const s = this._stroke;
+    const p = stationary ? s.pending : {
+      x: this.brush.positionX, y: this.brush.positionY,
+      pressure: this.brush.positionZ / (STROKE_HEIGHT_SCALE * s.brushSize),
+    };
+    this.simulator.splat(this.brush, s.zThreshold, s.rectangle, s.color,
+      s.splatRadius, stationary ? 0 : s.velocityScale,
+      stationary ? [p.x - this.brush.positionX, p.y - this.brush.positionY,
+        this._strokeHeight(p.pressure) - this.brush.positionZ] : [0, 0, 0], stationary);
+    s.emitted = { ...p };
   }
 
   // --- Painting geometry ------------------------------------------------
@@ -745,7 +847,10 @@ class FluidEngine {
    * seam makes a second caller obvious in review.
    */
   getBristleGeometry() {
+    const target = this._liveTarget;
     return {
+      displayOffset: target ? [target.x - this.brush.positionX,
+        target.y - this.brush.positionY, target.height - this.brush.positionZ] : [0, 0, 0],
       positionsTexture: this.brush.positionsTexture,
       coordinatesBuffer: this.brush.brushTextureCoordinatesBuffer,
       indexBuffer: this.brush.brushIndexBuffer,

@@ -159,6 +159,7 @@ class BrushViewer {
             // .uniform4f('u_color', 0, 0, 1, 1.0)
             .uniform4f('u_color', color[0], color[1], color[2], 1.0)
             .uniformMatrix4fv('u_projectionViewMatrix', false, projectionViewMatrix)
+            .uniform3f('u_displayOffset', ...(bristles.displayOffset || [0, 0, 0]))
             .enable(wgl.DEPTH_TEST)
             .uniformTexture('u_positionsTexture', 0, wgl.TEXTURE_2D, bristles.positionsTexture);
 

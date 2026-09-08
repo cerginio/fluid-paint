@@ -1,3 +1,29 @@
+# Live pointer/brush regression fix
+
+Implemented the simpler live clock described in [STROKE-TIMING-CONTRACT.md](STROKE-TIMING-CONTRACT.md).
+Main and minimal hosts explicitly select `timing: 'live'`. Offline replay stays
+available for compatibility. Input no longer performs spatial batches of brush
+and fluid steps. Brush presentation follows the current pointer before rendering.
+
+Additional GPU finding: the fragment splat shader divided by zero for point
+contacts, despite the vertex shader already guarding the same case. Fixed both
+short taps and stationary contacts without a settling loop. Press resets old
+bristle velocity/history; release preserves the final endpoint with a swept
+contact. No golden baselines were re-recorded.
+
+Validation commands: `npm run test:timing`, `npm run test:live-gpu`,
+`npm run test:color`, `npm run lint:shaders`, `npm run build`.
+Results: timing tests passed; live GPU checks passed on WebGL 1/2 at DPR 1/2;
+color parity 42/42 passed; shader lint and production build passed.
+`node debug/golden-run.js --scenario colorMix` completed: green mixing passed
+in all four configurations; all four baseline comparisons reported drift
+(exit 1). Baselines were not changed.
+
+Physical-GPU latency and the user's large canvas still require device measurement;
+SwiftShader correctness results are not hardware performance certification.
+
+---
+
 # Handoff — Phases 0-10 done; goldens decided and re-recorded
 
 Written 2026-09-07, updated 2026-09-08 for Phases 9 and 8 (done in that order).

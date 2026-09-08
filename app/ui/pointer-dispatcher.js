@@ -160,7 +160,7 @@ class PointerDispatcher {
         if (!this._active.pan && n === 1) {
             this._active.pan = true;
             this._vel.pan.length = 0;
-            this.emit('panstart', { type: 'panstart', centerX: this.center.x, centerY: this.center.y, pointerId: pt.pointerId, pointerType: pt.pointerType, button: pt.button, size: 1 });
+            this.emit('panstart', { type: 'panstart', pressure: pt.pressure, centerX: this.center.x, centerY: this.center.y, pointerId: pt.pointerId, pointerType: pt.pointerType, button: pt.button, size: 1 });
         }
         if (n === 2 && wasN !== 2) {
             // if we were panning with 1 finger, end it now
@@ -191,6 +191,11 @@ class PointerDispatcher {
 
     _up = e => {
         const prevN = this.pointers.size;
+        // pointerup may contain a newer endpoint than the last pointermove.
+        // Do not manufacture movement for cancellation events.
+        if (e.type === 'pointerup' && this.pointers.has(e.pointerId)) {
+            this.pointers.set(e.pointerId, this._clone(e));
+        }
         const prevCenter = this._calcCenter();
         const prevSpan = this.prevDist2; // last known 2-finger distance
 

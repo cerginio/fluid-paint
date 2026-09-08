@@ -6,6 +6,7 @@ uniform vec2 u_paintingDimensions;
 uniform vec2 u_paintingPosition;
 uniform float u_splatRadius;
 uniform float u_zThreshold;
+uniform vec3 u_brushOffset;
 
 uniform sampler2D u_positionsTexture;
 uniform sampler2D u_previousPositionsTexture;
@@ -52,7 +53,7 @@ varying vec2 v_quadPosition;
 void main () {
     vec2 coordinates = a_splatCoordinates.zw; //in [-1, 1]
 
-    vec3 position = sampleBristle(u_positionsTexture, a_splatCoordinates.xy);
+    vec3 position = sampleBristle(u_positionsTexture, a_splatCoordinates.xy) + u_brushOffset;
     vec3 previousPosition = sampleBristle(u_previousPositionsTexture, a_splatCoordinates.xy);
 
     if (position.z > u_zThreshold) {

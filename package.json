@@ -27,7 +27,9 @@
     "//test:golden": "STALE BASELINES -- 8 of 12 screen hashes drift, EXPECTED, not a regression. The black pigment corner (v111 -> #000000) became the default and it is applied at RENDER time, so `screen` moved while every `paint` hash stayed identical and colorMix still asserts green=pass. Deposited pigment is untouched. Re-record with `npm run test:golden:record` when there is time to review the images; until then this is not a gate. See docs/HANDOFF.md Phase 10e.",
     "test:golden": "node debug/golden-run.js",
     "test:golden:record": "node debug/golden-run.js --record",
-    "test:golden:dist": "cross-env GOLDEN_ROOT=dist node debug/golden-run.js"
+    "test:golden:dist": "cross-env GOLDEN_ROOT=dist node debug/golden-run.js",
+    "test:timing": "node debug/live-timing-test.js",
+    "test:live-gpu": "node debug/live-gpu-test.js"
   },
   "overrides": {
     "picomatch": "2.3.2"

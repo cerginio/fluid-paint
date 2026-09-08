@@ -568,17 +568,17 @@ class Simulator {
    * @param {number} splatRadius
    * @param {number} velocityScale
    */
-  splat(brush, zThreshold, brushRectangle, splatColor, splatRadius, velocityScale) {
+  splat(brush, zThreshold, brushRectangle, splatColor, splatRadius, velocityScale, offset = [0, 0, 0], stationary = false) {
     // the area we need to simulate for this set of splats
     let brushPadding = Math.ceil(brush.scale * SPLAT_PADDING);
     brushPadding += Math.ceil(brush.getFilteredSpeed() * SPEED_PADDING);
 
     // start in brush space
     const area = new Rectangle(
-      brush.positionX - brushPadding,
-      brush.positionY - brushPadding,
-      brushPadding * 2,
-      brushPadding * 2
+      brush.positionX + Math.min(0, offset[0]) - brushPadding,
+      brush.positionY + Math.min(0, offset[1]) - brushPadding,
+      brushPadding * 2 + Math.abs(offset[0]),
+      brushPadding * 2 + Math.abs(offset[1])
     );
 
     // transform into simulation space
@@ -619,9 +619,10 @@ class Simulator {
       .uniform2f('u_paintingDimensions', brushRectangle.width, brushRectangle.height)
       .uniform2f('u_paintingPosition', brushRectangle.left, brushRectangle.bottom)
       .uniform1f('u_splatRadius', splatRadius)
+      .uniform3f('u_brushOffset', offset[0], offset[1], offset[2])
       .uniform4f('u_splatColor', splatColor[0], splatColor[1], splatColor[2], splatColor[3])
       .uniformTexture('u_positionsTexture', 0, wgl.TEXTURE_2D, brush.positionsTexture)
-      .uniformTexture('u_previousPositionsTexture', 1, wgl.TEXTURE_2D, brush.previousPositionsTexture)
+      .uniformTexture('u_previousPositionsTexture', 1, wgl.TEXTURE_2D, stationary ? brush.positionsTexture : brush.previousPositionsTexture)
       .uniform1f('u_verticesPerBristle', brush.verticesPerBristle)
       .uniform1f('u_zThreshold', zThreshold);
 
@@ -674,8 +675,9 @@ class Simulator {
       .uniform2f('u_paintingDimensions', brushRectangle.width, brushRectangle.height)
       .uniform2f('u_paintingPosition', brushRectangle.left, brushRectangle.bottom)
       .uniform1f('u_splatRadius', splatRadius)
+      .uniform3f('u_brushOffset', offset[0], offset[1], offset[2])
       .uniformTexture('u_positionsTexture', 0, wgl.TEXTURE_2D, brush.positionsTexture)
-      .uniformTexture('u_previousPositionsTexture', 1, wgl.TEXTURE_2D, brush.previousPositionsTexture)
+      .uniformTexture('u_previousPositionsTexture', 1, wgl.TEXTURE_2D, stationary ? brush.positionsTexture : brush.previousPositionsTexture)
       .uniformTexture('u_velocitiesTexture', 2, wgl.TEXTURE_2D, brush.velocitiesTexture)
       .uniformTexture('u_previousVelocitiesTexture', 3, wgl.TEXTURE_2D, brush.previousVelocitiesTexture)
       .uniform1f('u_verticesPerBristle', brush.verticesPerBristle)
