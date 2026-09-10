@@ -87,8 +87,8 @@ class StoryToolsUI {
     this._on('story-keep-partial', 'click', () => this.controller.keepResult());
     this._on('story-keep-result', 'click', () => this.controller.keepResult());
     this._on('story-paint-remaining', 'click', () => this._safe(() => this.controller.playEarliestRemaining()));
-    this._on('story-previous-group', 'click', () => this._safe(() => this.controller.previousUnpaintedGroup()));
-    this._on('story-next-group', 'click', () => this._safe(() => this.controller.nextGroup()));
+    this._on('story-previous-color', 'click', () => this._safe(() => this.controller.previousUnpaintedColor()));
+    this._on('story-next-color', 'click', () => this._safe(() => this.controller.nextColor()));
     this._on('story-previous-frame', 'click', () => this._safe(() => this.controller.previousUnpaintedFrame()));
     this._on('story-next-frame', 'click', () => this._safe(() => this.controller.nextFrame()));
   }
@@ -169,7 +169,7 @@ class StoryToolsUI {
       this.coverage.textContent = `${painted.toLocaleString()} / ${total.toLocaleString()} operations · ${percent}% painted`;
     }
     if (this.playhead) {
-      this.playhead.textContent = `${progress.frameId || 'Frame —'} · ${progress.groupId || 'Group —'}`;
+      this.playhead.textContent = `${progress.frameId || 'Frame —'} · ${progress.colorId || 'Color —'}`;
     }
     if (this.playerStatus) this.playerStatus.textContent = this._statusText(view);
 
@@ -185,14 +185,14 @@ class StoryToolsUI {
     const restart = document.getElementById('story-restart');
     if (restart) restart.disabled = !['playing', 'paused', 'completed', 'completed-with-gaps'].includes(view.state);
 
-    const previousGroup = document.getElementById('story-previous-group');
+    const previousColor = document.getElementById('story-previous-color');
     const previousFrame = document.getElementById('story-previous-frame');
-    const nextGroup = document.getElementById('story-next-group');
+    const nextColor = document.getElementById('story-next-color');
     const nextFrame = document.getElementById('story-next-frame');
     const navigable = ['playing', 'paused', 'completed-with-gaps'].includes(view.state);
-    if (previousGroup) previousGroup.disabled = !navigable || !view.canPreviousGroup;
+    if (previousColor) previousColor.disabled = !navigable || !view.canPreviousColor;
     if (previousFrame) previousFrame.disabled = !navigable || !view.canPreviousFrame;
-    if (nextGroup) nextGroup.disabled = !navigable || !view.canNextGroup;
+    if (nextColor) nextColor.disabled = !navigable || !view.canNextColor;
     if (nextFrame) nextFrame.disabled = !navigable || !view.canNextFrame;
 
     const speed = document.getElementById('story-speed');

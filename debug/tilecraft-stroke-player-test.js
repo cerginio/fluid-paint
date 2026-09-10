@@ -67,7 +67,86 @@ new TilecraftStrokePlayer({
 });
 assert.equal(scaledCalls[0].brushSize, 2.5,
   'width applies Tilecraft gd scale, 3000px canvas ratio, and map coordinate scale');
-console.log('tilecraft stroke player: PASS (polyline paths before polygon spots)');
+
+const framedStory = { layers: [
+  { visible: true, tileShape: 'polyline', tiles: [
+    { x: 20, y: 0, c: '#ff0000', g: 20, f: 2 },
+    { x: 21, y: 0, c: '#ff0000', g: 20, f: 2 },
+    { x: 10, y: 0, c: '#ff0000', g: 10, f: 1 },
+    { x: 11, y: 0, c: '#ff0000', g: 10, f: 1 },
+  ] },
+  { visible: true, tileShape: 'polyline', tiles: [
+    { x: 12, y: 0, c: '#00ff00', g: 11, f: 1 },
+    { x: 13, y: 0, c: '#00ff00', g: 11, f: 1 },
+    { x: 22, y: 0, c: '#00ff00', g: 21, f: 2 },
+    { x: 23, y: 0, c: '#00ff00', g: 21, f: 2 },
+  ] },
+  { visible: true, tileShape: 'polygon', tiles: [
+    { x: 14, y: 0, c: '#0000ff', f: 1 },
+    { x: 24, y: 0, c: '#0000ff', f: 2 },
+    { x: 99, y: 0, c: '#0000ff' },
+  ] },
+] };
+const framedCalls = [];
+const framedPlayer = new TilecraftStrokePlayer({
+  beginStroke(options) { framedCalls.push(options.x); },
+  strokeTo(options) { framedCalls.push(options.x); },
+  endStroke() {},
+});
+const framedOptions = { paintingRectangle: { left: 0, bottom: 0, width: 100, height: 100 } };
+framedPlayer.replay(framedStory, framedOptions);
+assert.deepEqual(framedCalls, [20, 21, 22, 23, 24, 10, 11, 12, 13, 14, 99],
+  'replay groups every layer by frame, keeps polyline before polygon, and puts unassigned last');
+const framedPlan = framedPlayer.compile(framedStory, framedOptions);
+assert.deepEqual(framedPlan.operations.map((operation) => operation.point.x), framedCalls,
+  'compiled playback uses the same frame-major order as replay');
+assert.deepEqual(framedPlan.frameRanges.map(({ key, start, end }) => [key, start, end]), [
+  ['frame:2', 0, 5], ['frame:1', 5, 10], ['frame:unassigned', 10, 11],
+], 'each frame has one contiguous navigation range');
+
+const colorStory = { layers: [
+  { visible: true, tileShape: 'polyline', tiles: [
+    { x: 0, y: 0, c: '#ff0000', g: 1, f: 1 },
+    { x: 1, y: 0, c: '#00ff00', g: 1, f: 1 },
+    { x: 4, y: 0, c: '#0000ff', g: 2, f: 1 },
+    { x: 5, y: 0, c: '#0000ff', g: 2, f: 1 },
+  ] },
+  { visible: true, tileShape: 'polyline', tiles: [
+    { x: 2, y: 0, c: '#ff0000', g: 3, f: 1 },
+    { x: 3, y: 0, c: '#ff0000', g: 3, f: 1 },
+  ] },
+  { visible: true, tileShape: 'polygon', tiles: [
+    { x: 6, y: 0, c: '#0000ff', f: 1 },
+  ] },
+] };
+const colorCalls = [];
+const colorPlayer = new TilecraftStrokePlayer({
+  beginStroke(options) { colorCalls.push(['begin', options.x, options.color.channels]); },
+  strokeTo(options) { colorCalls.push(['to', options.x]); },
+  endStroke() {},
+});
+colorPlayer.replay(colorStory, framedOptions);
+assert.deepEqual(colorCalls.map((call) => call[1]), [0, 1, 2, 3, 4, 5, 6],
+  'groups with the same canonical colour are adjacent within their frame');
+assert.deepEqual(colorCalls.slice(0, 2).map((call) => call[0]), ['begin', 'to'],
+  'a colour change inside one group does not split its stroke');
+assert.deepEqual(colorCalls[0][2], [1, 0, 0],
+  'the first tile colour is used for the whole multi-colour group');
+const colorPlan = colorPlayer.compile(colorStory, framedOptions);
+assert.deepEqual(colorPlan.operations.map((operation) => operation.point.x), [0, 1, 2, 3, 4, 5, 6],
+  'compiled playback uses the same colour-grouped order');
+assert.ok(colorPlan.operations.slice(0, 4).every((operation) => operation.colorKey === '#ff0000'));
+assert.ok(colorPlan.operations.slice(4).every((operation) => operation.colorKey === '#0000ff'));
+assert.deepEqual(colorPlan.colorRanges.map(({ start, end, label }) => [start, end, label]), [
+  [0, 4, 'Color #ff0000'], [4, 7, 'Color #0000ff'],
+], 'compiled color buckets become stable navigation ranges');
+const colorRegistry = new UnpaintedRangeRegistry(colorPlan.operations.length);
+assert.equal(colorRegistry.nextColorBoundary(0, colorPlan), 4);
+colorRegistry.markPainted(0, 4);
+colorRegistry.markJump(4, 7, 'color-jump');
+assert.equal(colorRegistry.previousPendingColor(7, colorPlan).start, 4,
+  'backward color navigation selects an earlier unpainted color range');
+console.log('tilecraft stroke player: PASS (frame and canonical-colour grouped playback)');
 
 (async () => {
   const liveCalls = [];
@@ -98,6 +177,18 @@ console.log('tilecraft stroke player: PASS (polyline paths before polygon spots)
   assert.equal(frames, 6, 'each point target and spot waits the requested number of frames');
   assert.deepEqual(liveStats, { layers: 2, strokes: 2, spots: 1, points: 3, skipped: 0 });
   console.log('tilecraft live player: PASS (RAF-fed polyline then spots)');
+
+  const framedLiveCalls = [];
+  await new TilecraftStrokePlayer({
+    beginStroke(options) { framedLiveCalls.push(options.x); },
+    strokeTo(options) { framedLiveCalls.push(options.x); },
+    endStroke() {},
+  }).play(framedStory, {
+    ...framedOptions,
+    waitFrame: async () => {},
+  });
+  assert.deepEqual(framedLiveCalls, framedCalls,
+    'live playback uses the same frame-major order as replay and compile');
 
   const fastCalls = [];
   let fastFrames = 0, fastTicks = 0, clockResets = 0;
@@ -139,6 +230,7 @@ console.log('tilecraft stroke player: PASS (polyline paths before polygon spots)
   });
   assert.equal(plan.operations.length, 4);
   assert.deepEqual(plan.groupRanges.map(({ start, end }) => [start, end]), [[0, 2], [2, 4]]);
+  assert.deepEqual(plan.colorRanges.map(({ start, end }) => [start, end]), [[0, 2], [2, 4]]);
   assert.deepEqual(plan.frameRanges.map(({ start, end }) => [start, end]), [[0, 2], [2, 4]]);
 
   const registry = new UnpaintedRangeRegistry(plan.operations.length);
@@ -162,7 +254,7 @@ console.log('tilecraft stroke player: PASS (polyline paths before polygon spots)
   assert.equal(TilecraftStrokePlayer.brushSizeCorrectionRate, 0.5,
     'story playback exposes its fixed brush-size correction rate');
   assert.equal(registry.pendingCount, 0);
-  console.log('tilecraft plan navigation: PASS (group/frame ranges and no double paint)');
+  console.log('tilecraft plan navigation: PASS (color/frame ranges and no double paint)');
 
   const abortCalls = [];
   const abortController = new AbortController();

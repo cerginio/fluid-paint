@@ -16,9 +16,9 @@ class TilecraftStrokePlayer {
   }
 
   /**
-   * Replay a Tilecraft render model. Polyline layers are intentionally first,
-   * then polygon layers as independent paint spots, as required by the player
-   * pipeline. Other Tilecraft primitive families are ignored.
+   * Replay a Tilecraft render model frame by frame and canonical colour by
+   * colour. A polyline group's first tile defines its colour; polygon tiles
+   * are independent paint spots. Other primitive families are ignored.
    *
    * `mapPoint(tile, layer)` is the coordinate-boundary hook. It must return
    * finite bottom-left-origin engine coordinates; the model itself stays in its
@@ -29,14 +29,12 @@ class TilecraftStrokePlayer {
     const context = this._context(model, options);
     const { stats } = context;
 
-    const visible = model.layers.filter((layer) => layer && layer.visible);
-    for (const layer of visible.filter((layer) => layer.tileShape === 'polyline')) {
-      stats.layers++;
-      this._replayPolylineLayer(layer, context);
-    }
-    for (const layer of visible.filter((layer) => layer.tileShape === 'polygon')) {
-      stats.layers++;
-      this._replayPolygonLayer(layer, context);
+    for (const unit of this._playbackUnits(model, context)) {
+      if (unit.kind === 'polyline') {
+        this._replayPolylineSegment(unit.segment, unit.layer, context);
+      } else {
+        this._replayPolygonTile(unit.tile, unit.layer, context);
+      }
     }
     return stats;
   }
@@ -91,29 +89,25 @@ class TilecraftStrokePlayer {
     };
     const onPaint = options.onPaint || (() => {});
     const { stats } = context;
-    const visible = model.layers.filter((layer) => layer && layer.visible);
 
     try {
-      for (const layer of visible.filter((candidate) => candidate.tileShape === 'polyline')) {
-        stats.layers++;
-        for (const segment of this._polylineSegments(layer, stats, context)) {
-          await this._playPolylineSegment(segment, layer, context, waitStep, onPaint, fastTick);
+      for (const unit of this._playbackUnits(model, context)) {
+        if (unit.kind === 'polyline') {
+          await this._playPolylineSegment(
+            unit.segment, unit.layer, context, waitStep, onPaint, fastTick
+          );
+          continue;
         }
-      }
-      for (const layer of visible.filter((candidate) => candidate.tileShape === 'polygon')) {
-        stats.layers++;
-        for (const tile of layer.tiles || []) {
-          if (!this._isDrawableTile(tile)) { stats.skipped++; continue; }
-          const point = this._map(tile, layer, context);
-          if (!point) { stats.skipped++; continue; }
-          if (!fastTick) await waitStep();
-          this._begin(point, tile, this._tileSize(tile, layer, context), layer, context,
-            tile.s === undefined ? 1 : tile.s, 'live');
-          this.engine.endStroke();
-          stats.spots++;
-          onPaint();
-          if (fastTick) await fastTick();
-        }
+        const { tile, layer } = unit;
+        const point = this._map(tile, layer, context);
+        if (!point) { stats.skipped++; continue; }
+        if (!fastTick) await waitStep();
+        this._begin(point, tile, this._tileSize(tile, layer, context), layer, context,
+          tile.s === undefined ? 1 : tile.s, 'live');
+        this.engine.endStroke();
+        stats.spots++;
+        onPaint();
+        if (fastTick) await fastTick();
       }
     } finally {
       finishFastTicks();
@@ -123,7 +117,7 @@ class TilecraftStrokePlayer {
 
   /**
    * Compile Tilecraft input into one immutable execution order. The UI uses
-   * this plan for group/frame navigation; replay() and play() remain compatible
+   * this plan for color/frame navigation; replay() and play() remain compatible
    * with older sequential callers.
    */
   compile(model, options) {
@@ -155,7 +149,7 @@ class TilecraftStrokePlayer {
         });
         if (!mapped.length) { segmentOrdinal++; continue; }
 
-        const color = this._color(firstTile.c, layer, context);
+        const color = this._color(segment.groupColor, layer, context);
         mapped.forEach((entry, pointIndex) => {
           operations.push({
             kind: 'polyline-point',
@@ -163,6 +157,9 @@ class TilecraftStrokePlayer {
             layerTag: layer.tag,
             frameKey,
             frameLabel: this._frameLabel(firstTile.f),
+            colorKey: this._colorKey(segment.groupColor),
+            colorLabel: this._colorLabel(segment.groupColor),
+            frameColorKey: `${frameKey}:${this._colorKey(segment.groupColor)}`,
             groupKey: segmentKey,
             groupLabel: firstTile.g === undefined ? `Group ${segmentOrdinal + 1}` : `Group ${firstTile.g}`,
             segmentKey,
@@ -206,6 +203,9 @@ class TilecraftStrokePlayer {
           layerTag: layer.tag,
           frameKey,
           frameLabel: this._frameLabel(tile.f),
+          colorKey: this._colorKey(tile.c),
+          colorLabel: this._colorLabel(tile.c),
+          frameColorKey: `${frameKey}:${this._colorKey(tile.c)}`,
           groupKey,
           groupLabel: `Spot ${sourceTileIndex + 1}`,
           point,
@@ -219,11 +219,20 @@ class TilecraftStrokePlayer {
       }
     }
 
-    operations.forEach((operation, index) => { operation.index = index; Object.freeze(operation); });
+    const frameOrderedOperations = this._groupByFrame(
+      operations,
+      (operation) => operation.frameKey,
+      (operation) => operation.colorKey
+    );
+    frameOrderedOperations.forEach((operation, index) => {
+      operation.index = index;
+      Object.freeze(operation);
+    });
     const plan = {
-      operations: Object.freeze(operations),
-      groupRanges: Object.freeze(this._boundaryRanges(operations, 'groupKey', 'groupLabel')),
-      frameRanges: Object.freeze(this._boundaryRanges(operations, 'frameKey', 'frameLabel')),
+      operations: Object.freeze(frameOrderedOperations),
+      groupRanges: Object.freeze(this._boundaryRanges(frameOrderedOperations, 'groupKey', 'groupLabel')),
+      colorRanges: Object.freeze(this._boundaryRanges(frameOrderedOperations, 'frameColorKey', 'colorLabel')),
+      frameRanges: Object.freeze(this._boundaryRanges(frameOrderedOperations, 'frameKey', 'frameLabel')),
       skipped: context.stats.skipped,
       layers: context.stats.layers,
     };
@@ -233,7 +242,7 @@ class TilecraftStrokePlayer {
   /**
    * Play an immutable plan from one operation index. Painted indices reported
    * by a registry are skipped, which is the no-double-deposit guarantee used
-   * by backward group/frame navigation.
+   * by backward color/frame navigation.
    */
   async playPlan(plan, options = {}) {
     if (!plan || !Array.isArray(plan.operations)) {
@@ -464,6 +473,7 @@ class TilecraftStrokePlayer {
       layerIndex: operation.layerIndex,
       layerTag: operation.layerTag,
       frameId: operation.frameLabel,
+      colorId: operation.colorLabel,
       groupId: operation.groupLabel,
       modelTicks: stats.points,
       playheadIndex,
@@ -508,10 +518,83 @@ class TilecraftStrokePlayer {
     };
   }
 
-  _replayPolylineLayer(layer, context) {
-    for (const segment of this._polylineSegments(layer, context.stats, context)) {
-      this._replayPolylineSegment(segment, layer, context);
+  /**
+   * Build render units in the legacy layer/primitive order, then make frame
+   * identity the outer ordering boundary, followed by the group's canonical
+   * colour. This keeps source order stable inside each colour bucket and
+   * guarantees one contiguous range per frame.
+   */
+  _playbackUnits(model, context) {
+    const units = [];
+    const visible = model.layers.filter((layer) => layer && layer.visible);
+
+    for (const layer of visible.filter((candidate) => candidate.tileShape === 'polyline')) {
+      context.stats.layers++;
+      for (const segment of this._polylineSegments(layer, context.stats, context)) {
+        units.push({
+          kind: 'polyline',
+          layer,
+          segment,
+          frameKey: this._frameKey(segment.tiles[0] && segment.tiles[0].f),
+          colorKey: this._colorKey(segment.groupColor),
+        });
+      }
     }
+    for (const layer of visible.filter((candidate) => candidate.tileShape === 'polygon')) {
+      context.stats.layers++;
+      for (const tile of layer.tiles || []) {
+        if (!this._isDrawableTile(tile)) { context.stats.skipped++; continue; }
+        units.push({
+          kind: 'polygon',
+          layer,
+          tile,
+          frameKey: this._frameKey(tile.f),
+          colorKey: this._colorKey(tile.c),
+        });
+      }
+    }
+
+    return this._groupByFrame(
+      units,
+      (unit) => unit.frameKey,
+      (unit) => unit.colorKey
+    );
+  }
+
+  _groupByFrame(items, keyFor, colorFor) {
+    const buckets = new Map();
+    const unassigned = [];
+    for (const item of items) {
+      const key = keyFor(item);
+      if (key === 'frame:unassigned') {
+        unassigned.push(item);
+      } else {
+        if (!buckets.has(key)) buckets.set(key, []);
+        buckets.get(key).push(item);
+      }
+    }
+    const frames = [...buckets.values()];
+    if (unassigned.length) frames.push(unassigned);
+    return frames.flatMap((frameItems) => this._groupByValue(frameItems, colorFor));
+  }
+
+  _groupByValue(items, keyFor) {
+    if (typeof keyFor !== 'function') return items;
+    const buckets = new Map();
+    for (const item of items) {
+      const key = keyFor(item);
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push(item);
+    }
+    return [...buckets.values()].flat();
+  }
+
+  _colorKey(value) {
+    return String(value).toLowerCase();
+  }
+
+  _colorLabel(value) {
+    return `Color ${this._colorKey(value)}`;
   }
 
   *_polylineSegments(layer, stats, context) {
@@ -526,6 +609,10 @@ class TilecraftStrokePlayer {
     }
 
     for (const tiles of groups.values()) {
+      // Tilecraft groups can contain tiles with different colours. FluidEngine
+      // strokes have one immutable colour, so the first tile defines both the
+      // whole group's rendered colour and its colour-order bucket.
+      const groupColor = tiles[0].c;
       // `gd` describes the whole Tilecraft group, even when it contains
       // several `b`-separated runs.  Calculate it before splitting so every
       // run gets the renderer's same group scale.
@@ -534,33 +621,35 @@ class TilecraftStrokePlayer {
       for (const tile of tiles) {
         const previous = segment[segment.length - 1];
         // `b` starts a new Tilecraft polyline segment. A frame switch and a
-        // colour switch also cannot be represented by one immutable Stroke API
-        // stroke, so they are explicit lifts rather than accidental bridges.
+        // frame switch cannot be represented by one immutable Stroke API
+        // stroke, so it is an explicit lift rather than an accidental bridge.
         const breaks = previous && (
-          tile.b > 0 || tile.f !== previous.f || tile.c !== previous.c
+          tile.b > 0 || tile.f !== previous.f
         );
         if (breaks) {
-          yield { tiles: segment, closes: false, groupScale };
+          yield { tiles: segment, closes: false, groupScale, groupColor };
           segment = [];
         }
         segment.push(tile);
       }
       if (segment.length) {
         const closes = tiles.length > 2 && tiles.some((tile) => tile.gz === 1);
-        yield { tiles: segment, closes, groupScale };
+        yield { tiles: segment, closes, groupScale, groupColor };
       }
     }
   }
 
   _replayPolylineSegment(segment, layer, context) {
-    const { tiles, closes, groupScale } = segment;
+    const { tiles, closes, groupScale, groupColor } = segment;
     const sizes = tiles.map((tile) => this._tileSize(tile, layer, context, groupScale));
     const maximumSize = Math.max(...sizes);
     const maximumRelativeSize = Math.max(...tiles.map((tile) => tile.s === undefined ? 1 : tile.s));
     const first = this._map(tiles[0], layer, context);
     if (!first) { context.stats.skipped += tiles.length; return; }
 
-    this._begin(first, tiles[0], maximumSize, layer, context, maximumRelativeSize, 'replay');
+    this._begin(
+      first, tiles[0], maximumSize, layer, context, maximumRelativeSize, 'replay', groupColor
+    );
     try {
       for (let i = 1; i < tiles.length; i++) {
         const point = this._map(tiles[i], layer, context);
@@ -581,30 +670,29 @@ class TilecraftStrokePlayer {
     }
   }
 
-  _replayPolygonLayer(layer, context) {
-    for (const tile of layer.tiles || []) {
-      if (!this._isDrawableTile(tile)) { context.stats.skipped++; continue; }
-      const point = this._map(tile, layer, context);
-      if (!point) { context.stats.skipped++; continue; }
-      // A polygon tile is a spot: its per-tile `s` maps directly to brushSize.
-      // A live sub-tick tap deposits immediately, avoiding ten replay settle
-      // frames for every spot in a large Tilecraft layer.
-      this._begin(point, tile, this._tileSize(tile, layer, context), layer, context,
-        tile.s === undefined ? 1 : tile.s, 'live');
-      this.engine.endStroke();
-      context.stats.spots++;
-    }
+  _replayPolygonTile(tile, layer, context) {
+    const point = this._map(tile, layer, context);
+    if (!point) { context.stats.skipped++; return; }
+    // A polygon tile is a spot: its per-tile `s` maps directly to brushSize.
+    // A live sub-tick tap deposits immediately, avoiding ten replay settle
+    // frames for every spot in a large Tilecraft layer.
+    this._begin(point, tile, this._tileSize(tile, layer, context), layer, context,
+      tile.s === undefined ? 1 : tile.s, 'live');
+    this.engine.endStroke();
+    context.stats.spots++;
   }
 
   async _playPolylineSegment(segment, layer, context, waitFrame, onPaint, fastTick) {
-    const { tiles, closes, groupScale } = segment;
+    const { tiles, closes, groupScale, groupColor } = segment;
     const sizes = tiles.map((tile) => this._tileSize(tile, layer, context, groupScale));
     const maximumSize = Math.max(...sizes);
     const maximumRelativeSize = Math.max(...tiles.map((tile) => tile.s === undefined ? 1 : tile.s));
     const first = this._map(tiles[0], layer, context);
     if (!first) { context.stats.skipped += tiles.length; return; }
 
-    this._begin(first, tiles[0], maximumSize, layer, context, maximumRelativeSize, 'live');
+    this._begin(
+      first, tiles[0], maximumSize, layer, context, maximumRelativeSize, 'live', groupColor
+    );
     onPaint();
     try {
       for (let i = 1; i < tiles.length; i++) {
@@ -634,14 +722,14 @@ class TilecraftStrokePlayer {
     }
   }
 
-  _begin(point, tile, brushSize, layer, context, maximumRelativeSize, timing) {
+  _begin(point, tile, brushSize, layer, context, maximumRelativeSize, timing, color = tile.c) {
     this.engine.beginStroke({
       timing,
       x: point.x, y: point.y,
       pressure: this._pressure(tile, maximumRelativeSize, context),
       brushSize,
       paintingRectangle: context.paintingRectangle,
-      color: this._color(tile.c, layer, context),
+      color: this._color(color, layer, context),
       resolutionScale: context.resolutionScale,
     });
     context.stats.strokes++;

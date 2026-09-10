@@ -46,7 +46,7 @@ class UnpaintedRangeRegistry {
 
   markJump(start, end, reason) {
     this._validateRange(start, end);
-    if (!['group-jump', 'frame-jump', 'interrupted', 'future'].includes(reason)) {
+    if (!['color-jump', 'frame-jump', 'interrupted', 'future'].includes(reason)) {
       throw new TypeError(`Unknown pending range reason: ${reason}.`);
     }
     const next = [];
@@ -72,16 +72,16 @@ class UnpaintedRangeRegistry {
     return this.ranges.length ? { ...this.ranges[0] } : null;
   }
 
-  nextGroupBoundary(afterIndex, plan) {
-    return this._nextBoundary(afterIndex, plan && plan.groupRanges);
+  nextColorBoundary(afterIndex, plan) {
+    return this._nextBoundary(afterIndex, plan && plan.colorRanges);
   }
 
   nextFrameBoundary(afterIndex, plan) {
     return this._nextBoundary(afterIndex, plan && plan.frameRanges);
   }
 
-  previousPendingGroup(beforeIndex, plan) {
-    return this._previousPendingBoundary(beforeIndex, plan && plan.groupRanges);
+  previousPendingColor(beforeIndex, plan) {
+    return this._previousPendingBoundary(beforeIndex, plan && plan.colorRanges);
   }
 
   previousPendingFrame(beforeIndex, plan) {
@@ -141,4 +141,3 @@ class UnpaintedRangeRegistry {
 
 if (typeof module !== 'undefined' && module.exports) module.exports = UnpaintedRangeRegistry;
 if (typeof globalThis !== 'undefined') globalThis.UnpaintedRangeRegistry = UnpaintedRangeRegistry;
-

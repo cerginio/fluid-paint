@@ -114,6 +114,13 @@ const server = http.createServer((request, response) => {
     await page.waitForFunction(() => window.__painter.storyPlaybackController.state === 'ready');
     assert.equal(await page.locator('#story-player-page').isVisible(), true, 'valid file opens Player tab');
     assert.match(await page.locator('#story-player-file-name').textContent(), /story-2026/);
+    assert.deepEqual(await page.locator('.story-boundary-navigation button').evaluateAll(
+      (buttons) => buttons.map((button) => button.id)
+    ), [
+      'story-previous-frame', 'story-next-frame',
+      'story-previous-color', 'story-next-color',
+    ], 'navigation buttons are ordered by frame row, then color row');
+    assert.equal(await page.locator('#story-playhead-label').textContent(), 'Frame — · Color —');
     assert.equal(await page.locator('#story-thickness').getAttribute('min'), '0.1',
       'thickness range starts at 0.1');
     assert.equal(await page.locator('#story-thickness').inputValue(), '1',
@@ -229,6 +236,21 @@ const server = http.createServer((request, response) => {
     assert.deepEqual(manualTakeover, {
       state: 'paused', storyStrokeClosed: true, manualStrokeStarted: true,
     }, 'manual input pauses story and starts without competing strokes');
+
+    const beforeColorJump = await page.evaluate(() => window.__painter.storyPlaybackController.playheadIndex);
+    await page.click('#story-next-color');
+    await page.waitForFunction((before) => {
+      const controller = window.__painter.storyPlaybackController;
+      return controller.state === 'paused' && controller.playheadIndex > before;
+    }, beforeColorJump);
+    assert.match(await page.locator('#story-playhead-label').textContent(), /Color #[0-9a-f]{6,8}/i,
+      'color jump updates the visible playhead color');
+    const afterColorJump = await page.evaluate(() => window.__painter.storyPlaybackController.playheadIndex);
+    await page.click('#story-previous-color');
+    await page.waitForFunction(
+      (before) => window.__painter.storyPlaybackController.playheadIndex < before,
+      afterColorJump
+    );
 
     const beforeJump = await page.evaluate(() => window.__painter.storyPlaybackController.playheadIndex);
     await page.click('#story-next-frame');

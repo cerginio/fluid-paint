@@ -45,15 +45,18 @@ playback.
 
 ## Що саме відтворюється
 
-1. Видимі `polyline` layers ідуть першими; `g` є логічним шляхом, `b` робить
-   підняття пензля, а `gz` замикає шлях.
-2. Видимі `polygon` layers ідуть після polyline як незалежні точки-мазки.
-3. `s` керує нормалізованим pressure, а `gridSize * layer.scale` — базовою
+1. Tiles групуються за `f`, і кожен кадр малюється повністю перед переходом до
+   наступного; порядок кадрів відповідає першій появі у render order.
+2. Усередині кадру групи збираються за кольором першого tile; якщо `g` містить
+   різні кольори, увесь group малюється кольором його першого tile.
+3. `g` є логічним шляхом, `b` робить підняття пензля, а `gz` замикає шлях;
+   `polygon` tiles лишаються незалежними точками-мазками.
+4. `s` керує нормалізованим pressure, а `gridSize * layer.scale` — базовою
    товщиною.
-4. Для polyline товщина також враховує Tilecraft-корекцію `distance / gd`,
+5. Для polyline товщина також враховує Tilecraft-корекцію `distance / gd`,
    responsive коефіцієнт canvas `min(1, max(width, height) / 3000)` та
    coordinate scale, використаний для перенесення XY у Fluid Paint.
-5. `#RRGGBB[A]` — це display RGB. Адаптер знаходить найближче RYB-навантаження
+6. `#RRGGBB[A]` — це display RGB. Адаптер знаходить найближче RYB-навантаження
    того ж pigment cube, що рендерить Fluid Paint; RGB не передається напряму як
    RYB. Наднасичені RGB-кольори, яких subtractive cube не має, апроксимуються
    найближчим досяжним кольором.
@@ -110,7 +113,7 @@ URL більше не є основним інтерфейсом. Кнопка `
 - На старті controller зберігає baseline. Після `Stop` користувач явно обирає
   `Restore canvas` або `Keep partial`; `Restart` відновлює baseline і не
   накопичує попередній прогін.
-- `Previous/Next Group` і `Previous/Next Frame` працюють по межах immutable
+- `Previous/Next Color` і `Previous/Next Frame` працюють по межах immutable
   compiled plan. Стрибок уперед лише змінює playhead і позначає пропущену
   частину; назад доступні виключно pending-діапазони.
 - `UnpaintedRangeRegistry` зберігає нормалізовані half-open діапазони окремо
@@ -181,7 +184,7 @@ DevTools, а пряме посилання відтворює той самий 
   `group`/`frame`. Registry оперує half-open діапазонами індексів цього plan,
   а не сирими індексами `tiles`, які не враховують layer order і `b`-розриви.
 - Back-навігація не є rewind полотна: вона знаходить попередній перетин
-  group/frame з pending registry і малює тільки непромальований піддіапазон.
+  color/frame з pending registry і малює тільки непромальований піддіапазон.
 - UI-параметри мають бути валідовані (`N` — скінченне додатне ціле), мати
   доступні labels/keyboard control та не закривати картину на narrow viewport.
 

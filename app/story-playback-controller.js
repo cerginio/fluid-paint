@@ -236,8 +236,8 @@ class StoryPlaybackController {
     return true;
   }
 
-  previousUnpaintedGroup() { return this._navigate('previous-group'); }
-  nextGroup() { return this._navigate('next-group'); }
+  previousUnpaintedColor() { return this._navigate('previous-color'); }
+  nextColor() { return this._navigate('next-color'); }
   previousUnpaintedFrame() { return this._navigate('previous-frame'); }
   nextFrame() { return this._navigate('next-frame'); }
 
@@ -259,14 +259,14 @@ class StoryPlaybackController {
     const shouldResume = this.state === 'playing';
     await this._cancelRun();
     let destination = null;
-    if (kind === 'next-group') {
-      destination = this.registry.nextGroupBoundary(this.playheadIndex, this.plan);
-      if (destination !== null) this.registry.markJump(this.playheadIndex, destination, 'group-jump');
+    if (kind === 'next-color') {
+      destination = this.registry.nextColorBoundary(this.playheadIndex, this.plan);
+      if (destination !== null) this.registry.markJump(this.playheadIndex, destination, 'color-jump');
     } else if (kind === 'next-frame') {
       destination = this.registry.nextFrameBoundary(this.playheadIndex, this.plan);
       if (destination !== null) this.registry.markJump(this.playheadIndex, destination, 'frame-jump');
-    } else if (kind === 'previous-group') {
-      const range = this.registry.previousPendingGroup(this.playheadIndex, this.plan);
+    } else if (kind === 'previous-color') {
+      const range = this.registry.previousPendingColor(this.playheadIndex, this.plan);
       destination = range && range.start;
     } else if (kind === 'previous-frame') {
       const range = this.registry.previousPendingFrame(this.playheadIndex, this.plan);
@@ -461,10 +461,16 @@ class StoryPlaybackController {
 
   _syncProgressPosition() {
     const total = this.plan ? this.plan.operations.length : 0;
+    const operation = this.plan && this.plan.operations[
+      Math.min(this.playheadIndex, Math.max(0, total - 1))
+    ];
     this.progress = {
       ...this.progress,
       totalItems: total,
       playheadIndex: this.playheadIndex,
+      frameId: operation && operation.frameLabel,
+      colorId: operation && operation.colorLabel,
+      groupId: operation && operation.groupLabel,
       paintedOperations: total - this.registry.pendingCount,
       pendingOperations: this.registry.pendingCount,
       pendingRanges: this.registry.ranges.length,
@@ -503,9 +509,9 @@ class StoryPlaybackController {
       error: this.error,
       pendingRanges: this.registry.snapshot(),
       canPaintManually: this.canPaintManually,
-      canPreviousGroup: canNavigate && !!this.registry.previousPendingGroup(this.playheadIndex, this.plan),
+      canPreviousColor: canNavigate && !!this.registry.previousPendingColor(this.playheadIndex, this.plan),
       canPreviousFrame: canNavigate && !!this.registry.previousPendingFrame(this.playheadIndex, this.plan),
-      canNextGroup: canNavigate && this.registry.nextGroupBoundary(this.playheadIndex, this.plan) !== null,
+      canNextColor: canNavigate && this.registry.nextColorBoundary(this.playheadIndex, this.plan) !== null,
       canNextFrame: canNavigate && this.registry.nextFrameBoundary(this.playheadIndex, this.plan) !== null,
     };
   }
