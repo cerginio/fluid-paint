@@ -3,6 +3,8 @@ precision highp float;
 varying vec2 v_coordinates;
 
 uniform sampler2D u_paintTexture;
+uniform sampler2D u_backgroundTexture;
+uniform float u_hasBackground;
 
 uniform vec2 u_paintingSize; //painting size in pixels
 uniform vec2 u_paintingPosition; //bottom left position in pixels
@@ -197,6 +199,14 @@ void main () {
     vec3 color = rybToRgb(value.rgb);
 
     vec3 surfaceColor = color * diffuse + specular * u_specularScale;
+
+    // A PNG background is a separate dry layer. Existing rendering stays
+    // byte-for-byte on the no-background branch; with a background, paint
+    // height controls how strongly the wet material covers the source image.
+    if (u_hasBackground > 0.5) {
+        vec3 backgroundColor = texture2D(u_backgroundTexture, coordinates).rgb;
+        surfaceColor = mix(backgroundColor, surfaceColor, saturate(value.a));
+    }
     
     gl_FragColor = vec4(surfaceColor, 1.0);
 }

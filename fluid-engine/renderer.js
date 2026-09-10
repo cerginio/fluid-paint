@@ -141,6 +141,63 @@ class PaintingRenderer {
       new Float32Array([-1.0, -1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 1.0]),
       wgl.STATIC_DRAW
     );
+
+    // A white fallback keeps one shader contract with or without a PNG.
+    // Replacements reuse this texture instead of allocating per upload.
+    this.backgroundTexture = wgl.buildTexture(
+      wgl.RGBA,
+      wgl.UNSIGNED_BYTE,
+      1,
+      1,
+      new Uint8Array([255, 255, 255, 255]),
+      wgl.CLAMP_TO_EDGE,
+      wgl.CLAMP_TO_EDGE,
+      wgl.LINEAR,
+      wgl.LINEAR
+    );
+    this.hasBackground = false;
+  }
+
+  setBackgroundImage(source) {
+    if (!source) throw new TypeError('Painting background requires an image source.');
+    const wgl = this.wgl;
+    wgl.pixelStorei(wgl.TEXTURE_2D, this.backgroundTexture, wgl.UNPACK_FLIP_Y_WEBGL, true);
+    wgl.texImage2D(
+      wgl.TEXTURE_2D,
+      this.backgroundTexture,
+      0,
+      wgl.RGBA,
+      wgl.RGBA,
+      wgl.UNSIGNED_BYTE,
+      source
+    );
+    wgl.pixelStorei(wgl.TEXTURE_2D, this.backgroundTexture, wgl.UNPACK_FLIP_Y_WEBGL, false);
+    wgl.setTextureFiltering(
+      wgl.TEXTURE_2D,
+      this.backgroundTexture,
+      wgl.CLAMP_TO_EDGE,
+      wgl.CLAMP_TO_EDGE,
+      wgl.LINEAR,
+      wgl.LINEAR
+    );
+    this.hasBackground = true;
+  }
+
+  clearBackgroundImage() {
+    const wgl = this.wgl;
+    wgl.rebuildTexture(
+      this.backgroundTexture,
+      wgl.RGBA,
+      wgl.UNSIGNED_BYTE,
+      1,
+      1,
+      new Uint8Array([255, 255, 255, 255]),
+      wgl.CLAMP_TO_EDGE,
+      wgl.CLAMP_TO_EDGE,
+      wgl.LINEAR,
+      wgl.LINEAR
+    );
+    this.hasBackground = false;
   }
 
   // Pick the screen program for a colour model and whether a resize preview is
@@ -242,6 +299,8 @@ class PaintingRenderer {
       .uniform2f('u_paintingSize', paintingRectangle.width, paintingRectangle.height)
       .uniform2f('u_screenResolution', targetWidth, targetHeight)
       .uniformTexture('u_paintTexture', 0, wgl.TEXTURE_2D, simulator.paintTexture)
+      .uniformTexture('u_backgroundTexture', 1, wgl.TEXTURE_2D, this.backgroundTexture)
+      .uniform1f('u_hasBackground', this.hasBackground ? 1 : 0)
       .viewport(
         clippedRectangle.left,
         clippedRectangle.bottom,
@@ -333,7 +392,9 @@ class PaintingRenderer {
       .uniform2f('u_paintingResolution', simulator.resolutionWidth, simulator.resolutionHeight)
       .uniform2f('u_screenResolution', width, height)
       .uniform2f('u_paintingPosition', 0, 0)
-      .uniformTexture('u_paintTexture', 0, wgl.TEXTURE_2D, simulator.paintTexture);
+      .uniformTexture('u_paintTexture', 0, wgl.TEXTURE_2D, simulator.paintTexture)
+      .uniformTexture('u_backgroundTexture', 1, wgl.TEXTURE_2D, this.backgroundTexture)
+      .uniform1f('u_hasBackground', this.hasBackground ? 1 : 0);
 
     wgl.drawArrays(saveDrawState, wgl.TRIANGLE_STRIP, 0, 4);
 

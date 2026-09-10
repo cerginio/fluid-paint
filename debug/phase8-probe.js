@@ -375,6 +375,7 @@ const setViaWidget = (page, h, s, v, a) => page.evaluate(([h, s, v, a]) => {
 
     const wheelPoint = await page.evaluate(() => {
       const w = document.querySelector('#color-picker-slot .IroWheel');
+      w.scrollIntoView({ block: 'center', inline: 'nearest' });
       const r = w.getBoundingClientRect();
       return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
     });

@@ -77,16 +77,32 @@
                 <div id="color-picker-slot">
                     <div id="color-picker-widget"></div>
                     <div class="color-readout" aria-live="polite">
-                        <output id="paint-color-hex" role="button" tabindex="0"
-                                aria-label="Copy paint color" title="Copy paint color">#000000</output>
+                        <button id="paint-color-white" class="adhoc-color" type="button"
+                                aria-label="Use white" aria-pressed="false">#fff</button>
+                        <button id="paint-color-black" class="adhoc-color" type="button"
+                                aria-label="Use black" aria-pressed="false">#000</button>
+                        <span class="color-code-readout">
+                        <div class="color-code-readout">
+                            <output id="paint-color-hex" role="button" tabindex="0"
+                                    aria-label="Copy paint color" title="Copy paint color">#000000</output>
+                            <output id="paint-color-alpha" title="Alpha channel">CC</output>
+                        </div>
+                        </span>
                         <span id="paint-color-model">RYB</span>
                     </div>
                 </div>
             </div>
         </div>
 
-        <section id="panel-extension" hidden aria-label="Story tools">
+        <section id="panel-extension" hidden data-collapsed="false" data-has-story="false"
+                 aria-label="Story tools">
             <header class="panel-extension-header">
+                <div id="panel-extension-grip" role="button" tabindex="0"
+                     aria-expanded="true" aria-controls="story-file-page story-player-page"
+                     aria-label="Drag Story tools or tap to collapse"
+                     title="Drag to move, tap to collapse">
+                    <span></span><span></span><span></span>
+                </div>
                 <div class="panel-extension-tabs" role="tablist" aria-label="Story tools">
                     <button id="story-file-tab" type="button" role="tab"
                             data-extension-tab="file" aria-selected="true"
@@ -95,6 +111,7 @@
                             data-extension-tab="player" aria-selected="false" tabindex="-1"
                             aria-controls="story-player-page">Player</button>
                 </div>
+                <button id="story-header-play-pause" class="story-primary" type="button">Play</button>
                 <button id="panel-extension-close" type="button"
                         aria-label="Hide story tools">×</button>
             </header>
@@ -103,14 +120,22 @@
                  role="tabpanel" tabindex="0" aria-labelledby="story-file-tab"
                  data-extension-page="file">
                 <input id="story-file-input" type="file"
-                       accept=".json,application/json" hidden>
+                       accept=".json,.png,application/json,image/png" hidden>
                 <button id="story-file-dropzone" class="story-dropzone" type="button">
                     <span class="story-drop-icon" aria-hidden="true">⇧</span>
-                    <strong>Drop Tilecraft JSON here</strong>
+                    <strong>Drop Story JSON or PNG</strong>
                     <span>or choose a local file</span>
-                    <small>.json · max 25 MB</small>
+                    <small>.json / .png · max 25 MB</small>
                 </button>
                 <div id="story-file-status" class="story-status" aria-live="polite"></div>
+                <section id="story-background-card" class="story-background-card" hidden>
+                    <div>
+                        <strong>Canvas background</strong>
+                        <span id="story-background-name"></span>
+                        <small id="story-background-meta"></small>
+                    </div>
+                    <button id="story-remove-background" type="button">Remove background</button>
+                </section>
                 <section id="story-file-summary" class="story-file-card" hidden>
                     <div class="story-file-title">
                         <span class="story-success" aria-hidden="true">✓</span>

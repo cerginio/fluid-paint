@@ -8,6 +8,7 @@ class StoryToolsUI {
     this.dropzone = document.getElementById('story-file-dropzone');
     this.fileStatus = document.getElementById('story-file-status');
     this.fileSummary = document.getElementById('story-file-summary');
+    this.backgroundCard = document.getElementById('story-background-card');
     this.playerEmpty = document.getElementById('story-player-empty');
     this.playerContent = document.getElementById('story-player-content');
     this.playerStatus = document.getElementById('story-player-status');
@@ -17,6 +18,7 @@ class StoryToolsUI {
     this.playhead = document.getElementById('story-playhead-label');
     this.stopDecision = document.getElementById('story-stop-decision');
     this.gaps = document.getElementById('story-player-gaps');
+    this.headerPlayPause = document.getElementById('story-header-play-pause');
     this._thicknessFrame = null;
     this._bind();
     this.unsubscribe = controller.subscribe((view) => this.render(view));
@@ -52,6 +54,7 @@ class StoryToolsUI {
 
     this._on('story-replace-file', 'click', choose);
     this._on('story-remove-file', 'click', () => this._safe(() => this.controller.removeFile()));
+    this._on('story-remove-background', 'click', () => this.controller.removeBackground());
     this._on('story-open-player', 'click', () => {
       if (this.toolPanel) this.toolPanel.selectExtensionTab('player', true);
     });
@@ -76,10 +79,8 @@ class StoryToolsUI {
         if (input.checked) this.controller.setCanvasPolicy(input.value);
       });
     });
-    this._on('story-play-pause', 'click', () => {
-      if (this.controller.state === 'playing') this.controller.pause();
-      else this._safe(() => this.controller.play());
-    });
+    this._on('story-play-pause', 'click', () => this._togglePlayback());
+    this._on('story-header-play-pause', 'click', () => this._togglePlayback());
     this._on('story-restart', 'click', () => this._safe(() => this.controller.restart()));
     this._on('story-stop', 'click', () => this._safe(() => this.controller.stop()));
     this._on('story-restore-baseline', 'click', () => this._safe(() => this.controller.restoreBaseline()));
@@ -94,8 +95,10 @@ class StoryToolsUI {
 
   async _load(file) {
     try {
-      await this.controller.loadFile(file);
-      if (this.toolPanel) this.toolPanel.selectExtensionTab('player', true);
+      const result = await this.controller.loadFile(file);
+      if ((!result || result.kind !== 'background') && this.toolPanel) {
+        this.toolPanel.selectExtensionTab('player', true);
+      }
     } catch (_) { /* controller state renders the contextual error */ }
   }
 
@@ -108,20 +111,44 @@ class StoryToolsUI {
     Promise.resolve().then(action).catch((error) => console.error('Story tools:', error));
   }
 
+  _togglePlayback() {
+    if (this.controller.state === 'playing') this.controller.pause();
+    else this._safe(() => this.controller.play());
+  }
+
   render(view) {
     const summary = view.modelSummary;
     const hasFile = !!summary;
     const busy = view.state === 'loading';
+    const background = view.backgroundSummary;
+    if (this.toolPanel) this.toolPanel.setExtensionHasStory(hasFile);
 
     if (this.dropzone) this.dropzone.hidden = hasFile || busy;
     if (this.fileSummary) this.fileSummary.hidden = !hasFile;
+    if (this.backgroundCard) this.backgroundCard.hidden = !background;
+    if (background) {
+      const name = document.getElementById('story-background-name');
+      const meta = document.getElementById('story-background-meta');
+      if (name) name.textContent = background.fileName;
+      if (meta) {
+        meta.textContent = `${background.sourceWidth} × ${background.sourceHeight} · ${this._formatBytes(background.byteSize)}`;
+      }
+    }
     if (this.fileStatus) {
-      this.fileStatus.textContent = busy
-        ? 'Reading and validating file…'
-        : view.state === 'file-error' && view.error
-          ? view.error.message
-          : hasFile ? 'File is ready for playback.' : '';
-      this.fileStatus.classList.toggle('is-error', view.state === 'file-error');
+      this.fileStatus.textContent = view.backgroundLoading
+        ? 'Decoding PNG background…'
+        : view.backgroundError
+          ? view.backgroundError.message
+          : busy
+            ? 'Reading and validating file…'
+            : view.state === 'file-error' && view.error
+              ? view.error.message
+              : hasFile ? 'Story file is ready for playback.'
+                : background ? 'PNG background is ready for painting.' : '';
+      this.fileStatus.classList.toggle(
+        'is-error',
+        view.state === 'file-error' || !!view.backgroundError
+      );
     }
     if (summary) this._renderSummary(summary);
 
@@ -146,10 +173,11 @@ class StoryToolsUI {
     }
     if (this.playerStatus) this.playerStatus.textContent = this._statusText(view);
 
-    const playPause = document.getElementById('story-play-pause');
-    if (playPause) {
-      playPause.textContent = view.state === 'playing' ? 'Pause' :
+    const playPauseText = view.state === 'playing' ? 'Pause' :
         view.state === 'paused' ? 'Resume' : view.state === 'completed' ? 'Replay' : 'Play';
+    for (const playPause of [document.getElementById('story-play-pause'), this.headerPlayPause]) {
+      if (!playPause) continue;
+      playPause.textContent = playPauseText;
       playPause.disabled = ['stop-decision', 'player-error'].includes(view.state);
     }
     const stop = document.getElementById('story-stop');

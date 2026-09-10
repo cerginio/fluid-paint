@@ -44,6 +44,7 @@ class ToolPanel {
     this.onHue = options.onHue || (() => {});
     this.onLayoutChange = options.onLayoutChange || (() => {});
     this.extension = options.extension || null;
+    this.extensionGrip = options.extensionGrip || null;
     this.extensionToggle = options.extensionToggle || null;
     this.extensionClose = options.extensionClose || null;
     this.onExtensionClose = options.onExtensionClose || (() => {});
@@ -57,6 +58,8 @@ class ToolPanel {
     // Without this the grip would need two separate targets for two actions,
     // which is exactly the kind of chrome a phone has no room for.
     this._dragMoved = false;
+    this._dragGrip = null;
+    this._dragTap = null;
 
     this._installDrag();
     this._installHueStripe();
@@ -76,7 +79,10 @@ class ToolPanel {
     // Keep the panel on screen when the window changes. A panel dragged to the
     // right edge in landscape is entirely off screen in portrait, and with no
     // grip reachable there is no way back -- the user would have to reload.
-    this._onWindowResize = () => this.clampIntoView();
+    this._onWindowResize = () => {
+      this.clampIntoView();
+      requestAnimationFrame(() => this._placeExtension());
+    };
     window.addEventListener('resize', this._onWindowResize);
   }
 
@@ -89,7 +95,7 @@ class ToolPanel {
   setCollapsed(collapsed) {
     const barTop = this._barTop();
     this.root.setAttribute('data-collapsed', collapsed ? 'true' : 'false');
-    if (collapsed) this.setExtensionOpen(false);
+    if (collapsed) this.setExtensionOpen(false, false);
     // The body is hidden by CSS; the panel's height changes, so a panel pinned
     // near the bottom edge could end up mostly off screen when it expands.
     this.moveTo(this.root.getBoundingClientRect().left, barTop);
@@ -103,9 +109,21 @@ class ToolPanel {
   // --- dragging -------------------------------------------------------------
 
   _installDrag() {
-    if (!this.grip) return;
+    this._installDragTarget(this.grip, () => this.toggleCollapsed());
+    this._installDragTarget(this.extensionGrip, () => this.toggleExtensionCollapsed());
+    if (this.extensionGrip) {
+      this.extensionGrip.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        this.toggleExtensionCollapsed();
+      });
+    }
+  }
 
-    this.grip.addEventListener('pointerdown', (event) => {
+  _installDragTarget(grip, onTap) {
+    if (!grip) return;
+
+    grip.addEventListener('pointerdown', (event) => {
       // Only the primary button/contact drags; a second finger landing on the
       // grip mid-drag must not retarget the panel.
       if (this._dragPointerId !== null) return;
@@ -117,15 +135,17 @@ class ToolPanel {
       this._dragOffsetX = event.clientX - rect.left;
       this._dragOffsetY = event.clientY - barRect.top;
       this._dragMoved = false;
+      this._dragGrip = grip;
+      this._dragTap = onTap;
 
       // Capture on the grip, so a fast drag that outruns the pointer still
       // delivers its moves here rather than to whatever is underneath -- which
       // would be the canvas, and would paint a stroke across the picture.
-      try { this.grip.setPointerCapture(event.pointerId); } catch (e) { /* synthetic ids throw */ }
+      try { grip.setPointerCapture(event.pointerId); } catch (e) { /* synthetic ids throw */ }
     });
 
-    this.grip.addEventListener('pointermove', (event) => {
-      if (event.pointerId !== this._dragPointerId) return;
+    grip.addEventListener('pointermove', (event) => {
+      if (event.pointerId !== this._dragPointerId || this._dragGrip !== grip) return;
       event.preventDefault();
 
       // A few pixels of slop before it counts as a drag: fingers wobble, and
@@ -147,15 +167,18 @@ class ToolPanel {
     });
 
     const endDrag = (event) => {
-      if (event.pointerId !== this._dragPointerId) return;
+      if (event.pointerId !== this._dragPointerId || this._dragGrip !== grip) return;
       this._dragPointerId = null;
-      try { this.grip.releasePointerCapture(event.pointerId); } catch (e) { /* ignore */ }
+      try { grip.releasePointerCapture(event.pointerId); } catch (e) { /* ignore */ }
 
-      if (!this._dragMoved) this.toggleCollapsed();
+      const tap = this._dragTap;
+      this._dragGrip = null;
+      this._dragTap = null;
+      if (!this._dragMoved && tap) tap();
     };
 
-    this.grip.addEventListener('pointerup', endDrag);
-    this.grip.addEventListener('pointercancel', endDrag);
+    grip.addEventListener('pointerup', endDrag);
+    grip.addEventListener('pointercancel', endDrag);
   }
 
   /** Move the panel by its header coordinate, keeping that header reachable. */
@@ -211,6 +234,26 @@ class ToolPanel {
 
   // --- extension shell -----------------------------------------------------
 
+  isExtensionCollapsed() {
+    return !!this.extension && this.extension.getAttribute('data-collapsed') === 'true';
+  }
+
+  setExtensionCollapsed(collapsed) {
+    if (!this.extension) return;
+    this.extension.setAttribute('data-collapsed', collapsed ? 'true' : 'false');
+    if (this.extensionGrip) this.extensionGrip.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    this._placeExtension();
+    this.onLayoutChange();
+  }
+
+  toggleExtensionCollapsed() {
+    this.setExtensionCollapsed(!this.isExtensionCollapsed());
+  }
+
+  setExtensionHasStory(hasStory) {
+    if (this.extension) this.extension.setAttribute('data-has-story', hasStory ? 'true' : 'false');
+  }
+
   _installExtension() {
     if (!this.extension || !this.extensionToggle) return;
 
@@ -260,7 +303,7 @@ class ToolPanel {
     }
   }
 
-  setExtensionOpen(open) {
+  setExtensionOpen(open, notifyClose = true) {
     if (!this.extension || !this.extensionToggle) return;
     const wasOpen = !this.extension.hidden;
     const next = !!open && !this.isCollapsed();
@@ -269,7 +312,7 @@ class ToolPanel {
     this.extensionToggle.textContent = next ? '−' : '+';
     this._placeExtension();
     this.onLayoutChange();
-    if (wasOpen && !next) this.onExtensionClose();
+    if (notifyClose && wasOpen && !next) this.onExtensionClose();
   }
 
   /** Use an adjacent side when it fits; otherwise overlay the base panel. */
@@ -286,6 +329,34 @@ class ToolPanel {
     else if (roomLeft >= extensionWidth + gap) side = 'left';
     else side = panel.left + panel.width / 2 < window.innerWidth / 2 ? 'overlay-right' : 'overlay-left';
     this.root.setAttribute('data-extension-side', side);
+
+    this.extension.style.removeProperty('transform');
+    if (getComputedStyle(this.extension).position === 'fixed') {
+      // backdrop-filter makes this nominally fixed child use #ui as its
+      // containing block in Chromium. Counter-shift it after a parent drag so
+      // the phone sheet still respects the viewport's 8px gutters.
+      const fixedRect = this.extension.getBoundingClientRect();
+      const shift = fixedRect.left < 8 ? 8 - fixedRect.left
+        : fixedRect.right > window.innerWidth - 8
+          ? window.innerWidth - 8 - fixedRect.right
+          : 0;
+      if (shift) this.extension.style.transform = `translateX(${shift}px)`;
+      return;
+    }
+
+    // An overlay is positioned inside a panel that the user may deliberately
+    // leave partly off-screen. Clamp the extension itself so its header/grip
+    // never follows the parent beyond the viewport edge.
+    this.extension.style.removeProperty('left');
+    this.extension.style.removeProperty('right');
+    if (side.startsWith('overlay')) {
+      const preferredLeft = side === 'overlay-right'
+        ? panel.right - extensionWidth
+        : panel.left;
+      const viewportLeft = Math.max(0, Math.min(window.innerWidth - extensionWidth, preferredLeft));
+      this.extension.style.left = (viewportLeft - panel.left) + 'px';
+      this.extension.style.right = 'auto';
+    }
   }
 
   // --- the hue stripe -------------------------------------------------------

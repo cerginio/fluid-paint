@@ -25,6 +25,9 @@ class StoryPlaybackController {
     this._configurationPromise = Promise.resolve();
     this.activeRunSettings = null;
     this.lastStats = null;
+    this.backgroundSummary = null;
+    this.backgroundError = null;
+    this.backgroundLoading = false;
   }
 
   get canPaintManually() {
@@ -38,6 +41,8 @@ class StoryPlaybackController {
   }
 
   async loadFile(file) {
+    const isPng = file && (file.type === 'image/png' || /\.png$/i.test(file.name || ''));
+    if (isPng) return this.loadBackgroundFile(file);
     this._setState('loading');
     try {
       const loaded = await StoryFileLoader.load(file);
@@ -47,6 +52,34 @@ class StoryPlaybackController {
       this._setState('file-error');
       throw error;
     }
+  }
+
+  async loadBackgroundFile(file) {
+    this.backgroundLoading = true;
+    this.backgroundError = null;
+    this._emit();
+    try {
+      if (this.state === 'playing' || this.state === 'paused') await this.yieldToManualInput();
+      this.backgroundSummary = await this.painter.loadBackgroundImage(file);
+      this._emit();
+      return { kind: 'background', summary: this.backgroundSummary };
+    } catch (error) {
+      this.backgroundError = error;
+      this._emit();
+      throw error;
+    } finally {
+      this.backgroundLoading = false;
+      this._emit();
+    }
+  }
+
+  removeBackground() {
+    if (!this.backgroundSummary) return false;
+    this.painter.clearBackgroundImage();
+    this.backgroundSummary = null;
+    this.backgroundError = null;
+    this._emit();
+    return true;
   }
 
   async loadModel(model, summary) {
@@ -463,6 +496,9 @@ class StoryPlaybackController {
       speed: this.speed,
       thickness: this.thickness,
       activeRunSettings: this.activeRunSettings,
+      backgroundSummary: this.backgroundSummary,
+      backgroundError: this.backgroundError,
+      backgroundLoading: this.backgroundLoading,
       canvasPolicy: this.canvasPolicy,
       error: this.error,
       pendingRanges: this.registry.snapshot(),

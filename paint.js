@@ -149,6 +149,7 @@ class Paint {
         // draw has to move up here to keep the sequence -- otherwise every
         // golden hash shifts for no reason anyone could see in the diff.
         this.brushColorHSVA = [Math.random(), 1, 1, 0.8];
+        this.adhocPaintColor = null;
 
         /* ?black=1 deepens the pigment cube's all-three corner to true black.
          * Read once here: the engine fixes it at construction, because paint
@@ -220,7 +221,8 @@ class Paint {
             0.9,
             (fluidity) => {
                 this.engine.setSimulation({ fluidity });
-            }
+            },
+            { label: 'Paint Fluidity', step: 0.01, formatValue: (fluidity) => fluidity.toFixed(2) }
         );
 
         this.bristleCountSlider = new Slider(
@@ -235,6 +237,13 @@ class Paint {
                     MIN_BRISTLE_COUNT + t * (MAX_BRISTLE_COUNT - MIN_BRISTLE_COUNT)
                 );
                 this.engine.setBrush({ bristleCount });
+            },
+            {
+                formatValue: (t) => String(Math.floor(
+                    MIN_BRISTLE_COUNT + Math.pow(t, 2) * (MAX_BRISTLE_COUNT - MIN_BRISTLE_COUNT)
+                )),
+                label: 'Bristle Count',
+                step: 0.01,
             }
         );
 
@@ -249,7 +258,8 @@ class Paint {
                 // value, so whichever is not being dragged has to follow or
                 // they disagree the moment the panel is collapsed or expanded.
                 if (this.barSizeSlider) this.barSizeSlider.setValue(size);
-            }
+            },
+            { label: 'Brush Size', step: 1, formatValue: (size) => `${Math.round(size)} px` }
         );
 
         this.qualityButtons = new Buttons(
@@ -309,7 +319,10 @@ class Paint {
             ? new ColorControl({
                 element: colorWidget,
                 hexElement: document.getElementById('paint-color-hex'),
+                alphaElement: document.getElementById('paint-color-alpha'),
                 modelElement: document.getElementById('paint-color-model'),
+                whiteElement: document.getElementById('paint-color-white'),
+                blackElement: document.getElementById('paint-color-black'),
                 getHSVA: () => this.brushColorHSVA,
                 // Read live rather than captured: the toggle flips this after
                 // the control is built, and a snapshot would freeze the picker
@@ -321,6 +334,10 @@ class Paint {
                     // panel is collapsed -- the same rule the two size sliders
                     // follow.
                     if (this.toolPanel) this.toolPanel.setHue(this.brushColorHSVA[0]);
+                    this.needsRedraw = true;
+                },
+                onAdhocChange: (color) => {
+                    this.adhocPaintColor = color;
                     this.needsRedraw = true;
                 },
             })
@@ -612,6 +629,7 @@ class Paint {
                 grip: document.getElementById('panel-grip'),
                 hueStripe: document.getElementById('bar-hue-stripe'),
                 extension: document.getElementById('panel-extension'),
+                extensionGrip: document.getElementById('panel-extension-grip'),
                 extensionToggle: document.getElementById('panel-extension-toggle'),
                 extensionClose: document.getElementById('panel-extension-close'),
                 onExtensionClose: () => {
@@ -656,7 +674,8 @@ class Paint {
                 (size) => {
                     this.brushScale = size;
                     if (this.brushSizeSlider) this.brushSizeSlider.setValue(size);
-                }
+                },
+                { label: 'Brush Size', step: 1, formatValue: (size) => `${Math.round(size)} px` }
             )
             : null;
 
@@ -795,11 +814,12 @@ class Paint {
 
     update() {
         const wgl = this.wgl;
+        const storyOwnsBrush = this._storyOwnsBrush();
 
-        this._syncBrushToPointer();
+        if (!storyOwnsBrush) this._syncBrushToPointer();
 
         const result = this.engine.advance(performance.now() / 1000,
-            this.brushInitialized ? {
+            this.brushInitialized && !storyOwnsBrush ? {
                 x: this.brushX, y: this.brushY,
                 height: BRUSH_HEIGHT * this.brushScale * this.brushPressure,
                 scale: this.brushScale,
@@ -864,6 +884,7 @@ class Paint {
         // pointer never reaches the canvas at all. Same trade Phase 7 made when
         // it deleted the panel's geometric hit test.
         if (
+            storyOwnsBrush ||
             this.interactionState === InteractionMode.PAINTING ||
             (this.interactionState === InteractionMode.NONE &&
                 this.desiredInteractionMode(this.mouseX, this.mouseY) === InteractionMode.PAINTING)
@@ -912,7 +933,9 @@ class Paint {
         // element with its own CSS cursor, so the canvas no longer has to guess
         // whether the pointer is over it.
         let desiredCursor = '';
-        if (this.interactionState === InteractionMode.NONE) {
+        if (storyOwnsBrush) {
+            desiredCursor = 'default';
+        } else if (this.interactionState === InteractionMode.NONE) {
             const desiredMode = this.desiredInteractionMode(this.mouseX, this.mouseY);
             if (desiredMode === InteractionMode.PAINTING) {
                 desiredCursor = 'none';
@@ -981,13 +1004,23 @@ class Paint {
              * both would put the preview back out by the amount it corrects.
              */
             const hsva = this.brushColorHSVA;
-            const rgb = hsvToPigmentRgb(
-                hsva[0], hsva[1], hsva[2],
-                this.colorModel === FluidEngine.COLOR_MODEL.RGB
-            );
+            const rgb = this.adhocPaintColor === 'black' ? [0, 0, 0]
+                : this.adhocPaintColor === 'white' ? [1, 1, 1]
+                    : hsvToPigmentRgb(
+                        hsva[0], hsva[1], hsva[2],
+                        this.colorModel === FluidEngine.COLOR_MODEL.RGB
+                    );
 
             this.brushViewer.draw(this.brushX, this.brushY, this.engine.getBristleGeometry(), rgb);
         }
+    }
+
+    _storyOwnsBrush() {
+        if (!this.storyPlaybackController || this.interactionState === InteractionMode.PAINTING) {
+            return false;
+        }
+        return this.storyPlaybackController.state === 'playing' ||
+            this.storyPlaybackController.state === 'paused';
     }
 
     // Renders the painting to an offscreen texture and arms the save button
@@ -1023,6 +1056,60 @@ class Paint {
 
         this.saveButton.setAttribute('download', 'painting.png');
         this.saveButton.setAttribute('href', saveCanvas.toDataURL());
+    }
+
+    async loadBackgroundImage(file) {
+        if (!file || !/\.png$/i.test(file.name || '') && file.type !== 'image/png') {
+            throw new TypeError('Choose a PNG background image.');
+        }
+        if (file.size > 25 * 1024 * 1024) {
+            throw new RangeError('This PNG exceeds the 25 MB local limit.');
+        }
+
+        const objectUrl = URL.createObjectURL(file);
+        const image = new Image();
+        try {
+            image.decoding = 'async';
+            await new Promise((resolve, reject) => {
+                image.onload = resolve;
+                image.onerror = () => reject(new TypeError('This PNG could not be decoded.'));
+                image.src = objectUrl;
+            });
+
+            const width = Math.max(1, Math.round(this.paintingRectangle.width));
+            const height = Math.max(1, Math.round(this.paintingRectangle.height));
+            const backgroundCanvas = document.createElement('canvas');
+            backgroundCanvas.width = width;
+            backgroundCanvas.height = height;
+            const context = backgroundCanvas.getContext('2d', { alpha: false });
+            context.fillStyle = '#fff';
+            context.fillRect(0, 0, width, height);
+            const scale = Math.min(width / image.naturalWidth, height / image.naturalHeight);
+            const drawWidth = image.naturalWidth * scale;
+            const drawHeight = image.naturalHeight * scale;
+            context.drawImage(
+                image,
+                (width - drawWidth) / 2,
+                (height - drawHeight) / 2,
+                drawWidth,
+                drawHeight
+            );
+            this.engine.setBackgroundImage(backgroundCanvas);
+            this.needsRedraw = true;
+            return {
+                fileName: file.name || 'background.png',
+                byteSize: file.size || 0,
+                sourceWidth: image.naturalWidth,
+                sourceHeight: image.naturalHeight,
+            };
+        } finally {
+            URL.revokeObjectURL(objectUrl);
+        }
+    }
+
+    clearBackgroundImage() {
+        this.engine.clearBackgroundImage();
+        this.needsRedraw = true;
     }
 
     // Screen-space orthographic projection for the bristle preview, rebuilt
@@ -1263,11 +1350,13 @@ class Paint {
      * own bristle-count rule, unchanged from the pre-9a splat path.
      */
     _strokeColor() {
-        const channels = hsvToRyb(
-            this.brushColorHSVA[0],
-            this.brushColorHSVA[1],
-            this.brushColorHSVA[2]
-        );
+        const channels = this.adhocPaintColor === 'black' ? [1, 1, 1]
+            : this.adhocPaintColor === 'white' ? [0, 0, 0]
+                : hsvToRyb(
+                    this.brushColorHSVA[0],
+                    this.brushColorHSVA[1],
+                    this.brushColorHSVA[2]
+                );
         const bristleT =
             (this.engine.bristleCount - MIN_BRISTLE_COUNT) /
             (MAX_BRISTLE_COUNT - MIN_BRISTLE_COUNT);
@@ -1307,8 +1396,12 @@ class Paint {
             return;
         }
 
-        this._manualInputPending = true;
-        if (this.storyPlaybackController) {
+        const storyNeedsYield = this.storyPlaybackController && [
+            'playing', 'paused', 'stop-decision', 'completed',
+            'completed-with-gaps', 'player-error',
+        ].includes(this.storyPlaybackController.state);
+        this._manualInputPending = !!storyNeedsYield;
+        if (storyNeedsYield) {
             await this.storyPlaybackController.yieldToManualInput();
         }
         this._manualInputPending = false;

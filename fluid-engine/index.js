@@ -787,6 +787,17 @@ class FluidEngine {
     this.renderer.present(texture, targetWidth, targetHeight);
   }
 
+  /** Set or clear the dry image layer rendered beneath wet paint. */
+  setBackgroundImage(source) {
+    this._assertNoStroke('setBackgroundImage()');
+    this.renderer.setBackgroundImage(source);
+  }
+
+  clearBackgroundImage() {
+    this._assertNoStroke('clearBackgroundImage()');
+    this.renderer.clearBackgroundImage();
+  }
+
   /** Render the painting at full resolution and read it back as RGBA bytes. */
   exportPixels(options) {
     return this.renderer.renderToPixels(Object.assign({ simulator: this.simulator }, options));

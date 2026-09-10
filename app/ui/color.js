@@ -106,13 +106,21 @@ class ColorControl {
    *   actually using, so flipping the toggle must repaint the widget -- see
    *   `setAdditive()`. Defaults to Natural (subtractive) when not supplied.
    */
-  constructor({ element, hexElement, modelElement, getHSVA, onChange, isAdditive }) {
+  constructor({
+    element, hexElement, alphaElement, modelElement, whiteElement, blackElement,
+    getHSVA, onChange, onAdhocChange, isAdditive,
+  }) {
     this.element = element;
     this.hexElement = hexElement;
+    this.alphaElement = alphaElement;
     this.modelElement = modelElement;
     this.getHSVA = getHSVA;
     this.onChange = onChange || (() => {});
+    this.onAdhocChange = onAdhocChange || (() => {});
     this.isAdditive = isAdditive || (() => false);
+    this.whiteElement = whiteElement;
+    this.blackElement = blackElement;
+    this.adhocColor = null;
 
     /*
      * Hand the model down to lib/iro.js, which draws every surface through
@@ -162,8 +170,24 @@ class ColorControl {
 
     this.picker.on('color:change', (color) => {
       if (this.applying) return;
-      this._readFromWidget(color);
+      // White/black replace only the colour channels. Moving iro's alpha
+      // slider must therefore retain the ad-hoc choice, while changing H/S/V
+      // returns to the saved colour-space selection.
+      const adhocAlphaOnly = !!this.adhocColor && this._sameBaseColor(color);
+      if (!adhocAlphaOnly) this._setAdhocColor(null);
+      this._readFromWidget(color, adhocAlphaOnly);
     });
+
+    this._whiteHandler = () => this._setAdhocColor('white');
+    this._blackHandler = () => this._setAdhocColor('black');
+    if (this.whiteElement) this.whiteElement.addEventListener('click', this._whiteHandler);
+    if (this.blackElement) this.blackElement.addEventListener('click', this._blackHandler);
+    this._pickerPointerHandler = (event) => {
+      if (this.adhocColor && event.target.closest && event.target.closest('.IroWheel .IroHandle--0')) {
+        this._setAdhocColor(null);
+      }
+    };
+    this.element.addEventListener('pointerdown', this._pickerPointerHandler, true);
 
     this._copyHandler = () => this._copyHex();
     this._copyKeyHandler = (event) => {
@@ -230,6 +254,8 @@ class ColorControl {
 
   /** Return the colour actually displayed/deposited by the active paint model. */
   _pigmentHex() {
+    if (this.adhocColor === 'black') return '#000000';
+    if (this.adhocColor === 'white') return '#FFFFFF';
     const hsva = this.getHSVA();
     const rgb = hsvToPigmentRgb(hsva[0], hsva[1], hsva[2], this.isAdditive());
     const channel = (value) => Math.round(Math.max(0, Math.min(1, value)) * 255)
@@ -238,8 +264,39 @@ class ColorControl {
   }
 
   _updateReadout() {
-    if (this.hexElement) this.hexElement.textContent = this._pigmentHex();
+    const hex = this._pigmentHex();
+    if (this.hexElement) this.hexElement.textContent = hex;
+    if (this.alphaElement) {
+      const alpha = Math.round(Math.max(0, Math.min(1, this.getHSVA()[3])) * 255)
+        .toString(16).padStart(2, '0').toUpperCase();
+      this.alphaElement.textContent = alpha;
+      this.alphaElement.style.backgroundColor = hex + alpha;
+      this.alphaElement.setAttribute('aria-label', `Alpha ${alpha}`);
+    }
     if (this.modelElement) this.modelElement.textContent = this.isAdditive() ? 'RGB' : 'RYB';
+  }
+
+  _sameBaseColor(color) {
+    const hsva = this.getHSVA();
+    const hsv = color.hsv;
+    const hueDelta = Math.abs(hsv.h / DEGREES - hsva[0]);
+    return Math.min(hueDelta, 1 - hueDelta) < 1e-4 &&
+      Math.abs(hsv.s / PERCENT - hsva[1]) < 1e-4 &&
+      Math.abs(hsv.v / PERCENT - hsva[2]) < 1e-4;
+  }
+
+  _setAdhocColor(color) {
+    if (color !== null && color !== 'white' && color !== 'black') {
+      throw new TypeError('Ad-hoc colour must be white, black, or null.');
+    }
+    if (this.adhocColor === color) return;
+    this.adhocColor = color;
+    if (color) this.element.dataset.adhocColor = color;
+    else delete this.element.dataset.adhocColor;
+    if (this.whiteElement) this.whiteElement.setAttribute('aria-pressed', color === 'white' ? 'true' : 'false');
+    if (this.blackElement) this.blackElement.setAttribute('aria-pressed', color === 'black' ? 'true' : 'false');
+    this._updateReadout();
+    this.onAdhocChange(color);
   }
 
   async _copyHex() {
@@ -305,13 +362,15 @@ class ColorControl {
    * it is the widget's RGB rendering of the hue, not the pigment, and letting it
    * inward is precisely the §3b leak this control exists to prevent.
    */
-  _readFromWidget(color) {
+  _readFromWidget(color, alphaOnly = false) {
     const hsva = this.getHSVA();
     const hsv = color.hsv;
 
-    hsva[0] = hsv.h / DEGREES;
-    hsva[1] = hsv.s / PERCENT;
-    hsva[2] = hsv.v / PERCENT;
+    if (!alphaOnly) {
+      hsva[0] = hsv.h / DEGREES;
+      hsva[1] = hsv.s / PERCENT;
+      hsva[2] = hsv.v / PERCENT;
+    }
     hsva[3] = color.alpha;
 
     this._updateReadout();
@@ -325,6 +384,7 @@ class ColorControl {
    * Guarded against the echo back through `color:change` -- see `this.applying`.
    */
   setHSVA(hsva) {
+    this._setAdhocColor(null);
     this.applying = true;
     try {
       this.picker.color.set({
@@ -350,6 +410,9 @@ class ColorControl {
       this.hexElement.removeEventListener('click', this._copyHandler);
       this.hexElement.removeEventListener('keydown', this._copyKeyHandler);
     }
+    if (this.whiteElement) this.whiteElement.removeEventListener('click', this._whiteHandler);
+    if (this.blackElement) this.blackElement.removeEventListener('click', this._blackHandler);
+    this.element.removeEventListener('pointerdown', this._pickerPointerHandler, true);
   }
 }
 

@@ -24,10 +24,9 @@
 // asset it was taken for, replacing working device-tested code. The plan's §5a
 // was written before the source was read; this is the correction.
 //
-// What tilecraft's component genuinely has that this does not is native
-// `<input type=range>` semantics -- keyboard and screen-reader support. That is
-// a real gap and a real future task, but it is an accessibility feature, not a
-// reason to import a vertical component. See docs/UI-COMPONENTS.md.
+// Tilecraft's component gets native `<input type=range>` semantics for free.
+// This horizontal control mirrors the relevant slider role, ARIA values and
+// keyboard behaviour locally without importing the unrelated vertical UI.
 
 const SLIDER_THICKNESS = 2;
 const LEFT_COLOR = 'white';
@@ -42,11 +41,19 @@ class Slider {
    * @param {number} maxValue
    * @param {(val:number)=>void} changeCallback
    */
-  constructor(element, initialValue, minValue, maxValue, changeCallback) {
+  constructor(element, initialValue, minValue, maxValue, changeCallback, options = {}) {
     this.div = element;
     this.minValue = minValue;
     this.maxValue = maxValue;
     this.changeCallback = changeCallback;
+    this.formatValue = options.formatValue || ((value) => String(value));
+    this.step = options.step || (maxValue - minValue) / 100;
+
+    element.setAttribute('role', 'slider');
+    element.tabIndex = element.tabIndex < 0 ? 0 : element.tabIndex;
+    element.setAttribute('aria-valuemin', String(minValue));
+    element.setAttribute('aria-valuemax', String(maxValue));
+    if (options.label) element.setAttribute('aria-label', options.label);
 
     // Prevent touch scrolling/zooming while interacting
     // (needed for proper Pointer Events behavior on mobile)
@@ -90,6 +97,28 @@ class Slider {
     handleDiv.style.touchAction = 'none';
     element.appendChild(handleDiv);
 
+    const valuePop = document.createElement('output');
+    valuePop.className = 'slider-value-pop';
+    valuePop.setAttribute('aria-live', 'polite');
+    valuePop.hidden = true;
+    element.appendChild(valuePop);
+    let valuePopTimer = null;
+
+    const showValue = () => {
+      valuePop.textContent = this.formatValue(this.value);
+      valuePop.hidden = false;
+      if (valuePopTimer !== null) clearTimeout(valuePopTimer);
+      valuePopTimer = null;
+    };
+
+    const hideValueLater = () => {
+      if (valuePopTimer !== null) clearTimeout(valuePopTimer);
+      valuePopTimer = setTimeout(() => {
+        valuePop.hidden = true;
+        valuePopTimer = null;
+      }, 700);
+    };
+
     // Utilities (fallbacks if your Utilities helper isn’t present)
     const clamp = (typeof Utilities?.clamp === 'function')
       ? Utilities.clamp
@@ -122,6 +151,9 @@ class Slider {
       handleDiv.style.height = H + 'px';
       handleDiv.style.borderRadius = H * 0.5 + 'px';
       handleDiv.style.left = (px - H / 2) + 'px';
+      valuePop.style.left = px + 'px';
+      element.setAttribute('aria-valuenow', String(this.value));
+      element.setAttribute('aria-valuetext', this.formatValue(this.value));
     };
 
     // Apply a pointer change
@@ -132,6 +164,22 @@ class Slider {
       this.value = this.minValue + fraction * (this.maxValue - this.minValue);
       this.changeCallback(this.value);
       redraw();
+      showValue();
+    };
+
+    const onKeyDown = (event) => {
+      let next = this.value;
+      if (event.key === 'ArrowRight' || event.key === 'ArrowUp') next += this.step;
+      else if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') next -= this.step;
+      else if (event.key === 'Home') next = this.minValue;
+      else if (event.key === 'End') next = this.maxValue;
+      else return;
+      event.preventDefault();
+      this.value = clamp(next, this.minValue, this.maxValue);
+      this.changeCallback(this.value);
+      redraw();
+      showValue();
+      hideValueLater();
     };
 
     // Pointer Events
@@ -176,11 +224,13 @@ class Slider {
         e.preventDefault();
       }
       endInteraction();
+      hideValueLater();
     };
 
     const onPointerCancel = (e) => {
       if (e.pointerId !== activePointerId) return;
       endInteraction();
+      hideValueLater();
     };
 
     // Attach listeners (non-passive so we can preventDefault for touch)
@@ -189,6 +239,7 @@ class Slider {
     element.addEventListener('pointerup', onPointerUp, { passive: false });
     element.addEventListener('pointercancel', onPointerCancel, { passive: false });
     element.addEventListener('lostpointercapture', onPointerCancel, { passive: true });
+    element.addEventListener('keydown', onKeyDown);
 
     // Public API (same as original)
     this.setValue = (newValue) => {
@@ -218,7 +269,9 @@ class Slider {
     window.addEventListener('orientationchange', this._onOrientationChange, { passive: true });
 
     this.destroy = () => {
+      if (valuePopTimer !== null) clearTimeout(valuePopTimer);
       if (this.resizeObserver) this.resizeObserver.disconnect();
+      element.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('orientationchange', this._onOrientationChange);
     };
 

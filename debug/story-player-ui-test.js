@@ -9,6 +9,7 @@ require('./browser-lock').acquireBrowserLock('Story player UI');
 
 const root = path.resolve(__dirname, '..');
 const fixture = path.join(root, 'docs', 'story-2026-09-08-4-frames.json');
+const pngFixture = path.join(root, 'docs', 'image.png');
 const mime = { '.js': 'application/javascript', '.json': 'application/json', '.css': 'text/css',
   '.html': 'text/html', '.vert': 'text/plain', '.frag': 'text/plain' };
 const server = http.createServer((request, response) => {
@@ -32,7 +33,83 @@ const server = http.createServer((request, response) => {
     await page.goto(`http://127.0.0.1:${server.address().port}/index.html?debug=none`);
     await page.waitForFunction(() => window.__painter && window.__painter.storyPlaybackController);
 
+    for (const [selector, expected] of [
+      ['#fluidity-slider', /^0\.\d{2}$/],
+      ['#bristles-slider', /^\d+$/],
+      ['#size-slider', /^\d+ px$/],
+    ]) {
+      const box = await page.locator(selector).boundingBox();
+      await page.mouse.click(box.x + box.width * 0.6, box.y + box.height / 2);
+      const pop = page.locator(`${selector} .slider-value-pop`);
+      assert.equal(await pop.isVisible(), true, `${selector} shows its value pop`);
+      assert.match(await pop.textContent(), expected, `${selector} formats its displayed value`);
+    }
+
+    const originalHsva = await page.evaluate(() => window.__painter.brushColorHSVA.slice());
+    assert.deepEqual(await page.locator('.adhoc-color').allTextContents(), ['#fff', '#000'],
+      'ad-hoc actions use compact hex labels');
+    const adhocShape = await page.locator('#paint-color-black').evaluate((button) => {
+      const style = getComputedStyle(button);
+      return { width: button.offsetWidth, height: button.offsetHeight, radius: style.borderRadius };
+    });
+    assert.equal(adhocShape.width, adhocShape.height, 'ad-hoc action is square');
+    assert.equal(adhocShape.radius, '50%', 'ad-hoc action is circular');
+    await page.click('#paint-color-black');
+    assert.equal(await page.locator('#paint-color-black').getAttribute('aria-pressed'), 'true',
+      'Black exposes its selected state');
+    assert.equal(await page.locator('#paint-color-hex').textContent(), '#000000');
+    assert.deepEqual(await page.evaluate(() => ({
+      hsva: window.__painter.brushColorHSVA.slice(),
+      channels: window.__painter._strokeColor().channels,
+      adhoc: window.__painter.adhocPaintColor,
+    })), { hsva: originalHsva, channels: [1, 1, 1], adhoc: 'black' },
+    'ad-hoc black uses the exact pigment corner without mutating HSVA');
+    assert.equal(await page.locator('.IroWheel .IroHandle--0 circle:last-child').evaluate(
+      (circle) => getComputedStyle(circle).fill
+    ), 'rgb(0, 0, 0)', 'ad-hoc black paints the iro handle black');
+    const beforeAdhocAlpha = await page.evaluate(() => window.__painter._strokeColor().alpha);
+    await page.evaluate(() => { window.__painter.colorControl.picker.color.alpha = 0.35; });
+    const adhocAlpha = await page.evaluate(() => ({
+      adhoc: window.__painter.adhocPaintColor,
+      alpha: window.__painter.brushColorHSVA[3],
+      strokeAlpha: window.__painter._strokeColor().alpha,
+    }));
+    assert.equal(adhocAlpha.adhoc, 'black', 'alpha changes preserve the ad-hoc colour');
+    assert.equal(adhocAlpha.alpha, 0.35, 'iro alpha reaches the saved alpha channel');
+    assert.ok(adhocAlpha.strokeAlpha < beforeAdhocAlpha, 'iro alpha changes deposited opacity');
+    assert.equal(await page.locator('#paint-color-alpha').textContent(), '59',
+      'alpha readout uses a two-character hex channel');
+    await page.locator('.IroWheel .IroHandle--0').dispatchEvent('pointerdown', {
+      pointerId: 77, pointerType: 'mouse', isPrimary: true, button: 0, buttons: 1,
+    });
+    assert.equal(await page.evaluate(() => window.__painter.adhocPaintColor), null,
+      'touching the iro handle restores the saved wheel colour');
+    const hsvaAfterAlpha = originalHsva.slice();
+    hsvaAfterAlpha[3] = 0.35;
+    assert.deepEqual(await page.evaluate(() => window.__painter.brushColorHSVA.slice()), hsvaAfterAlpha,
+      'restoring the wheel colour preserves its original HSVA');
+
+    await page.click('#paint-color-white');
+    assert.equal(await page.locator('#paint-color-white').getAttribute('aria-pressed'), 'true',
+      'White exposes its selected state');
+    assert.deepEqual(await page.evaluate(() => window.__painter._strokeColor().channels), [0, 0, 0],
+      'ad-hoc white uses the exact no-pigment corner');
+    assert.equal(await page.locator('.IroWheel .IroHandle--0 circle:last-child').evaluate(
+      (circle) => getComputedStyle(circle).fill
+    ), 'rgb(255, 255, 255)', 'ad-hoc white paints the iro handle white');
+    await page.locator('.IroWheel .IroHandle--0').dispatchEvent('pointerdown', {
+      pointerId: 78, pointerType: 'mouse', isPrimary: true, button: 0, buttons: 1,
+    });
+
     await page.click('#panel-extension-toggle');
+    await page.click('#panel-extension-grip');
+    assert.equal(await page.locator('#panel-extension').getAttribute('data-collapsed'), 'true',
+      'extension grip tap collapses the extension');
+    assert.equal(await page.locator('#story-file-tab').isVisible(), true,
+      'File/Player tabs remain in an empty collapsed header');
+    assert.equal(await page.locator('#story-header-play-pause').isHidden(), true,
+      'header playback stays hidden before a Story is loaded');
+    await page.click('#panel-extension-grip');
     await page.setInputFiles('#story-file-input', fixture);
     await page.waitForFunction(() => window.__painter.storyPlaybackController.state === 'ready');
     assert.equal(await page.locator('#story-player-page').isVisible(), true, 'valid file opens Player tab');
@@ -49,13 +126,73 @@ const server = http.createServer((request, response) => {
       'remaining-ranges callout is hidden while the story is ready');
     assert.equal(await page.locator('#story-stop-decision').isHidden(), true,
       'result-decision callout is hidden while the story is ready');
+    const optionStyle = await page.locator('#story-speed option').first().evaluate((option) => {
+      const style = getComputedStyle(option);
+      return { color: style.color, backgroundColor: style.backgroundColor };
+    });
+    assert.deepEqual(optionStyle, {
+      color: 'rgb(17, 17, 17)', backgroundColor: 'rgb(255, 255, 255)',
+    }, 'native speed options use readable dark-on-white colours');
 
+    await page.setInputFiles('#story-file-input', pngFixture);
+    await page.waitForFunction(() => window.__painter.storyPlaybackController.backgroundSummary);
+    assert.equal(await page.evaluate(() => window.__painter.engine.renderer.hasBackground), true,
+      'PNG upload reaches the renderer background layer');
+    assert.equal(await page.evaluate(() => {
+      const painter = window.__painter;
+      const pixels = painter.engine.exportPixels({
+        width: 64, height: 64, resolutionScale: 1, colorModel: painter.colorModel,
+      });
+      for (let index = 0; index < pixels.length; index += 4) {
+        if (pixels[index] < 250 || pixels[index + 1] < 250 || pixels[index + 2] < 250) return true;
+      }
+      return false;
+    }), true, 'saved output includes visible PNG background pixels');
+    assert.equal(await page.locator('#story-background-card').getAttribute('hidden'), null,
+      'loaded PNG is represented in the File tab');
+    assert.ok(await page.locator('#story-background-name').textContent(), 'background filename is shown');
+
+    await page.evaluate(() => {
+      const painter = window.__painter;
+      painter.__storyPointerTargetLeaks = 0;
+      const advance = painter.engine.advance.bind(painter.engine);
+      painter.engine.advance = (now, target) => {
+        if (painter.storyPlaybackController.state === 'playing' && target) {
+          painter.__storyPointerTargetLeaks++;
+        }
+        return advance(now, target);
+      };
+    });
     await page.click('#story-play-pause');
     await page.waitForFunction(() => window.__painter.storyPlaybackController.progress.paintedOperations > 2);
+    assert.equal(await page.evaluate(() => window.__painter.__storyPointerTargetLeaks), 0,
+      'manual pointer targets never leak into Story-owned brush updates');
     assert.equal(await page.locator('#story-player-gaps').isHidden(), true,
       'remaining-ranges callout stays hidden during playback');
     assert.equal(await page.locator('#story-stop-decision').isHidden(), true,
       'result-decision callout stays hidden during playback');
+    const panelBeforeExtensionDrag = await page.locator('#ui').boundingBox();
+    const extensionGrip = await page.locator('#panel-extension-grip').boundingBox();
+    await page.mouse.move(extensionGrip.x + extensionGrip.width / 2, extensionGrip.y + extensionGrip.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(extensionGrip.x + extensionGrip.width / 2 + 24,
+      extensionGrip.y + extensionGrip.height / 2 + 12, { steps: 4 });
+    await page.mouse.up();
+    const panelAfterExtensionDrag = await page.locator('#ui').boundingBox();
+    assert.ok(Math.abs(panelAfterExtensionDrag.x - panelBeforeExtensionDrag.x) > 10,
+      'dragging the extension grip moves the attached panel group');
+    assert.equal(await page.locator('#panel-extension').getAttribute('data-collapsed'), 'false',
+      'an extension drag does not collapse it');
+    await page.click('#panel-extension-grip');
+    assert.equal(await page.locator('#story-header-play-pause').isVisible(), true,
+      'collapsed loaded Story keeps Play/Pause in the header');
+    assert.equal(await page.evaluate(() => window.__painter.storyPlaybackController.state), 'playing',
+      'collapsing the extension does not pause playback');
+    await page.click('#story-header-play-pause');
+    await page.waitForFunction(() => window.__painter.storyPlaybackController.state === 'paused');
+    await page.click('#story-header-play-pause');
+    await page.waitForFunction(() => window.__painter.storyPlaybackController.state === 'playing');
+    await page.click('#panel-extension-grip');
     await page.selectOption('#story-speed', '0.5');
     await page.locator('#story-thickness').fill('0.6');
     await page.waitForFunction(() => {
@@ -136,7 +273,17 @@ const server = http.createServer((request, response) => {
     await page.evaluate(() => window.__painter.storyPlaybackController.yieldToManualInput());
     await page.waitForFunction(() => window.__painter.storyPlaybackController.state === 'ready');
 
+    await page.click('#story-file-tab');
+    await page.click('#story-remove-background');
+    await page.waitForFunction(() => !window.__painter.storyPlaybackController.backgroundSummary);
+    assert.equal(await page.evaluate(() => window.__painter.engine.renderer.hasBackground), false,
+      'Remove background restores the plain canvas renderer');
+
     await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForFunction(() => {
+      const extension = document.getElementById('panel-extension').getBoundingClientRect();
+      return extension.left >= 0 && extension.right <= window.innerWidth;
+    });
     const mobileLayout = await page.evaluate(() => {
       const extension = document.getElementById('panel-extension').getBoundingClientRect();
       const controls = [
