@@ -1,31 +1,34 @@
 'use strict';
 
-// The zoom-out autofocus cue: four small corner angles around the focus point.
-// It is screen-space GL rather than DOM so its stroke remains crisp and exactly
-// follows the canvas at every device pixel ratio.
+// The focus cue is DOM rather than a framebuffer pass so the permitted 50px
+// overscan remains visible when the focus is just beyond a canvas edge.
 class FocusOverlay {
-  constructor(wgl, shaderSources, quadVertexBuffer) {
-    this.wgl = wgl;
-    this.quadVertexBuffer = quadVertexBuffer;
-    this.program = wgl.createProgram(
-      shaderSources['shaders/fullscreen.vert'],
-      shaderSources['shaders/focus.frag'],
-      { a_position: 0 }
-    );
+  constructor(canvas, viewport) {
+    this.canvas = canvas;
+    this.viewport = viewport;
+    this.root = document.getElementById('app') || document.body;
+    this.element = document.createElement('div');
+    this.element.className = 'focus-overlay';
+    this.element.setAttribute('aria-hidden', 'true');
+    this.element.innerHTML = `
+      <svg viewBox="0 0 18 18" aria-hidden="true">
+        <path fill="currentColor" fill-rule="evenodd"
+          d="M1 7V1h6v1H2v5H1zm10-6h6v6h-1V2h-5V1zM1 11h1v5h5v1H1v-6zm15 0h1v6h-6v-1h5v-5zM9 7a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/>
+      </svg>`;
+    this.root.appendChild(this.element);
   }
 
-  draw(focus, canvasWidth, canvasHeight) {
-    const wgl = this.wgl;
-    const state = wgl
-      .createDrawState()
-      .viewport(0, 0, canvasWidth, canvasHeight)
-      .useProgram(this.program)
-      .enable(wgl.BLEND)
-      .blendFunc(wgl.ONE, wgl.ONE_MINUS_SRC_ALPHA)
-      .vertexAttribPointer(this.quadVertexBuffer, 0, 2, wgl.FLOAT, wgl.FALSE, 0, 0)
-      .uniform2f('u_focus', focus.x, focus.y)
-      .uniform4f('u_color', 1, 1, 1, 0.9);
-    wgl.drawArrays(state, wgl.TRIANGLE_STRIP, 0, 4);
+  draw(focus) {
+    const canvasRect = this.canvas.getBoundingClientRect();
+    const rootRect = this.root.getBoundingClientRect();
+    const css = this.viewport.screenToCss(focus.x, focus.y);
+    this.element.style.left = `${canvasRect.left - rootRect.left + css.x}px`;
+    this.element.style.top = `${canvasRect.top - rootRect.top + css.y}px`;
+    this.element.classList.add('is-visible');
+  }
+
+  hide() {
+    this.element.classList.remove('is-visible');
   }
 }
 

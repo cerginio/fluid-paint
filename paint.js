@@ -105,7 +105,6 @@ class Paint {
         this.paintingRectOverlay = this.debug.paintingRect
             ? new PaintingRectOverlay(wgl, shaderSources, this.quadVertexBuffer)
             : null;
-        this.focusOverlay = new FocusOverlay(wgl, shaderSources, this.quadVertexBuffer);
 
         // The single owner of canvas sizing, devicePixelRatio, the Y-flip and
         // all three coordinate spaces. See viewport.js.
@@ -122,6 +121,7 @@ class Paint {
             useResponsivePixelRatioCap: PaintState.useResponsivePixelRatioCap,
             container: this.container,
         });
+        this.focusOverlay = new FocusOverlay(canvas, this.viewport);
 
         // position of painting on screen, and its dimensions (pixels)
         this.paintingRectangle = new Rectangle(
@@ -971,7 +971,9 @@ class Paint {
 
         const focusIndicator = this.viewport.getFocusIndicator();
         if (focusIndicator !== null) {
-            this.focusOverlay.draw(focusIndicator, this.canvas.width, this.canvas.height);
+            this.focusOverlay.draw(focusIndicator);
+        } else {
+            this.focusOverlay.hide();
         }
 
         // The panel, its frosted blur and its drop shadow are no longer drawn
@@ -1602,10 +1604,12 @@ class Paint {
         if (Math.abs(totalScale - 1) < PINCH_SCALE_DEADZONE) return;
 
         const anchor = this._toScreen(event.centerX, event.centerY);
+        const focusBounds = this.viewport.worldRectToScreen(this.paintingRectangle);
         if (this.viewport.zoomViewAt(
             anchor.x,
             anchor.y,
-            this.pinchStartViewScale * totalScale
+            this.pinchStartViewScale * totalScale,
+            focusBounds
         )) {
             this.rebuildProjectionMatrix();
             this.needsRedraw = true;
@@ -1768,11 +1772,13 @@ class Paint {
 
         if (event.ctrlKey || event.metaKey) {
             const anchor = this.viewport.eventToScreen(event);
+            const focusBounds = this.viewport.worldRectToScreen(this.paintingRectangle);
             const factor = Math.exp(-event.deltaY * 0.0015);
             if (this.viewport.zoomViewAt(
                 anchor.x,
                 anchor.y,
-                this.viewport.viewScale * factor
+                this.viewport.viewScale * factor,
+                focusBounds
             )) {
                 this.rebuildProjectionMatrix();
                 this.needsRedraw = true;

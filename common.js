@@ -123,7 +123,6 @@ const APP_SHADERS = [
   // its way to empty.
   'shaders/shadow.frag',
   'shaders/rectborder.frag',
-  'shaders/focus.frag',
 ];
 
 /*

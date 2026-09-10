@@ -99,6 +99,29 @@ html, body {
   touch-action: none;
 }
 
+/* The focus cue deliberately sits outside #canvas-cell: zoom-in may show up
+   to 50px beyond an edge while tracking a pointer that left the canvas. */
+.focus-overlay {
+  position: absolute;
+  z-index: 10;
+  width: 108px;
+  height: 108px;
+  color: #0ea5e9;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  opacity: 0;
+}
+
+.focus-overlay.is-visible {
+  opacity: 1;
+}
+
+.focus-overlay svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 /* ---- The floating panel --------------------------------------------------
  *
  * Replaces panelProgram + blurProgram: the blur is a backdrop-filter, which is
