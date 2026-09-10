@@ -4,6 +4,8 @@
 // layer rules and canvas-coordinate transform belong to the importing host, not
 // to the fluid simulation.  The adapter never reads engine.brush/simulator.
 
+const TILECRAFT_BRUSH_SIZE_CORRECTION_RATE = 0.5;
+
 class TilecraftStrokePlayer {
   constructor(engine) {
     if (!engine || typeof engine.beginStroke !== 'function' ||
@@ -117,6 +119,364 @@ class TilecraftStrokePlayer {
       finishFastTicks();
     }
     return stats;
+  }
+
+  /**
+   * Compile Tilecraft input into one immutable execution order. The UI uses
+   * this plan for group/frame navigation; replay() and play() remain compatible
+   * with older sequential callers.
+   */
+  compile(model, options) {
+    const context = this._context(model, options);
+    const operations = [];
+    const visible = model.layers
+      .map((layer, layerIndex) => ({ layer, layerIndex }))
+      .filter(({ layer }) => layer && layer.visible);
+
+    for (const { layer, layerIndex } of visible.filter(({ layer }) => layer.tileShape === 'polyline')) {
+      context.stats.layers++;
+      let segmentOrdinal = 0;
+      for (const segment of this._polylineSegments(layer, context.stats, context)) {
+        const { tiles, closes, groupScale } = segment;
+        const sizes = tiles.map((tile) => this._tileSize(tile, layer, context, groupScale));
+        const brushSize = Math.max(...sizes);
+        const maximumRelativeSize = Math.max(...tiles.map((tile) => tile.s === undefined ? 1 : tile.s));
+        const firstTile = tiles[0];
+        const frameKey = this._frameKey(firstTile && firstTile.f);
+        const rawGroup = firstTile && firstTile.g !== undefined
+          ? String(firstTile.g)
+          : `ungrouped-${segmentOrdinal}`;
+        const segmentKey = `${layerIndex}:${frameKey}:${rawGroup}:${segmentOrdinal}`;
+        const mapped = [];
+        tiles.forEach((tile, sourceTileIndex) => {
+          const point = this._map(tile, layer, context);
+          if (!point) { context.stats.skipped++; return; }
+          mapped.push({ tile, sourceTileIndex, point });
+        });
+        if (!mapped.length) { segmentOrdinal++; continue; }
+
+        const color = this._color(firstTile.c, layer, context);
+        mapped.forEach((entry, pointIndex) => {
+          operations.push({
+            kind: 'polyline-point',
+            layerIndex,
+            layerTag: layer.tag,
+            frameKey,
+            frameLabel: this._frameLabel(firstTile.f),
+            groupKey: segmentKey,
+            groupLabel: firstTile.g === undefined ? `Group ${segmentOrdinal + 1}` : `Group ${firstTile.g}`,
+            segmentKey,
+            segmentStart: pointIndex === 0,
+            segmentEnd: pointIndex === mapped.length - 1 && !closes,
+            point: entry.point,
+            pressure: this._pressure(entry.tile, maximumRelativeSize, context),
+            brushSize,
+            color,
+            paintingRectangle: context.paintingRectangle,
+            resolutionScale: context.resolutionScale,
+            sourceTileIndex: entry.sourceTileIndex,
+          });
+        });
+        if (closes && mapped.length > 2) {
+          operations.push({
+            ...operations[operations.length - mapped.length],
+            segmentStart: false,
+            segmentEnd: true,
+            closure: true,
+          });
+        } else if (mapped.length) {
+          operations[operations.length - 1].segmentEnd = true;
+        }
+        segmentOrdinal++;
+      }
+    }
+
+    for (const { layer, layerIndex } of visible.filter(({ layer }) => layer.tileShape === 'polygon')) {
+      context.stats.layers++;
+      for (let sourceTileIndex = 0; sourceTileIndex < (layer.tiles || []).length; sourceTileIndex++) {
+        const tile = layer.tiles[sourceTileIndex];
+        if (!this._isDrawableTile(tile)) { context.stats.skipped++; continue; }
+        const point = this._map(tile, layer, context);
+        if (!point) { context.stats.skipped++; continue; }
+        const frameKey = this._frameKey(tile.f);
+        const groupKey = `${layerIndex}:${frameKey}:spot-${sourceTileIndex}`;
+        operations.push({
+          kind: 'polygon-spot',
+          layerIndex,
+          layerTag: layer.tag,
+          frameKey,
+          frameLabel: this._frameLabel(tile.f),
+          groupKey,
+          groupLabel: `Spot ${sourceTileIndex + 1}`,
+          point,
+          pressure: this._pressure(tile, tile.s === undefined ? 1 : tile.s, context),
+          brushSize: this._tileSize(tile, layer, context),
+          color: this._color(tile.c, layer, context),
+          paintingRectangle: context.paintingRectangle,
+          resolutionScale: context.resolutionScale,
+          sourceTileIndex,
+        });
+      }
+    }
+
+    operations.forEach((operation, index) => { operation.index = index; Object.freeze(operation); });
+    const plan = {
+      operations: Object.freeze(operations),
+      groupRanges: Object.freeze(this._boundaryRanges(operations, 'groupKey', 'groupLabel')),
+      frameRanges: Object.freeze(this._boundaryRanges(operations, 'frameKey', 'frameLabel')),
+      skipped: context.stats.skipped,
+      layers: context.stats.layers,
+    };
+    return Object.freeze(plan);
+  }
+
+  /**
+   * Play an immutable plan from one operation index. Painted indices reported
+   * by a registry are skipped, which is the no-double-deposit guarantee used
+   * by backward group/frame navigation.
+   */
+  async playPlan(plan, options = {}) {
+    if (!plan || !Array.isArray(plan.operations)) {
+      throw new TypeError('Tilecraft playPlan() requires a compiled playback plan.');
+    }
+    const startIndex = options.startIndex === undefined ? 0 : options.startIndex;
+    const stopAt = options.shouldStopAt === undefined ? plan.operations.length : options.shouldStopAt;
+    if (!Number.isInteger(startIndex) || startIndex < 0 || startIndex > plan.operations.length ||
+        !Number.isInteger(stopAt) || stopAt < startIndex || stopAt > plan.operations.length) {
+      throw new RangeError('Tilecraft playPlan() received an invalid operation range.');
+    }
+
+    const framesPerStep = options.framesPerStep === undefined ? 1 : options.framesPerStep;
+    const ticksPerFrame = options.ticksPerFrame === undefined ? 1 : options.ticksPerFrame;
+    const brushSizeMultiplier = options.brushSizeMultiplier === undefined ? 1 : options.brushSizeMultiplier;
+    if (!Number.isInteger(framesPerStep) || framesPerStep < 1 ||
+        !Number.isInteger(ticksPerFrame) || ticksPerFrame < 1 ||
+        (ticksPerFrame > 1 && framesPerStep !== 1)) {
+      throw new TypeError('Use positive integer framesPerStep or ticksPerFrame, not both.');
+    }
+    if (!Number.isFinite(brushSizeMultiplier) || brushSizeMultiplier <= 0) {
+      throw new TypeError('Tilecraft brushSizeMultiplier must be a positive finite number.');
+    }
+    if (ticksPerFrame > 1 && typeof options.advanceTick !== 'function') {
+      throw new TypeError('Fast Tilecraft playback requires options.advanceTick().');
+    }
+
+    const registry = options.registry;
+    const waitFrame = options.waitFrame || (() => new Promise((resolve) => {
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(resolve);
+      else resolve();
+    }));
+    const onPaint = options.onPaint || (() => {});
+    const onProgress = options.onProgress || (() => {});
+    const stats = { layers: plan.layers, strokes: 0, spots: 0, points: 0, skipped: plan.skipped };
+    let activeSegment = null;
+    let pendingIndex = null;
+    let previousIndex = null;
+    let nextIndex = startIndex;
+    let ticksThisFrame = 0;
+
+    const checkAbort = () => {
+      if (options.signal && options.signal.aborted) throw this._abortError();
+    };
+    const waitUntilReady = async () => {
+      checkAbort();
+      if (typeof options.waitUntilResumed === 'function') {
+        await options.waitUntilResumed(options.signal);
+      }
+      checkAbort();
+    };
+    const waitStep = async () => {
+      for (let i = 0; i < framesPerStep; i++) {
+        await waitUntilReady();
+        await waitFrame();
+        checkAbort();
+      }
+    };
+    const markPainted = (index, operation) => {
+      if (registry && typeof registry.markPainted === 'function') registry.markPainted(index, index + 1);
+      stats.points++;
+      if (operation.kind === 'polygon-spot') stats.spots++;
+      onProgress(this._planProgress(plan, registry, index + 1, operation, stats));
+    };
+    const advanceFast = async () => {
+      await options.advanceTick();
+      checkAbort();
+      ticksThisFrame++;
+      if (ticksThisFrame === ticksPerFrame) {
+        if (typeof options.resetAdvanceClock === 'function') options.resetAdvanceClock();
+        ticksThisFrame = 0;
+        await waitFrame();
+        checkAbort();
+      }
+    };
+    const closeStroke = () => {
+      if (activeSegment !== null) {
+        this.engine.endStroke();
+        activeSegment = null;
+        onPaint();
+      }
+    };
+
+    try {
+      for (let index = startIndex; index < stopAt; index++) {
+        nextIndex = index;
+        await waitUntilReady();
+        const operation = plan.operations[index];
+        if (registry && !registry.contains(index)) {
+          if (pendingIndex !== null) {
+            await waitStep();
+            markPainted(pendingIndex, plan.operations[pendingIndex]);
+            pendingIndex = null;
+          }
+          closeStroke();
+          previousIndex = index;
+          nextIndex = index + 1;
+          continue;
+        }
+
+        if (operation.kind === 'polygon-spot') {
+          if (pendingIndex !== null) {
+            await waitStep();
+            markPainted(pendingIndex, plan.operations[pendingIndex]);
+            pendingIndex = null;
+          }
+          closeStroke();
+          if (ticksPerFrame === 1) await waitStep();
+          this._beginPlanOperation(operation, brushSizeMultiplier);
+          stats.strokes++;
+          this.engine.endStroke();
+          markPainted(index, operation);
+          onPaint();
+          if (ticksPerFrame > 1) await advanceFast();
+          previousIndex = index;
+          nextIndex = index + 1;
+          continue;
+        }
+
+        const continuesSegment = activeSegment === operation.segmentKey && previousIndex === index - 1;
+        if (!continuesSegment) {
+          if (pendingIndex !== null) {
+            await waitStep();
+            markPainted(pendingIndex, plan.operations[pendingIndex]);
+            pendingIndex = null;
+          }
+          closeStroke();
+          this._beginPlanOperation(operation, brushSizeMultiplier);
+          activeSegment = operation.segmentKey;
+          stats.strokes++;
+          markPainted(index, operation); // beginStroke's live contact is immediate
+          onPaint();
+        } else {
+          if (pendingIndex !== null && ticksPerFrame === 1) {
+            await waitStep();
+            markPainted(pendingIndex, plan.operations[pendingIndex]);
+            pendingIndex = null;
+          }
+          this.engine.strokeTo({
+            x: operation.point.x, y: operation.point.y, pressure: operation.pressure,
+          });
+          onPaint();
+          if (ticksPerFrame > 1) {
+            await advanceFast();
+            markPainted(index, operation);
+          } else {
+            pendingIndex = index;
+          }
+        }
+
+        previousIndex = index;
+        nextIndex = index + 1;
+        if (operation.segmentEnd) {
+          if (pendingIndex !== null) {
+            await waitStep();
+            markPainted(pendingIndex, operation);
+            pendingIndex = null;
+          }
+          closeStroke();
+        }
+      }
+
+      if (pendingIndex !== null) {
+        await waitStep();
+        markPainted(pendingIndex, plan.operations[pendingIndex]);
+        pendingIndex = null;
+      }
+      closeStroke();
+      return { stats, nextIndex, completed: nextIndex >= plan.operations.length };
+    } finally {
+      // endStroke() flushes the final live mailbox target. If cancellation
+      // lands between strokeTo() and its timed tick, closing the stroke still
+      // deposits that endpoint, so acknowledge it exactly once in the registry.
+      if (pendingIndex !== null) {
+        closeStroke();
+        markPainted(pendingIndex, plan.operations[pendingIndex]);
+        pendingIndex = null;
+      } else {
+        closeStroke();
+      }
+      if (typeof options.resetAdvanceClock === 'function') options.resetAdvanceClock();
+    }
+  }
+
+  _beginPlanOperation(operation, brushSizeMultiplier = 1) {
+    this.engine.beginStroke({
+      timing: 'live',
+      x: operation.point.x,
+      y: operation.point.y,
+      pressure: operation.pressure,
+      brushSize: operation.brushSize * TILECRAFT_BRUSH_SIZE_CORRECTION_RATE * brushSizeMultiplier,
+      paintingRectangle: operation.paintingRectangle,
+      color: operation.color,
+      resolutionScale: operation.resolutionScale,
+    });
+  }
+
+  _boundaryRanges(operations, keyName, labelName) {
+    const ranges = [];
+    for (let index = 0; index < operations.length; index++) {
+      const operation = operations[index];
+      const previous = ranges[ranges.length - 1];
+      if (previous && previous.key === operation[keyName]) {
+        previous.end = index + 1;
+      } else {
+        ranges.push({ start: index, end: index + 1, key: operation[keyName], label: operation[labelName] });
+      }
+    }
+    return ranges.map((range) => Object.freeze(range));
+  }
+
+  _frameKey(value) {
+    return value === undefined || value === null ? 'frame:unassigned' : `frame:${String(value)}`;
+  }
+
+  _frameLabel(value) {
+    return value === undefined || value === null ? 'Unassigned frame' : `Frame ${value}`;
+  }
+
+  _planProgress(plan, registry, playheadIndex, operation, stats) {
+    const pendingOperations = registry ? registry.pendingCount : Math.max(0, plan.operations.length - playheadIndex);
+    return {
+      status: pendingOperations ? 'playing' : 'completed',
+      processedItems: plan.operations.length - pendingOperations,
+      totalItems: plan.operations.length,
+      processedStrokes: stats.strokes,
+      totalStrokes: plan.groupRanges.length,
+      layerIndex: operation.layerIndex,
+      layerTag: operation.layerTag,
+      frameId: operation.frameLabel,
+      groupId: operation.groupLabel,
+      modelTicks: stats.points,
+      playheadIndex,
+      paintedOperations: plan.operations.length - pendingOperations,
+      pendingOperations,
+      pendingRanges: registry ? registry.ranges.length : (pendingOperations ? 1 : 0),
+    };
+  }
+
+  _abortError() {
+    const error = new Error('Tilecraft playback was cancelled.');
+    error.name = 'AbortError';
+    return error;
   }
 
   _context(model, options) {
@@ -415,6 +775,8 @@ class TilecraftStrokePlayer {
     return best;
   }
 }
+
+TilecraftStrokePlayer.brushSizeCorrectionRate = TILECRAFT_BRUSH_SIZE_CORRECTION_RATE;
 
 if (typeof module !== 'undefined' && module.exports) module.exports = TilecraftStrokePlayer;
 if (typeof globalThis !== 'undefined') globalThis.TilecraftStrokePlayer = TilecraftStrokePlayer;

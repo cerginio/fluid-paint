@@ -85,27 +85,132 @@
             </div>
         </div>
 
-        <!-- Extension shell only. File/player actions are intentionally not
-             wired until their contracts are specified. It establishes the
-             adaptive adjacent panel, tabs and show/hide behaviour now. -->
-        <section id="panel-extension" hidden aria-label="Additional tools">
+        <section id="panel-extension" hidden aria-label="Story tools">
             <header class="panel-extension-header">
-                <div class="panel-extension-tabs" role="tablist">
-                    <button type="button" role="tab" data-extension-tab="file"
-                            aria-selected="true">File</button>
-                    <button type="button" role="tab" data-extension-tab="player"
-                            aria-selected="false">Player</button>
+                <div class="panel-extension-tabs" role="tablist" aria-label="Story tools">
+                    <button id="story-file-tab" type="button" role="tab"
+                            data-extension-tab="file" aria-selected="true"
+                            aria-controls="story-file-page">File</button>
+                    <button id="story-player-tab" type="button" role="tab"
+                            data-extension-tab="player" aria-selected="false" tabindex="-1"
+                            aria-controls="story-player-page">Player</button>
                 </div>
                 <button id="panel-extension-close" type="button"
-                        aria-label="Hide additional tools">×</button>
+                        aria-label="Hide story tools">×</button>
             </header>
-            <div class="panel-extension-page" data-extension-page="file">
-                <strong>File tools</strong>
-                <p>Open, import and project actions will live here.</p>
+
+            <div id="story-file-page" class="panel-extension-page"
+                 role="tabpanel" tabindex="0" aria-labelledby="story-file-tab"
+                 data-extension-page="file">
+                <input id="story-file-input" type="file"
+                       accept=".json,application/json" hidden>
+                <button id="story-file-dropzone" class="story-dropzone" type="button">
+                    <span class="story-drop-icon" aria-hidden="true">⇧</span>
+                    <strong>Drop Tilecraft JSON here</strong>
+                    <span>or choose a local file</span>
+                    <small>.json · max 25 MB</small>
+                </button>
+                <div id="story-file-status" class="story-status" aria-live="polite"></div>
+                <section id="story-file-summary" class="story-file-card" hidden>
+                    <div class="story-file-title">
+                        <span class="story-success" aria-hidden="true">✓</span>
+                        <div>
+                            <strong id="story-file-name"></strong>
+                            <small id="story-file-size"></small>
+                        </div>
+                    </div>
+                    <dl class="story-summary-grid">
+                        <div><dt>Content</dt><dd id="story-file-counts"></dd></div>
+                        <div><dt>Items</dt><dd id="story-file-items"></dd></div>
+                        <div><dt>Bounds</dt><dd id="story-file-bounds"></dd></div>
+                        <div><dt>Fit</dt><dd>Contain</dd></div>
+                    </dl>
+                    <p id="story-file-warnings" class="story-warning" hidden></p>
+                    <div class="story-actions">
+                        <button id="story-replace-file" type="button">Replace file</button>
+                        <button id="story-remove-file" type="button">Remove</button>
+                    </div>
+                    <button id="story-open-player" class="story-primary story-wide" type="button">
+                        Open Player →
+                    </button>
+                </section>
             </div>
-            <div class="panel-extension-page" data-extension-page="player" hidden>
-                <strong>Player</strong>
-                <p>Playback and timeline controls will live here.</p>
+
+            <div id="story-player-page" class="panel-extension-page"
+                 role="tabpanel" tabindex="0" aria-labelledby="story-player-tab"
+                 data-extension-page="player" hidden>
+                <div id="story-player-empty" class="story-empty">
+                    <strong>No story loaded</strong>
+                    <p>Load a Tilecraft JSON file to enable playback.</p>
+                    <button id="story-player-choose-file" class="story-primary" type="button">
+                        Choose file
+                    </button>
+                </div>
+
+                <div id="story-player-content" hidden>
+                    <strong id="story-player-file-name" class="story-player-file"></strong>
+                    <div id="story-player-status" class="story-status" role="status" aria-live="polite">Ready.</div>
+
+                    <div id="story-player-progress" class="story-progress" role="progressbar"
+                         aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                        <div id="story-player-progress-fill"></div>
+                    </div>
+                    <div id="story-player-coverage" class="story-progress-copy">0 / 0 operations</div>
+
+                    <nav class="story-boundary-navigation" aria-label="Story position">
+                        <button id="story-previous-frame" type="button"
+                                aria-label="Previous unpainted frame" title="Previous unpainted frame">⏮ Frame</button>
+                        <button id="story-previous-group" type="button"
+                                aria-label="Previous unpainted tile group" title="Previous unpainted group">‹ Group</button>
+                        <output id="story-playhead-label">Frame — · Group —</output>
+                        <button id="story-next-group" type="button">Group ›</button>
+                        <button id="story-next-frame" type="button">Frame ⏭</button>
+                    </nav>
+
+                    <div class="story-runtime-controls">
+                        <label class="story-field story-speed-field">
+                            <span>Speed</span>
+                            <select id="story-speed">
+                                <option value="0.25">0.25×</option>
+                                <option value="0.5">0.5×</option>
+                                <option value="1">1×</option>
+                                <option value="2">2×</option>
+                                <option value="4">4×</option>
+                                <option value="8" selected>8×</option>
+                                <option value="16">16×</option>
+                            </select>
+                        </label>
+                        <label class="story-thickness-field">
+                            <span>Thickness <output id="story-thickness-value">1.00×</output></span>
+                            <input id="story-thickness" type="range"
+                                   min="0.1" max="1.2" step="0.05" value="1">
+                        </label>
+                    </div>
+
+                    <fieldset id="story-canvas-policy" class="story-policy">
+                        <legend>Paint onto canvas</legend>
+                        <label><input type="radio" name="story-canvas" value="replace" checked> Replace current painting</label>
+                        <label><input type="radio" name="story-canvas" value="overlay"> Add over current painting</label>
+                    </fieldset>
+
+                    <div id="story-player-gaps" class="story-callout" hidden>
+                        <strong>Unpainted ranges remain</strong>
+                        <button id="story-paint-remaining" class="story-primary" type="button">Paint earliest remaining</button>
+                        <button id="story-keep-result" type="button">Keep result</button>
+                    </div>
+
+                    <div id="story-stop-decision" class="story-callout" hidden>
+                        <strong id="story-result-decision-title">Keep the partial painting?</strong>
+                        <button id="story-restore-baseline" class="story-primary" type="button">Restore canvas</button>
+                        <button id="story-keep-partial" type="button">Keep partial</button>
+                    </div>
+
+                    <footer class="story-transport">
+                        <button id="story-restart" type="button" disabled>Restart</button>
+                        <button id="story-play-pause" class="story-primary" type="button">Play</button>
+                        <button id="story-stop" type="button" disabled>Stop</button>
+                    </footer>
+                </div>
             </div>
         </section>
     </div>
@@ -157,6 +262,9 @@
     <script src="fluid-engine/renderer.js"></script>
     <script src="fluid-engine/index.js"></script>
     <script src="fluid-engine/tilecraft-stroke-player.js"></script>
+    <script src="app/unpainted-range-registry.js"></script>
+    <script src="app/story-file-loader.js"></script>
+    <script src="app/story-playback-controller.js"></script>
     <!-- colorpicker.js is GONE (Phase 8): the GL hue ring, its two programs and
          its hand-written hit tests are replaced by the iro.js wheel below. -->
     <!-- ryb.js BEFORE iro.js, not merely before color.js: iro builds its hue
@@ -172,6 +280,7 @@
     <script src="brushviewer.js"></script>
     <script src="app/ui/pointer-dispatcher.js"></script>
     <script src="app/ui/panel.js"></script>
+    <script src="app/ui/story-tools.js"></script>
     <script src="paint-setup.js"></script>
     <script src="paint.js"></script>
 
@@ -300,27 +409,6 @@
                                 if (!response.ok) throw new Error(`Story fixture: HTTP ${response.status}`);
                                 return response.json();
                             });
-                        const selectedFrame = story.frames.find((candidate) => candidate.selected);
-                        const framePoints = selectedFrame
-                            ? selectedFrame.points
-                            : story.frames.flatMap((frame) => frame.points || []);
-                        if (framePoints.length < 4) {
-                            throw new Error('Story fixture needs rectangular frame points.');
-                        }
-                        const sourceX = framePoints.map((point) => point.x);
-                        const sourceY = framePoints.map((point) => point.y);
-                        const left = Math.min(...sourceX), right = Math.max(...sourceX);
-                        const top = Math.min(...sourceY), bottom = Math.max(...sourceY);
-                        const target = painter.paintingRectangle;
-                        const scale = Math.min(target.width / (right - left), target.height / (bottom - top));
-                        const offsetX = target.left + (target.width - (right - left) * scale) / 2;
-                        const offsetY = target.bottom + (target.height - (bottom - top) * scale) / 2;
-
-                        painter.engine.clear();
-                        painter.needsRedraw = true;
-                        const player = new TilecraftStrokePlayer(painter.engine);
-                        window.__tilecraftStoryPlayer = player;
-                        window.__tilecraftStoryStarted = true;
                         // Speed is a true multiplier: storySpeed=8 advances
                         // eight complete model ticks per displayed RAF. The
                         // explicitly named storyFramesPerStep is the separate,
@@ -331,39 +419,19 @@
                             ? requestedSlowFrames
                             : 1;
                         const requestedSpeed = Number(params.get('storySpeed'));
-                        const ticksPerFrame = !hasSlowMode
+                        const speed = !hasSlowMode
                             ? (Number.isInteger(requestedSpeed) && requestedSpeed > 0 ? requestedSpeed : 8)
-                            : 1;
-                        let storyClock;
-                        const advanceStoryTick = () => {
-                            const wallNow = performance.now() / 1000;
-                            storyClock = Math.max(storyClock === undefined ? wallNow : storyClock, wallNow) + 1 / 60;
-                            painter.engine.advance(storyClock);
-                        };
-                        const resetStoryClock = () => {
-                            painter.engine.resetClock(performance.now() / 1000);
-                            storyClock = undefined;
-                        };
-                        const stats = await player.play(story, {
-                            paintingRectangle: target,
-                            resolutionScale: painter.getEffectiveResolutionScale(),
-                            // Mirrors polyline-lcr.js' responsive `cw`/`ch`
-                            // stroke factor. mapPoint below has its own source
-                            // -> target scale, supplied separately.
-                            canvasSize: { width: target.width, height: target.height },
-                            coordinateScale: scale,
-                            // Tilecraft's canvas y-axis is down; FluidEngine's
-                            // painting rectangle is bottom-left-origin.
-                            mapPoint: (tile) => ({
-                                x: offsetX + (tile.x - left) * scale,
-                                y: offsetY + (bottom - tile.y) * scale,
-                            }),
-                            framesPerStep,
-                            ticksPerFrame,
-                            advanceTick: advanceStoryTick,
-                            resetAdvanceClock: resetStoryClock,
-                            onPaint: () => { painter.needsRedraw = true; },
-                        });
+                            : 1 / framesPerStep;
+                        const controller = painter.storyPlaybackController;
+                        await controller.loadModel(
+                            story,
+                            StoryFileLoader.summarize(story, 'story-2026-09-08-4-frames.json')
+                        );
+                        controller.setSpeed([0.25, 0.5, 1, 2, 4, 8, 16].includes(speed) ? speed : 8);
+                        const playback = controller.play();
+                        window.__tilecraftStoryPlayer = controller.player;
+                        window.__tilecraftStoryStarted = true;
+                        const stats = await playback;
                         window.__tilecraftStoryStats = stats;
                         return stats;
                     };

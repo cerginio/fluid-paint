@@ -54,6 +54,9 @@ const paths = {
     // Optional Tilecraft story-model adapter. It only uses FluidEngine's public
     // Stroke API and is inert until a host constructs it.
     'fluid-engine/tilecraft-stroke-player.js',
+    'app/unpainted-range-registry.js',
+    'app/story-file-loader.js',
+    'app/story-playback-controller.js',
     // iro.js before app/ui/color.js, which constructs an iro.ColorPicker.
     // Vendored verbatim, MPL-2.0 -- see docs/UI-COMPONENTS.md. colorpicker.js
     // and its two GL programs are gone (Phase 8).
@@ -72,6 +75,7 @@ const paths = {
     'app/ui/pointer-dispatcher.js',
     // The floating tool panel (Phase 7). After the dispatcher, before paint.js.
     'app/ui/panel.js',
+    'app/ui/story-tools.js',
     'paint-setup.js',
     'paint.js'
 

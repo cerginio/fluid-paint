@@ -46,6 +46,9 @@ class ToolPanel {
     this.extension = options.extension || null;
     this.extensionToggle = options.extensionToggle || null;
     this.extensionClose = options.extensionClose || null;
+    this.onExtensionClose = options.onExtensionClose || (() => {});
+    this.extensionTabs = [];
+    this.extensionPages = [];
 
     this._dragPointerId = null;
     this._dragOffsetX = 0;
@@ -222,29 +225,51 @@ class ToolPanel {
       });
     }
 
-    const tabs = [...this.extension.querySelectorAll('[data-extension-tab]')];
-    const pages = [...this.extension.querySelectorAll('[data-extension-page]')];
-    for (const tab of tabs) {
+    this.extensionTabs = [...this.extension.querySelectorAll('[data-extension-tab]')];
+    this.extensionPages = [...this.extension.querySelectorAll('[data-extension-page]')];
+    for (const [index, tab] of this.extensionTabs.entries()) {
       tab.addEventListener('click', () => {
-        const selected = tab.getAttribute('data-extension-tab');
-        for (const candidate of tabs) {
-          candidate.setAttribute('aria-selected', candidate === tab ? 'true' : 'false');
-        }
-        for (const page of pages) {
-          page.hidden = page.getAttribute('data-extension-page') !== selected;
-        }
+        this.selectExtensionTab(tab.getAttribute('data-extension-tab'));
       });
+      tab.addEventListener('keydown', (event) => {
+        let nextIndex = index;
+        if (event.key === 'ArrowRight') nextIndex = (index + 1) % this.extensionTabs.length;
+        else if (event.key === 'ArrowLeft') nextIndex = (index - 1 + this.extensionTabs.length) % this.extensionTabs.length;
+        else if (event.key === 'Home') nextIndex = 0;
+        else if (event.key === 'End') nextIndex = this.extensionTabs.length - 1;
+        else return;
+        event.preventDefault();
+        const next = this.extensionTabs[nextIndex];
+        this.selectExtensionTab(next.getAttribute('data-extension-tab'), true);
+      });
+    }
+    const selected = this.extensionTabs.find((tab) => tab.getAttribute('aria-selected') === 'true');
+    if (selected) this.selectExtensionTab(selected.getAttribute('data-extension-tab'));
+  }
+
+  selectExtensionTab(selected, focus = false) {
+    if (!this.extension) return;
+    for (const tab of this.extensionTabs) {
+      const active = tab.getAttribute('data-extension-tab') === selected;
+      tab.setAttribute('aria-selected', active ? 'true' : 'false');
+      tab.setAttribute('tabindex', active ? '0' : '-1');
+      if (active && focus) tab.focus();
+    }
+    for (const page of this.extensionPages) {
+      page.hidden = page.getAttribute('data-extension-page') !== selected;
     }
   }
 
   setExtensionOpen(open) {
     if (!this.extension || !this.extensionToggle) return;
+    const wasOpen = !this.extension.hidden;
     const next = !!open && !this.isCollapsed();
     this.extension.hidden = !next;
     this.extensionToggle.setAttribute('aria-expanded', next ? 'true' : 'false');
     this.extensionToggle.textContent = next ? '−' : '+';
     this._placeExtension();
     this.onLayoutChange();
+    if (wasOpen && !next) this.onExtensionClose();
   }
 
   /** Use an adjacent side when it fits; otherwise overlay the base panel. */

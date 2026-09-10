@@ -1,5 +1,8 @@
 # Tilecraft story playback у Fluid Paint
 
+UI та product integration specification:
+[`TILECRAFT-PLAYER-UI-SPEC.md`](TILECRAFT-PLAYER-UI-SPEC.md).
+
 ## Призначення
 
 Ця фіча відтворює Tilecraft Story Model через публічний Stroke API
@@ -15,7 +18,7 @@ URL.
 Запустити development server і відкрити:
 
 ```text
-http://127.0.0.1:8081/?story=1
+http://127.0.0.1:3000/?story=1
 ```
 
 Сторінка очистить полотно, піджене обраний кадр Story Model (або об'єднання
@@ -80,33 +83,58 @@ display frame, браузер покаже менше FPS. Це свідомий
 ```text
 npm run test:tilecraft       # mapping, RYB, gd/canvas width, slow та fast modes
 npm run test:tilecraft:gpu   # запускає fixture зі storySpeed=8 у Chromium/WebGL
+npm run test:story-ui        # file import, transport, jumps, registry та mobile layout
 npm run build                # production bundle
 ```
 
 GPU-probe перевіряє, що playback стартує без GL error. Він не є вимірюванням
 плавності на конкретних GPU або великих полотнах.
 
-## План UI
+## Реалізований UI та runtime
 
-### P0 — керування вже реалізованим playback
+URL більше не є основним інтерфейсом. Кнопка `+` відкриває extension із
+вкладками **File** та **Player**.
 
-Мета: URL більше не повинен бути основним інтерфейсом для перегляду історії.
+- **File** приймає локальний `.json` через picker або drag-and-drop, перевіряє
+  кореневу структуру, типи drawable tiles, ліміт 25 MB і максимум 500 000
+  tiles. Після перевірки показує frames, groups, drawable items, bounds та
+  попередження про пропущений контент.
+- **Player** має `Play/Pause/Resume`, `Restart`, `Stop`, вибір швидкості
+  `0.25×…16×`, live-множник товщини `0.1×…1.2×` (default `1×`) та політику
+  `Replace current painting` / `Add over current painting`. Зміна speed або
+  thickness під час `Playing` застосовується через safe scheduler hand-off із
+  поточного playhead; painted registry не дозволяє повторне нанесення.
+  Фінальний розмір пензля обчислюється як
+  `calculatedBrushSize × 0.5 × brushSizeMultiplier`; UI-множник за замовчуванням
+  дорівнює `1`.
+- На старті controller зберігає baseline. Після `Stop` користувач явно обирає
+  `Restore canvas` або `Keep partial`; `Restart` відновлює baseline і не
+  накопичує попередній прогін.
+- `Previous/Next Group` і `Previous/Next Frame` працюють по межах immutable
+  compiled plan. Стрибок уперед лише змінює playhead і позначає пропущену
+  частину; назад доступні виключно pending-діапазони.
+- `UnpaintedRangeRegistry` зберігає нормалізовані half-open діапазони окремо
+  від DOM та engine. `TilecraftStrokePlayer.playPlan()` перевіряє registry
+  перед кожною операцією, тому нанесена фарба не дублюється.
+- Paint controls і canvas ніколи не стають `inert` через story. Початок
+  ручного жесту атомарно завершує поточний story stroke, ставить playback на
+  паузу і відразу передає brush користувачу. `Clear`, `Undo` та `Redo` мають ту
+  саму arbitration-поведінку. Якщо story уже завершена або очікує рішення,
+  ручна дія трактує видимий результат як `Keep result`.
+- Закриття extension ставить playback на паузу.
+- Панель має ARIA tabs і keyboard navigation; на viewport до 640 px вона стає
+  bottom sheet з touch targets не менше 44 px.
 
-1. Додати компактну, окрему від brush panel панель **Story playback**, яка
-   з'являється лише після завантаження Story Model.
-2. Додати `Play/Pause`, `Restart`, `Stop/Return to canvas` і selector швидкості
-   `0.25×, 0.5×, 1×, 2×, 4×, 8×, 16×`. Значення нижче 1× використовують
-   `storyFramesPerStep`; значення 1× і вище — `storySpeed`.
-3. Показувати progress: `оброблено точок / всього`, номер кадру, активний layer
-   та завершений/paused/error стан. Не підміняти прогрес числом RAF.
-4. Показувати діагностику `model ticks/s`, FPS та selected speed. При GPU-bound
-   8× UI має чесно показати, що фактична швидкість нижча за обрану.
-5. На початку playback зробити snapshot полотна; `Stop/Return` відновлює його,
-   `Restart` не накопичує фарбу поверх старої історії.
+Стан `Completed` досягається лише з порожнім registry. Якщо playhead дійшов до
+кінця, але після стрибків залишились прогалини, controller переходить у
+`completed-with-gaps` та пропонує домалювати найраніший pending range або
+свідомо залишити неповний результат.
 
-**Критерій готовності P0:** пауза не втрачає наступну точку, restart завжди
-дає той самий порядок Tilecraft input, а звичайне малювання не може одночасно
-мати активний story stroke.
+Ще не реалізована runtime-телеметрія `model ticks/s` і presentation FPS. UI
+показує обраний multiplier та точний operation coverage, але не видає обрану
+швидкість за фактично досягнуту.
+
+## Подальший план
 
 ### P1 — вибір контенту та кадрів
 
@@ -146,9 +174,14 @@ DevTools, а пряме посилання відтворює той самий 
   Не реалізовувати pause блокуванням JavaScript або накопиченням точок.
 - При старті, паузі, stop і помилці controller мусить коректно завершувати
   активний Stroke API stroke та повертати engine clock до wall time.
-- Поки active story playback існує, pointer dispatcher повинен або блокувати
-  ручне малювання, або спершу поставити історію на паузу; паралельні strokes
-  заборонені API.
+- Якщо під час active story playback починається ручне малювання, pointer
+  dispatcher спершу має дочекатися safe pause/cleanup історії; блокувати canvas
+  не можна, а паралельні strokes заборонені API.
+- Перед playback модель компілюється у стабільний лінійний plan із межами
+  `group`/`frame`. Registry оперує half-open діапазонами індексів цього plan,
+  а не сирими індексами `tiles`, які не враховують layer order і `b`-розриви.
+- Back-навігація не є rewind полотна: вона знаходить попередній перетин
+  group/frame з pending registry і малює тільки непромальований піддіапазон.
 - UI-параметри мають бути валідовані (`N` — скінченне додатне ціле), мати
   доступні labels/keyboard control та не закривати картину на narrow viewport.
 

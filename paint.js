@@ -216,7 +216,7 @@ class Paint {
         this.fluiditySlider = new Slider(
             document.getElementById('fluidity-slider'),
             this.engine.fluidity,
-            0.6,
+            0.1,
             0.9,
             (fluidity) => {
                 this.engine.setSimulation({ fluidity });
@@ -602,6 +602,9 @@ class Paint {
         // The floating panel: drag by the grip, tap the grip to collapse to the
         // compact bar. Replaces the old #panel-button, which could only toggle
         // a panel that was drawn at a fixed place in the canvas.
+        this.storyPlaybackController = typeof StoryPlaybackController !== 'undefined'
+            ? new StoryPlaybackController(this)
+            : null;
         const panelRoot = document.getElementById('ui');
         this.toolPanel = panelRoot
             ? new ToolPanel({
@@ -611,6 +614,11 @@ class Paint {
                 extension: document.getElementById('panel-extension'),
                 extensionToggle: document.getElementById('panel-extension-toggle'),
                 extensionClose: document.getElementById('panel-extension-close'),
+                onExtensionClose: () => {
+                    if (this.storyPlaybackController && this.storyPlaybackController.state === 'playing') {
+                        this.storyPlaybackController.pause();
+                    }
+                },
                 onHue: (hue) => {
                     // Hue only. Saturation, value and alpha are left alone, so
                     // the stripe cannot silently reset a colour the user mixed
@@ -620,6 +628,10 @@ class Paint {
                 },
                 onLayoutChange: () => this._syncPanelState(),
             })
+            : null;
+
+        this.storyTools = this.storyPlaybackController && typeof StoryToolsUI !== 'undefined'
+            ? new StoryToolsUI(this.storyPlaybackController, this.toolPanel)
             : null;
 
         if (this.toolPanel) {
@@ -1285,7 +1297,7 @@ class Paint {
         this.needsRedraw = true;
     }
 
-    onGestureStart = (event) => {
+    onGestureStart = async (event) => {
         // Right-click collapses/expands the panel; it never starts a stroke.
         // It goes through the panel rather than setting showPanel directly, so
         // the flag stays a MIRROR of the panel's state -- setting it here too
@@ -1294,6 +1306,12 @@ class Paint {
             if (this.toolPanel) this.toolPanel.toggleCollapsed();
             return;
         }
+
+        this._manualInputPending = true;
+        if (this.storyPlaybackController) {
+            await this.storyPlaybackController.yieldToManualInput();
+        }
+        this._manualInputPending = false;
 
         const position = this._toWorld(event.centerX, event.centerY);
         const mouseX = position.x;
@@ -1345,6 +1363,13 @@ class Paint {
             );
             this.brushInitialized = true;
         }
+
+        const queuedPan = this._queuedManualPan;
+        const queuedEnd = this._queuedManualEnd;
+        this._queuedManualPan = null;
+        this._queuedManualEnd = null;
+        if (queuedPan) this.onGesturePan(queuedPan);
+        if (queuedEnd) this.onGestureEnd(queuedEnd);
     };
 
     /**
@@ -1382,6 +1407,10 @@ class Paint {
     }
 
     onGesturePan = (event) => {
+        if (this._manualInputPending) {
+            this._queuedManualPan = event;
+            return;
+        }
         const position = this._toWorld(event.centerX, event.centerY);
         const mx = position.x;
         const my = position.y;
@@ -1488,7 +1517,9 @@ class Paint {
         this.mouseY = position.y;
 
         this.brushPressure = this._pressureScale(event.pressure, event.pointerType);
-        if (!this.brushInitialized) {
+        const storyMayOwnStroke = this.storyPlaybackController &&
+            ['playing', 'paused'].includes(this.storyPlaybackController.state);
+        if (!this.brushInitialized && !storyMayOwnStroke) {
             this.engine.initializeBrush(this.brushX, this.brushY,
                 this._brushHeight(event.pressure, event.pointerType), this.brushScale);
             this.brushInitialized = true;
@@ -1496,6 +1527,10 @@ class Paint {
     };
 
     onGestureEnd = (event) => {
+        if (this._manualInputPending) {
+            this._queuedManualEnd = event;
+            return;
+        }
         // Lift first: endStroke() flushes the final pointer position, so the
         // stroke reaches where the finger actually stopped rather than the last
         // resampled point. Also covers pointercancel and pointer loss, both of
@@ -1652,7 +1687,8 @@ class Paint {
     }
 
     // --- Editing & history ---
-    clear() {
+    async clear() {
+        if (this.storyPlaybackController) await this.storyPlaybackController.yieldToManualInput();
         this.engine.clear();
         this.needsRedraw = true;
     }
@@ -1712,7 +1748,8 @@ class Paint {
         return this.undoing && this.snapshotIndex <= this.maxRedoIndex - 1;
     }
 
-    undo() {
+    async undo() {
+        if (this.storyPlaybackController) await this.storyPlaybackController.yieldToManualInput();
         if (!this.undoing) {
             this.saveSnapshot();
             this.undoing = true;
@@ -1729,7 +1766,8 @@ class Paint {
         this.needsRedraw = true;
     }
 
-    redo() {
+    async redo() {
+        if (this.storyPlaybackController) await this.storyPlaybackController.yieldToManualInput();
         if (this.canRedo()) {
             this.applySnapshot(this.snapshots[this.snapshotIndex + 1]);
             this.snapshotIndex += 1;
@@ -1751,4 +1789,5 @@ class Paint {
                 : 'button do-button-inactive';
         }
     }
+
 }

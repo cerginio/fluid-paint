@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const TilecraftStrokePlayer = require('../fluid-engine/tilecraft-stroke-player.js');
+const UnpaintedRangeRegistry = require('../app/unpainted-range-registry.js');
 
 const calls = [];
 const engine = {
@@ -120,6 +121,66 @@ console.log('tilecraft stroke player: PASS (polyline paths before polygon spots)
   assert.equal(fastFrames, 1, 'two ticks share one displayed frame at 2x speed');
   assert.equal(clockResets, 1, 'synthetic playback time is returned to the host clock');
   console.log('tilecraft fast player: PASS (ticks retained at accelerated display rate)');
+
+  const planCalls = [];
+  const planEngine = {
+    beginStroke(options) { planCalls.push(['begin', options.x, options.brushSize]); },
+    strokeTo(options) { planCalls.push(['to', options.x]); },
+    endStroke() { planCalls.push(['end']); },
+  };
+  const planPlayer = new TilecraftStrokePlayer(planEngine);
+  const plan = planPlayer.compile({ layers: [{ visible: true, tileShape: 'polyline', gridSize: 2, tiles: [
+    { x: 0, y: 0, c: '#ff0000', g: 10, f: 1 },
+    { x: 1, y: 0, c: '#ff0000', g: 10, f: 1 },
+    { x: 2, y: 0, c: '#00ff00', g: 20, f: 2 },
+    { x: 3, y: 0, c: '#00ff00', g: 20, f: 2 },
+  ] }] }, {
+    paintingRectangle: { left: 0, bottom: 0, width: 10, height: 10 },
+  });
+  assert.equal(plan.operations.length, 4);
+  assert.deepEqual(plan.groupRanges.map(({ start, end }) => [start, end]), [[0, 2], [2, 4]]);
+  assert.deepEqual(plan.frameRanges.map(({ start, end }) => [start, end]), [[0, 2], [2, 4]]);
+
+  const registry = new UnpaintedRangeRegistry(plan.operations.length);
+  registry.markPainted(0, 2);
+  registry.markJump(2, 4, 'frame-jump');
+  assert.equal(registry.previousPendingFrame(4, plan).start, 2,
+    'backward frame navigation selects only an earlier unpainted range');
+  assert.equal(registry.previousPendingFrame(2, plan), null,
+    'already painted frame is never offered for backward replay');
+
+  await planPlayer.playPlan(plan, {
+    startIndex: 0,
+    registry,
+    ticksPerFrame: 2,
+    brushSizeMultiplier: 0.5,
+    advanceTick() {},
+    waitFrame: async () => {},
+  });
+  assert.deepEqual(planCalls, [['begin', 2, 0.5], ['to', 3], ['end']],
+    'playPlan combines the fixed brush-size correction with its runtime thickness multiplier');
+  assert.equal(TilecraftStrokePlayer.brushSizeCorrectionRate, 0.5,
+    'story playback exposes its fixed brush-size correction rate');
+  assert.equal(registry.pendingCount, 0);
+  console.log('tilecraft plan navigation: PASS (group/frame ranges and no double paint)');
+
+  const abortCalls = [];
+  const abortController = new AbortController();
+  const abortPlayer = new TilecraftStrokePlayer({
+    beginStroke() { abortCalls.push('begin'); },
+    strokeTo() { abortCalls.push('to'); },
+    endStroke() { abortCalls.push('end'); },
+  });
+  const abortPlan = abortPlayer.compile({ layers: [{ visible: true, tileShape: 'polyline', tiles: [
+    { x: 0, y: 0, c: '#ff0000', g: 1 },
+    { x: 1, y: 0, c: '#ff0000', g: 1 },
+  ] }] }, { paintingRectangle: { left: 0, bottom: 0, width: 10, height: 10 } });
+  await assert.rejects(abortPlayer.playPlan(abortPlan, {
+    signal: abortController.signal,
+    waitFrame: async () => { abortController.abort(); },
+  }), (error) => error.name === 'AbortError');
+  assert.equal(abortCalls.at(-1), 'end', 'abort always closes the active engine stroke');
+  console.log('tilecraft plan cancellation: PASS (AbortSignal closes stroke)');
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;
