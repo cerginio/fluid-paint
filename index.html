@@ -43,34 +43,71 @@
                 <span></span><span></span><span></span>
             </div>
             <div id="bar-hue-stripe"><div class="handle"></div></div>
+            <button id="panel-extension-toggle" type="button"
+                    aria-expanded="false" aria-controls="panel-extension"
+                    title="Show additional tools">+</button>
         </div>
 
         <div id="panel-body">
-            <div id="clear-button" class="button">Clear</div>
-            <a id="save-button" class="button">Save</a>
-            <div class="control-label">Quality</div>
-            <div class="buttons" id="qualities"></div>
-            <div style="clear:both"></div>
-            <div class="control-label">Color Mode</div>
-            <div class="buttons" id="models"></div>
-            <div style="clear:both"></div>
-            <div class="control-label">Paint Fluidity</div>
-            <div id="fluidity-slider" class="slider"></div>
-            <div class="control-label">Bristle Count</div>
-            <div id="bristles-slider" class="slider"></div>
-            <div class="control-label">Brush Size</div>
-            <div id="size-slider" class="slider"></div>
-            <div class="control-label">Paint Color</div>
-            <!-- The iro.js wheel mounts HERE (Phase 8). Until Phase 8 this was a
-                 reserved empty box that the GL picker was drawn on top of; now
-                 it holds the real widget, so the picker is laid out by the
-                 document like everything else and paint.js no longer positions
-                 it by hand. app/ui/color.js converts HSVA at the boundary --
-                 iro.js is RGB-native and the simulation is RYB. -->
-            <div id="color-picker-slot"></div>
-            <div id="undo-button" class="button">Undo</div>
-            <div id="redo-button" class="button">Redo</div>
+            <div class="panel-column panel-column-controls">
+                <div class="control-label">Paint Fluidity</div>
+                <div id="fluidity-slider" class="slider"></div>
+                <div class="control-label">Bristle Count</div>
+                <div id="bristles-slider" class="slider"></div>
+                <div class="control-label">Brush Size</div>
+                <div id="size-slider" class="slider"></div>
+                <div class="panel-actions panel-history-actions">
+                    <div id="undo-button" class="button">Undo</div>
+                    <div id="redo-button" class="button">Redo</div>
+                </div>
+                <div class="panel-bottom-controls">
+                    <div class="panel-actions panel-document-actions">
+                        <div id="clear-button" class="button">Clear</div>
+                        <a id="save-button" class="button">Save</a>
+                    </div>
+                    <div class="control-label">Quality</div>
+                    <div class="buttons" id="qualities"></div>
+                    <div class="buttons" id="models"></div>
+                </div>
+            </div>
+
+            <div class="panel-column panel-column-color">
+                <!-- The iro.js wheel mounts HERE (Phase 8). It is DOM content,
+                     so the two-column layout can size it directly. -->
+                <div id="color-picker-slot">
+                    <div id="color-picker-widget"></div>
+                    <div class="color-readout" aria-live="polite">
+                        <output id="paint-color-hex" role="button" tabindex="0"
+                                aria-label="Copy paint color" title="Copy paint color">#000000</output>
+                        <span id="paint-color-model">RYB</span>
+                    </div>
+                </div>
+            </div>
         </div>
+
+        <!-- Extension shell only. File/player actions are intentionally not
+             wired until their contracts are specified. It establishes the
+             adaptive adjacent panel, tabs and show/hide behaviour now. -->
+        <section id="panel-extension" hidden aria-label="Additional tools">
+            <header class="panel-extension-header">
+                <div class="panel-extension-tabs" role="tablist">
+                    <button type="button" role="tab" data-extension-tab="file"
+                            aria-selected="true">File</button>
+                    <button type="button" role="tab" data-extension-tab="player"
+                            aria-selected="false">Player</button>
+                </div>
+                <button id="panel-extension-close" type="button"
+                        aria-label="Hide additional tools">×</button>
+            </header>
+            <div class="panel-extension-page" data-extension-page="file">
+                <strong>File tools</strong>
+                <p>Open, import and project actions will live here.</p>
+            </div>
+            <div class="panel-extension-page" data-extension-page="player" hidden>
+                <strong>Player</strong>
+                <p>Playback and timeline controls will live here.</p>
+            </div>
+        </section>
     </div>
 
     <!--

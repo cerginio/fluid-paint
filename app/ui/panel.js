@@ -37,11 +37,15 @@ class ToolPanel {
    */
   constructor(options) {
     this.root = options.root;
+    this.bar = this.root.querySelector('#panel-bar');
     this.grip = options.grip;
     this.hueStripe = options.hueStripe;
     this.hueHandle = this.hueStripe ? this.hueStripe.querySelector('.handle') : null;
     this.onHue = options.onHue || (() => {});
     this.onLayoutChange = options.onLayoutChange || (() => {});
+    this.extension = options.extension || null;
+    this.extensionToggle = options.extensionToggle || null;
+    this.extensionClose = options.extensionClose || null;
 
     this._dragPointerId = null;
     this._dragOffsetX = 0;
@@ -53,11 +57,17 @@ class ToolPanel {
 
     this._installDrag();
     this._installHueStripe();
+    this._installExtension();
 
     // Start collapsed on a phone: the painting is what the user came for, and
     // the bar alone is enough to paint with.
-    if (window.innerWidth <= PANEL_COLLAPSE_BELOW_CSS_WIDTH) {
+    const coarsePhone = typeof matchMedia === 'function' &&
+      matchMedia('(pointer: coarse) and (hover: none)').matches &&
+      Math.min(screen.width, screen.height) <= PANEL_COLLAPSE_BELOW_CSS_WIDTH;
+    if (window.innerWidth <= PANEL_COLLAPSE_BELOW_CSS_WIDTH || coarsePhone) {
       this.setCollapsed(true);
+    } else {
+      this.clampIntoView();
     }
 
     // Keep the panel on screen when the window changes. A panel dragged to the
@@ -74,10 +84,12 @@ class ToolPanel {
   }
 
   setCollapsed(collapsed) {
+    const barTop = this._barTop();
     this.root.setAttribute('data-collapsed', collapsed ? 'true' : 'false');
+    if (collapsed) this.setExtensionOpen(false);
     // The body is hidden by CSS; the panel's height changes, so a panel pinned
     // near the bottom edge could end up mostly off screen when it expands.
-    this.clampIntoView();
+    this.moveTo(this.root.getBoundingClientRect().left, barTop);
     this.onLayoutChange();
   }
 
@@ -97,9 +109,10 @@ class ToolPanel {
       event.preventDefault();
 
       const rect = this.root.getBoundingClientRect();
+      const barRect = this.bar.getBoundingClientRect();
       this._dragPointerId = event.pointerId;
       this._dragOffsetX = event.clientX - rect.left;
-      this._dragOffsetY = event.clientY - rect.top;
+      this._dragOffsetY = event.clientY - barRect.top;
       this._dragMoved = false;
 
       // Capture on the grip, so a fast drag that outruns the pointer still
@@ -117,11 +130,12 @@ class ToolPanel {
       // toggle would never fire.
       const DRAG_SLOP = 3;
       const rect = this.root.getBoundingClientRect();
+      const barRect = this.bar.getBoundingClientRect();
       const nextLeft = event.clientX - this._dragOffsetX;
       const nextTop = event.clientY - this._dragOffsetY;
 
       if (!this._dragMoved &&
-          Math.abs(nextLeft - rect.left) + Math.abs(nextTop - rect.top) > DRAG_SLOP) {
+          Math.abs(nextLeft - rect.left) + Math.abs(nextTop - barRect.top) > DRAG_SLOP) {
         this._dragMoved = true;
       }
       if (!this._dragMoved) return;
@@ -141,11 +155,19 @@ class ToolPanel {
     this.grip.addEventListener('pointercancel', endDrag);
   }
 
-  /** Move the panel, keeping it reachable. */
-  moveTo(left, top) {
-    const clamped = this._clampPosition(left, top);
+  /** Move the panel by its header coordinate, keeping that header reachable. */
+  moveTo(left, barTop) {
+    const barHeight = this.bar.getBoundingClientRect().height || 40;
+    const viewportHeight = this._viewportHeight();
+    const bodyAbove = !this.isCollapsed() && barTop + barHeight / 2 > viewportHeight / 2;
+    this.root.setAttribute('data-body-placement', bodyAbove ? 'above' : 'below');
+
+    const clamped = this._clampPosition(left, barTop);
+    const rootHeight = this.root.getBoundingClientRect().height;
+    const rootTop = bodyAbove ? clamped.top - (rootHeight - barHeight) : clamped.top;
     this.root.style.left = clamped.left + 'px';
-    this.root.style.top = clamped.top + 'px';
+    this.root.style.top = rootTop + 'px';
+    this._placeExtension();
     this.onLayoutChange();
   }
 
@@ -158,21 +180,87 @@ class ToolPanel {
    * unreachable, and that means keeping the BAR visible, since the grip lives
    * on it.
    */
-  _clampPosition(left, top) {
+  _clampPosition(left, barTop) {
     const rect = this.root.getBoundingClientRect();
+    const barHeight = this.bar.getBoundingClientRect().height || 40;
     const MIN_VISIBLE = 56;
     const maxLeft = window.innerWidth - MIN_VISIBLE;
-    const maxTop = window.innerHeight - MIN_VISIBLE;
+    const maxTop = this._viewportHeight() - barHeight;
 
     return {
       left: Math.max(MIN_VISIBLE - rect.width, Math.min(maxLeft, left)),
-      top: Math.max(0, Math.min(maxTop, top)),
+      top: Math.max(0, Math.min(maxTop, barTop)),
     };
   }
 
   clampIntoView() {
     const rect = this.root.getBoundingClientRect();
-    this.moveTo(rect.left, rect.top);
+    this.moveTo(rect.left, this._barTop());
+  }
+
+  _viewportHeight() {
+    return window.visualViewport ? window.visualViewport.height : window.innerHeight;
+  }
+
+  _barTop() {
+    return this.bar ? this.bar.getBoundingClientRect().top : this.root.getBoundingClientRect().top;
+  }
+
+  // --- extension shell -----------------------------------------------------
+
+  _installExtension() {
+    if (!this.extension || !this.extensionToggle) return;
+
+    this.extensionToggle.addEventListener('click', (event) => {
+      event.preventDefault();
+      this.setExtensionOpen(this.extension.hidden);
+    });
+    if (this.extensionClose) {
+      this.extensionClose.addEventListener('click', (event) => {
+        event.preventDefault();
+        this.setExtensionOpen(false);
+      });
+    }
+
+    const tabs = [...this.extension.querySelectorAll('[data-extension-tab]')];
+    const pages = [...this.extension.querySelectorAll('[data-extension-page]')];
+    for (const tab of tabs) {
+      tab.addEventListener('click', () => {
+        const selected = tab.getAttribute('data-extension-tab');
+        for (const candidate of tabs) {
+          candidate.setAttribute('aria-selected', candidate === tab ? 'true' : 'false');
+        }
+        for (const page of pages) {
+          page.hidden = page.getAttribute('data-extension-page') !== selected;
+        }
+      });
+    }
+  }
+
+  setExtensionOpen(open) {
+    if (!this.extension || !this.extensionToggle) return;
+    const next = !!open && !this.isCollapsed();
+    this.extension.hidden = !next;
+    this.extensionToggle.setAttribute('aria-expanded', next ? 'true' : 'false');
+    this.extensionToggle.textContent = next ? '−' : '+';
+    this._placeExtension();
+    this.onLayoutChange();
+  }
+
+  /** Use an adjacent side when it fits; otherwise overlay the base panel. */
+  _placeExtension() {
+    if (!this.extension || this.extension.hidden) return;
+    const panel = this.root.getBoundingClientRect();
+    const extensionWidth = this.extension.getBoundingClientRect().width;
+    const gap = 8;
+    const roomRight = window.innerWidth - panel.right;
+    const roomLeft = panel.left;
+
+    let side;
+    if (roomRight >= extensionWidth + gap) side = 'right';
+    else if (roomLeft >= extensionWidth + gap) side = 'left';
+    else side = panel.left + panel.width / 2 < window.innerWidth / 2 ? 'overlay-right' : 'overlay-left';
+    this.root.setAttribute('data-extension-side', side);
   }
 
   // --- the hue stripe -------------------------------------------------------

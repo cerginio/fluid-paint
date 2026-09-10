@@ -83,9 +83,9 @@ frame make the first frame's scale spike — measured ~1.19 for a span that neve
 changed — so a per-frame scale test flips the mode to RESIZING and a two-finger
 drag silently becomes a resize. `onGesturePinch()` therefore measures the span
 against the span the *gesture started with* (`pinchStartSpan`), which cannot
-spike because it starts at exactly 1, and gates on `PINCH_SCALE_DEADZONE`. The
-resize scales from `pinchStartRectangle` rather than the running rectangle so
-the total ratio does not compound frame over frame.
+spike because it starts at exactly 1, and gates on `PINCH_SCALE_DEADZONE`. It
+applies the total ratio to `pinchStartViewScale`, so zoom cannot compound frame
+over frame and never enters the destructive resize path.
 
 **`getResizingSide()` was NOT deleted**, though the extraction plan called for
 it. A pinch has a scale about a centroid but no notion of *which* edge is being
@@ -94,6 +94,12 @@ dragged, and that is what drives the asymmetric clamping in
 and the resize **cursor** (`cursorForResizingSide`). Deleting it would have
 replaced edge-anchored mouse resizing with centroid scaling — a different
 feature, not the same one. Pinch was added *alongside* it as the touch path.
+
+The floating `ToolPanel` now treats its compact bar as the stable drag anchor.
+Its body opens below that bar in the upper viewport half and above it in the
+lower half, with a sub-half-viewport scroll cap. The optional File/Player
+extension chooses a free adjacent side and falls back to an in-panel overlay on
+narrow phones.
 
 ### What the goldens cannot see
 

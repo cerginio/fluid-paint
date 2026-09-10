@@ -18,6 +18,9 @@ const PaintState = {
     // scales with the square of the ratio.
     pixelRatioEnabled: true,
     maxPixelRatio: 2,
+    // CSS capability media may lower the cap on coarse mobile devices. A URL
+    // override disables that policy so diagnostics can still force any DPR.
+    useResponsivePixelRatioCap: true,
 
     // Hard ceiling on GPU memory for the resolution-dependent render targets.
     //
@@ -69,6 +72,7 @@ const PaintState = {
     } else {
         PaintState.maxPixelRatio = value;
     }
+    PaintState.useResponsivePixelRatioCap = false;
     console.log('[viewport] dpr override:', raw);
 })();
 

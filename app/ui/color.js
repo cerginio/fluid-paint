@@ -97,6 +97,8 @@ class ColorControl {
   /**
    * @param {Object}   options
    * @param {HTMLElement} options.element   the slot to mount into
+   * @param {HTMLElement} options.hexElement selected pigment hex output
+   * @param {HTMLElement} options.modelElement active RYB/RGB label
    * @param {function(): number[]} options.getHSVA  live [h,s,v,a], all 0..1
    * @param {function(): void} options.onChange  called after the array is edited
    * @param {function(): boolean} [options.isAdditive]  true while the Digital
@@ -104,8 +106,10 @@ class ColorControl {
    *   actually using, so flipping the toggle must repaint the widget -- see
    *   `setAdditive()`. Defaults to Natural (subtractive) when not supplied.
    */
-  constructor({ element, getHSVA, onChange, isAdditive }) {
+  constructor({ element, hexElement, modelElement, getHSVA, onChange, isAdditive }) {
     this.element = element;
+    this.hexElement = hexElement;
+    this.modelElement = modelElement;
     this.getHSVA = getHSVA;
     this.onChange = onChange || (() => {});
     this.isAdditive = isAdditive || (() => false);
@@ -161,6 +165,18 @@ class ColorControl {
       this._readFromWidget(color);
     });
 
+    this._copyHandler = () => this._copyHex();
+    this._copyKeyHandler = (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      this._copyHex();
+    };
+    if (this.hexElement) {
+      this.hexElement.addEventListener('click', this._copyHandler);
+      this.hexElement.addEventListener('keydown', this._copyKeyHandler);
+    }
+    this._updateReadout();
+
     /*
      * Resize with the slot. The panel is draggable and the layout has
      * breakpoints, so the slot's width is not fixed -- and iro.js sizes itself
@@ -181,6 +197,9 @@ class ColorControl {
 
   _resize() {
     const width = this._measureWidth();
+    if (this.element.parentElement) {
+      this.element.parentElement.style.setProperty('--picker-wheel-size', width + 'px');
+    }
     if (width === this.picker.state.width) return;
     this.picker.resize(width);
   }
@@ -206,6 +225,48 @@ class ColorControl {
     // vdom pass, which is exactly what is wanted: the colour did not move,
     // only the space it is drawn in.
     this.picker.setState({ color: this.picker.color });
+    this._updateReadout();
+  }
+
+  /** Return the colour actually displayed/deposited by the active paint model. */
+  _pigmentHex() {
+    const hsva = this.getHSVA();
+    const rgb = hsvToPigmentRgb(hsva[0], hsva[1], hsva[2], this.isAdditive());
+    const channel = (value) => Math.round(Math.max(0, Math.min(1, value)) * 255)
+      .toString(16).padStart(2, '0');
+    return ('#' + channel(rgb[0]) + channel(rgb[1]) + channel(rgb[2])).toUpperCase();
+  }
+
+  _updateReadout() {
+    if (this.hexElement) this.hexElement.textContent = this._pigmentHex();
+    if (this.modelElement) this.modelElement.textContent = this.isAdditive() ? 'RGB' : 'RYB';
+  }
+
+  async _copyHex() {
+    const hex = this._pigmentHex();
+    try {
+      await navigator.clipboard.writeText(hex);
+      if (this.hexElement) {
+        this.hexElement.dataset.copied = 'true';
+        this.hexElement.title = 'Copied ' + hex;
+        this.hexElement.setAttribute('aria-label', 'Copied ' + hex);
+        window.setTimeout(() => {
+          delete this.hexElement.dataset.copied;
+          this.hexElement.title = 'Copy paint color';
+          this.hexElement.setAttribute('aria-label', 'Copy paint color');
+        }, 1200);
+      }
+    } catch (error) {
+      // Clipboard access can be denied outside a secure context. Keep the
+      // current value selectable/copyable instead of changing paint state.
+      if (this.hexElement) {
+        const selection = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(this.hexElement);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+    }
   }
 
   /*
@@ -253,6 +314,7 @@ class ColorControl {
     hsva[2] = hsv.v / PERCENT;
     hsva[3] = color.alpha;
 
+    this._updateReadout();
     this.onChange();
   }
 
@@ -271,6 +333,7 @@ class ColorControl {
         v: hsva[2] * PERCENT,
         a: hsva[3],
       });
+      this._updateReadout();
     } finally {
       // In a finally so a throw inside iro.js cannot leave the control wedged
       // permanently ignoring its own events -- which would look like a picker
@@ -283,6 +346,10 @@ class ColorControl {
    *  a second host might, and an observer on a removed element leaks. */
   destroy() {
     this.observer.disconnect();
+    if (this.hexElement) {
+      this.hexElement.removeEventListener('click', this._copyHandler);
+      this.hexElement.removeEventListener('keydown', this._copyKeyHandler);
+    }
   }
 }
 

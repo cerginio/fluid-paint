@@ -45,6 +45,9 @@ class Viewport {
     this.canvas = canvas;
     this.maxPixelRatio = opts.maxPixelRatio !== undefined ? opts.maxPixelRatio : 2;
     this.pixelRatioEnabled = opts.pixelRatioEnabled !== undefined ? opts.pixelRatioEnabled : true;
+    this.useResponsivePixelRatioCap = opts.useResponsivePixelRatioCap !== undefined
+      ? opts.useResponsivePixelRatioCap
+      : true;
 
     // The element whose CSS box decides the canvas size (Phase 7). Before this
     // the size came from window.innerWidth/innerHeight directly, which pinned
@@ -70,6 +73,19 @@ class Viewport {
     this.pixelRatio = 1;
     this.cssWidth = 0;
     this.cssHeight = 0;
+    // Quarter-turn applied only to the presentation canvas. The simulation and
+    // painting rectangle stay in their original coordinate system; rotating
+    // those would alter saved pixels rather than merely following the device.
+    this.presentationRotation = 0;
+
+    // Presentation-only camera. World coordinates remain stable for the
+    // simulation and export; zoom/pan only decide where those coordinates land
+    // in the canvas backing store.
+    this.viewScale = 1;
+    this.viewOffsetX = 0;
+    this.viewOffsetY = 0;
+    this.minViewScale = opts.minViewScale !== undefined ? opts.minViewScale : 0.25;
+    this.maxViewScale = opts.maxViewScale !== undefined ? opts.maxViewScale : 8;
 
     this.resize();
   }
@@ -81,7 +97,23 @@ class Viewport {
   computePixelRatio() {
     if (!this.pixelRatioEnabled) return 1;
     const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
-    return Math.max(1, Math.min(this.maxPixelRatio, dpr));
+    let cap = this.maxPixelRatio;
+
+    // Width media alone cannot identify an Android phone in "Desktop site"
+    // mode. CSS capability media publishes the device policy as a custom
+    // property; explicit ?dpr= diagnostics opt out through the constructor.
+    if (this.useResponsivePixelRatioCap &&
+        typeof getComputedStyle === 'function' && this.canvas) {
+      const raw = getComputedStyle(this.canvas)
+        .getPropertyValue('--canvas-max-pixel-ratio')
+        .trim();
+      const responsiveCap = Number.parseFloat(raw);
+      if (Number.isFinite(responsiveCap) && responsiveCap > 0) {
+        cap = Math.min(cap, responsiveCap);
+      }
+    }
+
+    return Math.max(1, Math.min(cap, dpr));
   }
 
   /**
@@ -103,13 +135,23 @@ class Viewport {
       // built from it, so refuse to act on a degenerate box and keep the last
       // good size instead.
       if (rect.width > 0 && rect.height > 0) {
-        return { width: rect.width, height: rect.height };
+        return this.presentationRotation % 2 === 0
+          ? { width: rect.width, height: rect.height }
+          : { width: rect.height, height: rect.width };
       }
       if (this.cssWidth > 0 && this.cssHeight > 0) {
         return { width: this.cssWidth, height: this.cssHeight };
       }
     }
     return { width: window.innerWidth, height: window.innerHeight };
+  }
+
+  /** Rotate the presentation canvas by a quarter turn, without rotating paint data. */
+  setPresentationRotation(quarterTurns) {
+    const normalized = ((quarterTurns % 4) + 4) % 4;
+    const changed = this.presentationRotation !== normalized;
+    this.presentationRotation = normalized;
+    return changed;
   }
 
   /**
@@ -159,6 +201,23 @@ class Viewport {
     if (this.container !== null || pixelRatio !== 1) {
       this.canvas.style.width = cssWidth + 'px';
       this.canvas.style.height = cssHeight + 'px';
+    }
+
+    if (this.container !== null) {
+      const containerRect = this.container.getBoundingClientRect();
+      if (this.presentationRotation === 0) {
+        this.canvas.style.left = '0px';
+        this.canvas.style.top = '0px';
+        this.canvas.style.transform = '';
+        this.canvas.style.transformOrigin = '';
+      } else {
+        // Centre the unrotated layout box first; rotating around that centre
+        // then makes its swapped bounds exactly fill the container.
+        this.canvas.style.left = (containerRect.width - cssWidth) * 0.5 + 'px';
+        this.canvas.style.top = (containerRect.height - cssHeight) * 0.5 + 'px';
+        this.canvas.style.transform = 'rotate(' + (this.presentationRotation * 90) + 'deg)';
+        this.canvas.style.transformOrigin = 'center center';
+      }
     }
 
     return changed;
@@ -230,14 +289,28 @@ class Viewport {
    * bottom-left).
    */
   cssToScreen(x, y) {
+    if (this.presentationRotation === 1) {
+      return { x: y * this.pixelRatio, y: x * this.pixelRatio };
+    }
     const ratio = this.pixelRatio;
     return { x: x * ratio, y: this.height - y * ratio };
   }
 
   /** The inverse of cssToScreen, for anything that has to hand a value back. */
   screenToCss(x, y) {
+    if (this.presentationRotation === 1) {
+      return { x: y / this.pixelRatio, y: x / this.pixelRatio };
+    }
     const ratio = this.pixelRatio;
     return { x: x / ratio, y: (this.height - y) / ratio };
+  }
+
+  /** A CSS-space drag delta expressed in the rotated canvas's screen space. */
+  cssDeltaToScreen(dx, dy) {
+    if (this.presentationRotation === 1) {
+      return { x: dy * this.pixelRatio, y: dx * this.pixelRatio };
+    }
+    return { x: dx * this.pixelRatio, y: -dy * this.pixelRatio };
   }
 
   /**
@@ -247,6 +320,57 @@ class Viewport {
    */
   cssLengthToScreen(length) {
     return length * this.pixelRatio;
+  }
+
+  // --- world <-> screen view transform ------------------------------------
+
+  worldToScreen(x, y) {
+    return {
+      x: x * this.viewScale + this.viewOffsetX,
+      y: y * this.viewScale + this.viewOffsetY,
+    };
+  }
+
+  screenToWorld(x, y) {
+    return {
+      x: (x - this.viewOffsetX) / this.viewScale,
+      y: (y - this.viewOffsetY) / this.viewScale,
+    };
+  }
+
+  worldDeltaToScreen(dx, dy) {
+    return { x: dx * this.viewScale, y: dy * this.viewScale };
+  }
+
+  screenDeltaToWorld(dx, dy) {
+    return { x: dx / this.viewScale, y: dy / this.viewScale };
+  }
+
+  worldRectToScreen(rectangle) {
+    const origin = this.worldToScreen(rectangle.left, rectangle.bottom);
+    return new Rectangle(
+      origin.x,
+      origin.y,
+      rectangle.width * this.viewScale,
+      rectangle.height * this.viewScale
+    );
+  }
+
+  panViewBy(dx, dy) {
+    this.viewOffsetX += dx;
+    this.viewOffsetY += dy;
+  }
+
+  /** Set absolute zoom while keeping the world point beneath the anchor fixed. */
+  zoomViewAt(screenX, screenY, nextScale) {
+    const anchor = this.screenToWorld(screenX, screenY);
+    const scale = Math.max(this.minViewScale, Math.min(this.maxViewScale, nextScale));
+    if (scale === this.viewScale) return false;
+
+    this.viewScale = scale;
+    this.viewOffsetX = screenX - anchor.x * scale;
+    this.viewOffsetY = screenY - anchor.y * scale;
+    return true;
   }
 
   // --- screen <-> painting --------------------------------------------------

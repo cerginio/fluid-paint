@@ -7,9 +7,10 @@ function setupDebugCanvas({
   } = {}) {
     const c = document.createElement('canvas');
     c.width = w; c.height = h;
+    c.className = 'debug-texture-probe';
     Object.assign(c.style, {
       position: 'fixed',
-      zIndex: 99999,
+      zIndex: 8,
       imageRendering: 'pixelated',
       border: '1px solid rgba(255,255,255,.3)',
       background: '#111',
@@ -142,4 +143,3 @@ function setupDebugCanvas({
   
     return { presentTextureToCanvas2D };
   }
-  

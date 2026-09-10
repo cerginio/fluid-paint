@@ -913,8 +913,10 @@ on", at the user's direction. It is the only flag whose cost is paid every frame
 *while painting*, and with a one-tap toggle it no longer needs a reload to reach.
 The other two are unchanged and the decomposition rule stands.
 
-The bottom-right stack is offset `bottom: 280px` to clear the probe's own 256px
-canvas — otherwise the button needed to turn the probe off sits underneath it.
+The toggles are compact inline-SVG icon buttons. On touch layouts they form a
+bottom-right stack; the bug button stays on the bottom safe edge even while the
+probe is absent. The panel has the higher stacking level, so debug chrome never
+intercepts a panel control.
 
 ### The brush preview was painting the wrong colour too
 
@@ -1217,28 +1219,17 @@ phones score 3.7 where the tablet scores 5.
 **Phase 7 fixed none of them, and that is worth stating plainly.** Phase 7 was
 the layout: chrome out of the canvas, panel floating, canvas sized by its
 container. It helps the *symptom* behind the scores (the painting no longer
-loses width to chrome) but it does not touch the three causes below. Finding 1
-in particular is still live: pinch zoom-out still destroys paint.
+loses width to chrome). Finding 1 was resolved by the view-transform work
+specified in `VIEW-ZOOM-AND-MOBILE-LAYOUT-SPEC.md`.
 
 Carry them into whichever phase takes them. Finding 1 is the one that loses user
 data, so it should not wait behind Phase 8's colour picker.
 
-**1. Pinch zoom-out crops the image, because zoom and resize are the same
-gesture.** Zoom **in** is good. Zoom **out** shrinks the painting *rectangle*,
-and shrinking the rectangle destroys paint outside it — the user loses image
-content to what they read as a view operation. This is inherited behaviour, not
-a Phase 6 regression: `onGesturePinch()` was deliberately wired to
-`_resizePaintingTo()` because that is what a pinch had to mean when the
-rectangle was the only spatial state there was.
-
-The fix is to **separate view zoom from canvas resize**, so a pinch changes only
-what is on screen and nothing is ever lost. That means a view transform
-(pan + zoom) that lives *between* the pointer and the painting rectangle —
-`Viewport` is the natural owner, and `_toScreen()` / `_deltaToScreen()` in
-`paint.js` are the two places it has to be applied. Resizing the canvas stays
-available, but through the edge handles (`getResizingSide()`, kept in Phase 6
-for exactly this reason), never through a pinch. Do not "fix" this by clamping
-the pinch's lower bound — that hides the loss instead of removing it.
+**1. Pinch view zoom — resolved.** `Viewport` now owns view scale/offset and
+the forward/inverse world transforms. Pinch and two-finger pan change only that
+camera. The painting rectangle, simulation resolution, snapshots and export
+dimensions remain stable; destructive resize is available only from explicit
+edge handles. `Ctrl/Meta+wheel` uses the same anchored zoom path.
 
 **2. Bristles stretch on transitions, on phones.** Both phones show the
 bristles stretching during transitions; the tablet does not. Suspect the
@@ -1449,10 +1440,8 @@ Useful query parameters: `?diag=1` (on-device capability panel), `?gpu=<profile>
   with unchanged RYB means. Net effect: **chrome in the outer 20% margin no
   longer moves a screen hash**, so UI phases stop tripping the suite.
 
-- **Pinch zoom-out crops the image** — still open, unchanged by Phase 7. Zoom and
-  canvas resize are the same gesture, so zooming out destroys paint. Separate
-  view zoom from the painting rectangle; see UX finding 1. This one loses user
-  data and should not wait behind Phase 8.
+- **Pinch zoom-out crop — resolved.** Pinch is presentation-only view zoom; see
+  `VIEW-ZOOM-AND-MOBILE-LAYOUT-SPEC.md` and UX finding 1.
 - **Bristles stretch on transitions, phones only** — still open. UX finding 2.
   Not the old `OES_texture_float_linear` collapse; suspect the coordinate
   mapping changing under carried-over geometry.

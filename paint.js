@@ -118,6 +118,7 @@ class Paint {
         this.viewport = new Viewport(canvas, {
             pixelRatioEnabled: PaintState.pixelRatioEnabled,
             maxPixelRatio: PaintState.maxPixelRatio,
+            useResponsivePixelRatioCap: PaintState.useResponsivePixelRatioCap,
             container: this.container,
         });
 
@@ -198,10 +199,10 @@ class Paint {
         // is changed independently by the size slider and the wheel, and a stored
         // height would silently keep the old size after either of those.
         this.brushPressure = 1;
-        // Two-finger pinch state: the span and rectangle the gesture started
-        // with, so a resize scales from its origin rather than compounding.
+        // Two-finger pinch state: total span and view scale at gesture start,
+        // so zoom is absolute and cannot compound across RAF batches.
         this.pinchStartSpan = null;
-        this.pinchStartRectangle = null;
+        this.pinchStartViewScale = null;
         // FluidEngine.COLOR_MODEL, not the app's own enum (Phase 9 finding 2).
         // The value is handed straight to renderToTexture(), and the renderer's
         // test is an equality -- anything that is not exactly RGB falls silently
@@ -303,10 +304,12 @@ class Paint {
          * second host may bring its own markup. Every call site below is guarded
          * rather than assuming the control exists.
          */
-        const colorSlot = document.getElementById('color-picker-slot');
-        this.colorControl = colorSlot
+        const colorWidget = document.getElementById('color-picker-widget');
+        this.colorControl = colorWidget
             ? new ColorControl({
-                element: colorSlot,
+                element: colorWidget,
+                hexElement: document.getElementById('paint-color-hex'),
+                modelElement: document.getElementById('paint-color-model'),
                 getHSVA: () => this.brushColorHSVA,
                 // Read live rather than captured: the toggle flips this after
                 // the control is built, and a snapshot would freeze the picker
@@ -363,6 +366,7 @@ class Paint {
                 toggles: [{
                     id: 'brushViewer',
                     label: 'Brush preview',
+                    icon: 'brush',
                     title: 'The live bristle projection (top right)',
                     get: () => this.brushViewer !== null,
                     set: (on) => {
@@ -383,6 +387,7 @@ class Paint {
                 toggles: [{
                     id: 'textureProbe',
                     label: 'Texture probe',
+                    icon: 'bug',
                     title: 'The 256x256 readback view (bottom right)',
                     // Owned by index.html's inline script, which holds the
                     // `presenter` global brush.js reads; it publishes this pair
@@ -471,6 +476,28 @@ class Paint {
         // the ratio changes without the box changing.
         this.unobserveResize = this.viewport.observeResize(this.onResize);
 
+        // A rotation must not resize the painting itself: that would resample
+        // pigment and change export dimensions. Instead, turn the presentation
+        // canvas by 90 degrees whenever the screen and painting have opposite
+        // aspects. Two RAFs let mobile browsers finish applying the dynamic
+        // viewport and orientation media queries before measuring it.
+        this._orientationFitPending = false;
+        this._onOrientationChange = () => {
+            // Modern mobile browsers commonly emit both window's legacy event
+            // and screen.orientation's change event for one physical turn.
+            if (this._orientationFitPending) return;
+            this._orientationFitPending = true;
+            requestAnimationFrame(() => requestAnimationFrame(() => {
+                this._orientationFitPending = false;
+                this.rotatePresentationWithViewport();
+                this.onResize();
+            }));
+        };
+        window.addEventListener('orientationchange', this._onOrientationChange, { passive: true });
+        if (typeof screen !== 'undefined' && screen.orientation) {
+            screen.orientation.addEventListener('change', this._onOrientationChange);
+        }
+
         this.mouseX = 0;
         this.mouseY = 0;
         this.spaceDown = false;
@@ -502,7 +529,8 @@ class Paint {
             .on('pan2end', this.onGestureEnd)
             .on('pinch', this.onGesturePinch);
 
-        // Wheel (brush size) – scoped to canvas
+        // Wheel is brush size; Ctrl/Meta+wheel is view zoom (and also covers
+        // the wheel events desktop browsers synthesize for trackpad pinch).
         canvas.addEventListener('wheel', this.onWheel.bind(this), { passive: false });
 
         document.addEventListener('keydown', (e) => {
@@ -580,6 +608,9 @@ class Paint {
                 root: panelRoot,
                 grip: document.getElementById('panel-grip'),
                 hueStripe: document.getElementById('bar-hue-stripe'),
+                extension: document.getElementById('panel-extension'),
+                extensionToggle: document.getElementById('panel-extension-toggle'),
+                extensionClose: document.getElementById('panel-extension-close'),
                 onHue: (hue) => {
                     // Hue only. Saturation, value and alpha are left alone, so
                     // the stripe cannot silently reset a colour the user mixed
@@ -763,12 +794,18 @@ class Paint {
             } : undefined);
         if (result.simulationUpdated) this.needsRedraw = true;
 
-        // the rectangle we end up drawing the painting into
-        const clippedPaintingRectangle = (
+        // Persistent painting geometry is world-space. Only these derived
+        // rectangles are transformed for presentation.
+        const activePaintingRectangle = (
             this.interactionState === InteractionMode.RESIZING
                 ? this.newPaintingRectangle
                 : this.paintingRectangle
-        )
+        );
+        const displayPaintingRectangle =
+            this.viewport.worldRectToScreen(this.paintingRectangle);
+        const activeDisplayPaintingRectangle =
+            this.viewport.worldRectToScreen(activePaintingRectangle);
+        const clippedPaintingRectangle = activeDisplayPaintingRectangle
             .clone()
             .intersectRectangle(new Rectangle(0, 0, this.canvas.width, this.canvas.height));
 
@@ -776,7 +813,7 @@ class Paint {
             this.engine.renderToTexture({
                 framebuffer: this.framebuffer,
                 targetTexture: this.canvasTexture,
-                paintingRectangle: this.paintingRectangle,
+                paintingRectangle: displayPaintingRectangle,
                 clippedRectangle: clippedPaintingRectangle,
                 targetWidth: this.canvas.width,
                 targetHeight: this.canvas.height,
@@ -799,9 +836,7 @@ class Paint {
         if (this.paintingRectOverlay !== null) {
             // While resizing, show the preview rectangle; otherwise the current one
             this.paintingRectOverlay.draw(
-                (this.interactionState === InteractionMode.RESIZING && this.newPaintingRectangle)
-                    ? this.newPaintingRectangle
-                    : this.paintingRectangle,
+                activeDisplayPaintingRectangle,
                 this.canvas.width,
                 this.canvas.height
             );
@@ -987,15 +1022,28 @@ class Paint {
     // brushScale * BRISTLE_LENGTH). It is kept bit-for-bit here so this commit
     // stays a pure deduplication; narrowing it is a separate, testable change.
     rebuildProjectionMatrix() {
+        const scale = this.viewport.viewScale;
+        const left = -this.viewport.viewOffsetX / scale;
+        const bottom = -this.viewport.viewOffsetY / scale;
         this.mainProjectionMatrix = makeOrthographicMatrix(
             new Float32Array(16),
-            0.0,
-            this.canvas.width,
-            0,
-            this.canvas.height,
+            left,
+            left + this.canvas.width / scale,
+            bottom,
+            bottom + this.canvas.height / scale,
             -5000.0,
             5000.0
         );
+    }
+
+    /** Rotate presentation when the viewport and painting have opposite aspects. */
+    rotatePresentationWithViewport() {
+        const viewportRect = this.container
+            ? this.container.getBoundingClientRect()
+            : { width: window.innerWidth, height: window.innerHeight };
+        const paintingIsLandscape = this.paintingRectangle.width >= this.paintingRectangle.height;
+        const viewportIsLandscape = viewportRect.width >= viewportRect.height;
+        this.viewport.setPresentationRotation(paintingIsLandscape === viewportIsLandscape ? 0 : 1);
     }
 
     /**
@@ -1050,7 +1098,9 @@ class Paint {
         // phone-portrait drawer -- where the panel really does overlap the
         // canvas -- that rectangle would be in the wrong place and the wrong
         // size, blocking paint in the middle of the picture.
-        const resizingRadius = this.viewport.cssLengthToScreen(RESIZING_RADIUS_CSS);
+        const resizingRadius =
+            this.viewport.cssLengthToScreen(RESIZING_RADIUS_CSS) /
+            this.viewport.viewScale;
 
         if (
             this.spaceDown ||
@@ -1071,11 +1121,11 @@ class Paint {
         // the side we'd be resizing with the current mouse position
         // we can resize if our perpendicular distance to an edge is less than RESIZING_RADIUS
         //
-        // The radius is authored in CSS pixels, but mouseX/mouseY are screen
-        // pixels, so it has to be converted or the grab zone shrinks as the
-        // device pixel ratio rises -- half as wide on a DPR-2 phone, which is
-        // where a grab margin matters most.
-        const RESIZING_RADIUS = this.viewport.cssLengthToScreen(RESIZING_RADIUS_CSS);
+        // Hit-testing is world-space after view zoom, so convert the authored
+        // CSS radius to backing pixels and then through the inverse camera.
+        const RESIZING_RADIUS =
+            this.viewport.cssLengthToScreen(RESIZING_RADIUS_CSS) /
+            this.viewport.viewScale;
         if (
             Math.abs(mouseX - this.paintingRectangle.left) <= RESIZING_RADIUS &&
             Math.abs(mouseY - this.paintingRectangle.getTop()) <= RESIZING_RADIUS
@@ -1147,6 +1197,12 @@ class Paint {
         return this.viewport.cssToScreen(x / scaleX, y / scaleY);
     }
 
+    /** Dispatcher coordinates -> stable world/painting coordinates. */
+    _toWorld(x, y) {
+        const screen = this._toScreen(x, y);
+        return this.viewport.screenToWorld(screen.x, screen.y);
+    }
+
     /**
      * A dispatcher DELTA -> a screen-space delta.
      *
@@ -1158,8 +1214,12 @@ class Paint {
         const rect = this.canvas.getBoundingClientRect();
         const scaleX = rect.width === 0 ? 1 : this.canvas.width / rect.width;
         const scaleY = rect.height === 0 ? 1 : this.canvas.height / rect.height;
-        const ratio = this.viewport.pixelRatio;
-        return { x: (dx / scaleX) * ratio, y: -(dy / scaleY) * ratio };
+        return this.viewport.cssDeltaToScreen(dx / scaleX, dy / scaleY);
+    }
+
+    _deltaToWorld(dx, dy) {
+        const screen = this._deltaToScreen(dx, dy);
+        return this.viewport.screenDeltaToWorld(screen.x, screen.y);
     }
 
     /**
@@ -1235,7 +1295,7 @@ class Paint {
             return;
         }
 
-        const position = this._toScreen(event.centerX, event.centerY);
+        const position = this._toWorld(event.centerX, event.centerY);
         const mouseX = position.x;
         const mouseY = position.y;
 
@@ -1312,7 +1372,7 @@ class Paint {
         const pt = pointers.values().next().value;
         if (!pt) return;
 
-        const position = this._toScreen(pt.x, pt.y);
+        const position = this._toWorld(pt.x, pt.y);
         this.brushX = position.x;
         this.brushY = position.y;
         this.brushPressure = this._pressureScale(pt.pressure, pt.pointerType);
@@ -1322,7 +1382,7 @@ class Paint {
     }
 
     onGesturePan = (event) => {
-        const position = this._toScreen(event.centerX, event.centerY);
+        const position = this._toWorld(event.centerX, event.centerY);
         const mx = position.x;
         const my = position.y;
 
@@ -1357,7 +1417,7 @@ class Paint {
 
         if (this.interactionState === InteractionMode.PANNING) {
             const delta = this._deltaToScreen(event.dx, event.dy);
-            this._panPainting(delta.x, delta.y);
+            this._panView(delta.x, delta.y);
         } else if (this.interactionState === InteractionMode.RESIZING) {
             this._resizePaintingTo(mx, my);
         }
@@ -1379,20 +1439,16 @@ class Paint {
         }
 
         const delta = this._deltaToScreen(event.dx, event.dy);
-        this._panPainting(delta.x, delta.y);
+        this._panView(delta.x, delta.y);
 
-        const position = this._toScreen(event.centerX, event.centerY);
+        const position = this._toWorld(event.centerX, event.centerY);
         this.mouseX = position.x;
         this.mouseY = position.y;
     };
 
     /**
-     * Pinch scales the painting about its own centre.
-     *
-     * This is the touch counterpart to edge-drag resizing, not a replacement
-     * for it: a pinch has a scale factor but no notion of WHICH edge is being
-     * dragged, which is what getResizingSide() supplies for the mouse path and
-     * for the resize cursor.
+     * Pinch changes only the view. The simulation rectangle, resolution,
+     * snapshots and export dimensions remain untouched.
      */
     onGesturePinch = (event) => {
         // pinch and pan2 BOTH fire for every two-finger gesture, so a pure
@@ -1404,44 +1460,27 @@ class Paint {
         // frame's scale spike (measured ~1.19 for a span that never changed),
         // and a per-frame test acts on that spike before the gesture is really
         // under way. Total span change cannot spike: it starts at exactly 1.
-        if (this.pinchStartSpan === null) this.pinchStartSpan = event.span;
+        if (this.pinchStartSpan === null) {
+            this.pinchStartSpan = event.span;
+            this.pinchStartViewScale = this.viewport.viewScale;
+        }
 
         const totalScale = event.span / this.pinchStartSpan;
         if (Math.abs(totalScale - 1) < PINCH_SCALE_DEADZONE) return;
 
-        if (this.interactionState !== InteractionMode.RESIZING) {
-            this.saveSnapshot();
-            this.interactionState = InteractionMode.RESIZING;
-            this.resizingSide = ResizingSide.NONE;
-            this.newPaintingRectangle = this.paintingRectangle.clone();
-            // The rectangle the whole gesture scales FROM. Scaling the running
-            // rectangle by a total ratio every frame would compound it.
-            this.pinchStartRectangle = this.paintingRectangle.clone();
+        const anchor = this._toScreen(event.centerX, event.centerY);
+        if (this.viewport.zoomViewAt(
+            anchor.x,
+            anchor.y,
+            this.pinchStartViewScale * totalScale
+        )) {
+            this.rebuildProjectionMatrix();
+            this.needsRedraw = true;
         }
-
-        const start = this.pinchStartRectangle;
-        const aspect = start.height / start.width;
-        const centerX = start.left + start.width / 2;
-        const centerY = start.bottom + start.height / 2;
-
-        const width = Utilities.clamp(
-            start.width * totalScale,
-            MIN_PAINTING_WIDTH,
-            this.maxPaintingWidth
-        );
-        const height = width * aspect;
-
-        const rect = this.newPaintingRectangle;
-        rect.width = width;
-        rect.height = height;
-        rect.left = centerX - width / 2;
-        rect.bottom = centerY - height / 2;
-
-        this.needsRedraw = true;
     };
 
     onGestureHover = (event) => {
-        const position = this._toScreen(event.x, event.y);
+        const position = this._toWorld(event.x, event.y);
 
         this.brushX = position.x;
         this.brushY = position.y;
@@ -1463,7 +1502,7 @@ class Paint {
         // which the dispatcher reports as panend.
         if (this.engine.strokeActive) {
             if (Number.isFinite(event.centerX) && Number.isFinite(event.centerY)) {
-                const p = this._toScreen(event.centerX, event.centerY);
+                const p = this._toWorld(event.centerX, event.centerY);
                 this.brushX = p.x; this.brushY = p.y;
                 this.engine.strokeTo({ x: p.x, y: p.y, pressure: this.brushPressure });
             }
@@ -1473,7 +1512,7 @@ class Paint {
 
         // The next two-finger gesture measures its span from scratch.
         this.pinchStartSpan = null;
-        this.pinchStartRectangle = null;
+        this.pinchStartViewScale = null;
 
         if (this.interactionState === InteractionMode.RESIZING) {
             this._commitResize();
@@ -1482,22 +1521,10 @@ class Paint {
         this.interactionState = InteractionMode.NONE;
     };
 
-    /** Shared by one-finger PANNING and two-finger pan2. */
-    _panPainting(deltaX, deltaY) {
-        this.paintingRectangle.left += deltaX;
-        this.paintingRectangle.bottom += deltaY;
-
-        this.paintingRectangle.left = Utilities.clamp(
-            this.paintingRectangle.left,
-            -this.paintingRectangle.width,
-            this.canvas.width
-        );
-        this.paintingRectangle.bottom = Utilities.clamp(
-            this.paintingRectangle.bottom,
-            -this.paintingRectangle.height,
-            this.canvas.height
-        );
-
+    /** Shared by one-finger PANNING and two-finger pan2; screen-space camera pan. */
+    _panView(deltaX, deltaY) {
+        this.viewport.panViewBy(deltaX, deltaY);
+        this.rebuildProjectionMatrix();
         this.needsRedraw = true;
     }
 
@@ -1599,6 +1626,20 @@ class Paint {
 
     onWheel(event) {
         event.preventDefault();
+
+        if (event.ctrlKey || event.metaKey) {
+            const anchor = this.viewport.eventToScreen(event);
+            const factor = Math.exp(-event.deltaY * 0.0015);
+            if (this.viewport.zoomViewAt(
+                anchor.x,
+                anchor.y,
+                this.viewport.viewScale * factor
+            )) {
+                this.rebuildProjectionMatrix();
+                this.needsRedraw = true;
+            }
+            return;
+        }
 
         const scrollDelta = event.deltaY < 0.0 ? -1.0 : 1.0;
         this.brushScale = Utilities.clamp(

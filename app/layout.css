@@ -26,6 +26,10 @@
   --panel-bg: rgba(32, 32, 36, 0.82);
   --panel-border: rgba(255, 255, 255, 0.14);
   --edge-pad: 30px;
+  /* Viewport reads this presentation policy. A coarse mobile device lowers it
+     below to keep desktop-site page scaling from multiplying a huge backing
+     store and simulation. Explicit ?dpr= remains a diagnostic override. */
+  --canvas-max-pixel-ratio: 2;
 }
 
 * {
@@ -37,6 +41,7 @@ html, body {
   margin: 0;
   padding: 0;
   height: 100%;
+  height: 100dvh;
   overflow: hidden;
 
   user-select: none;
@@ -69,6 +74,7 @@ html, body {
 #app {
   position: relative;
   height: 100%;
+  height: 100dvh;
   width: 100%;
   background: #b0b0b0;
 }
@@ -105,7 +111,7 @@ html, body {
  */
 #ui {
   position: absolute;
-  z-index: 2;
+  z-index: 20;
   left: 16px;
   top: 16px;
   width: var(--panel-width);
@@ -121,9 +127,13 @@ html, body {
   border: 1px solid var(--panel-border);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
 
-  /* The panel itself never scrolls as a whole -- #panel-body does. Otherwise
-     the collapsed bar would scroll out of reach. */
-  overflow: hidden;
+  /* The panel itself never scrolls as a whole -- #panel-body does. Overflow is
+     visible so the optional extension can sit beside it. */
+  overflow: visible;
+}
+
+#ui[data-body-placement="above"] {
+  flex-direction: column-reverse;
 }
 
 /* ---- The collapsed bar ---------------------------------------------------
@@ -139,11 +149,25 @@ html, body {
  */
 #panel-bar {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: 1fr auto 1fr auto;
   align-items: center;
   gap: 10px;
   padding: 8px 10px;
   flex: none;
+}
+
+#panel-extension-toggle {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 6px;
+  color: white;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 19px;
+  line-height: 1;
+  cursor: pointer;
+  touch-action: manipulation;
 }
 
 /* The bar's slider carries .slider for the Slider class's own styling, so it
@@ -226,14 +250,95 @@ html, body {
 /* ---- The expanded body --------------------------------------------------- */
 
 #panel-body {
+  min-height: 0;
+  max-height: calc(50dvh - 48px);
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   overflow-y: auto;
   overflow-x: hidden;
   padding-bottom: 20px;
   border-top: 1px solid var(--panel-border);
 }
 
+#ui[data-body-placement="above"] #panel-body {
+  border-top: 0;
+  border-bottom: 1px solid var(--panel-border);
+}
+
 #ui[data-collapsed="true"] #panel-body {
   display: none;
+}
+
+/* ---- Optional adjacent tools -------------------------------------------- */
+
+#panel-extension[hidden] { display: none; }
+
+#panel-extension {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  width: min(240px, calc(100vw - 24px));
+  max-height: calc(50dvh - 8px);
+  overflow: auto;
+  color: white;
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  background: var(--panel-bg);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+}
+
+#ui[data-extension-side="right"] #panel-extension { left: calc(100% + 8px); }
+#ui[data-extension-side="left"] #panel-extension { right: calc(100% + 8px); }
+#ui[data-extension-side="overlay-right"] #panel-extension { right: 0; }
+#ui[data-extension-side="overlay-left"] #panel-extension { left: 0; }
+
+.panel-extension-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.panel-extension-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  flex: 1;
+}
+
+.panel-extension-tabs button,
+#panel-extension-close {
+  min-height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: white;
+  background: transparent;
+  cursor: pointer;
+}
+
+.panel-extension-tabs button[aria-selected="true"] {
+  color: #111;
+  background: white;
+}
+
+#panel-extension-close {
+  width: 32px;
+  padding: 0;
+  border-radius: 5px;
+  font-size: 20px;
+}
+
+.panel-extension-page {
+  min-height: 120px;
+  padding: 16px;
+  font-size: 12px;
+}
+
+.panel-extension-page p {
+  margin: 8px 0 0;
+  color: rgba(255, 255, 255, 0.7);
+  line-height: 1.45;
 }
 
 /* ---- Controls ------------------------------------------------------------
@@ -340,11 +445,14 @@ html, body {
    calls picker.resize() from a ResizeObserver, so the breakpoint rules below
    only need to change the width. */
 #color-picker-slot {
+  position: relative;
   margin-left: 20px;
   margin-top: 6px;
   width: 260px;
   pointer-events: auto;
 }
+
+#color-picker-widget { width: 100%; }
 
 /* iro.js renders its own markup; these are the few things it cannot know.
    The wheel is centred in the slot because the slot can be wider than the
@@ -360,8 +468,87 @@ html, body {
   touch-action: none;
 }
 
+/* iro's default gap is 12px; reserve another 8px for the overlaid labels. */
+#color-picker-slot .IroWheel + .IroSlider { margin-top: 20px !important; }
+
+/* The values live in the otherwise-empty corners of the wheel's square instead
+   of consuming a row before the sliders. They remain outside iro's virtual DOM
+   so library re-renders cannot remove them. */
+
+.color-readout {
+  position: absolute;
+  z-index: 2;
+  top: 8px;
+  left: 0;
+  width: 100%;
+  height: var(--picker-wheel-size, 200px);
+  margin: 0;
+  color: white;
+  pointer-events: none;
+}
+
+#paint-color-hex {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  transform: translateY(8px);
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: rgba(24, 24, 28, 0.72);
+  white-space: nowrap;
+  font: 600 11px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: .04em;
+  color: white;
+  cursor: pointer;
+  pointer-events: auto;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+#paint-color-hex:hover,
+#paint-color-hex:focus-visible {
+  background: rgba(24, 24, 28, 0.9);
+  outline: 1px solid rgba(255, 255, 255, 0.7);
+}
+#paint-color-hex[data-copied="true"] { background: rgb(0, 150, 70); }
+
+#paint-color-model {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  transform: translateY(8px);
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: rgba(24, 24, 28, 0.72);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  color: rgba(255, 255, 255, 0.8);
+}
+
 #undo-button { margin-left: var(--edge-pad); }
 #redo-button { margin-left: 10px; }
+
+.panel-actions {
+  display: flex;
+  gap: 10px;
+  margin: 24px var(--edge-pad) 0;
+}
+
+.panel-actions .button,
+.panel-actions #clear-button,
+.panel-actions #save-button,
+.panel-actions #undo-button,
+.panel-actions #redo-button {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+  margin: 0;
+}
+
+.panel-history-actions { margin-top: 16px; }
+.panel-bottom-controls { margin-top: 16px; }
+.panel-document-actions { margin-top: 0; }
 
 .do-button-active { background: rgb(30, 100, 130); }
 .do-button-active:hover  { background: rgb(20, 90, 120); }
@@ -454,7 +641,7 @@ html, body {
   #ui {
     left: 12px;
     top: 12px;
-    max-height: calc(100% - 24px);
+    max-height: calc(100dvh - 24px);
   }
 
   .slider { width: calc(100% - 2 * var(--edge-pad)); }
@@ -467,15 +654,13 @@ html, body {
  * Outside #ui deliberately: the panel is draggable and collapsible, and a
  * switch for an overlay must not vanish with it or move when it moves.
  *
- * The bottom-right stack sits ABOVE the texture probe's own 256px canvas
- * (debug.js pins that to bottom:8px right:8px at z-index 99999), so its offset
- * clears 256 + the canvas's own 8px gap + a margin. Without that the button
- * the user needs in order to turn the probe OFF would be underneath the probe.
- * z-index is one higher than the probe's for the same reason.
+ * Debug controls sit over the optional probe canvas but under #ui. On touch
+ * layouts both icon buttons form a bottom-right stack instead of reserving a
+ * permanent 256px hole for a probe that defaults off.
  */
 .debug-toggle-corner {
   position: fixed;
-  z-index: 100000;
+  z-index: 10;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -488,7 +673,7 @@ html, body {
 }
 
 #debug-toggle-br {
-  bottom: 280px; /* 256 probe + 8 its gap + 16 breathing room */
+  bottom: max(8px, env(safe-area-inset-bottom));
   right: 8px;
 }
 
@@ -497,9 +682,11 @@ html, body {
   /* .button's own margin-top is for the panel's stacked layout and would push
      these apart here; the flex gap above spaces them instead. */
   margin-top: 0;
-  width: 132px;
-  height: 26px;
-  line-height: 26px;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  line-height: 1;
   text-align: center;
   font-size: 11px;
   border: 1px solid rgba(255, 255, 255, 0.35);
@@ -508,6 +695,17 @@ html, body {
   user-select: none;
   -webkit-user-select: none;
   touch-action: manipulation;
+}
+
+.debug-toggle-corner .debug-toggle svg {
+  width: 22px;
+  height: 22px;
+  fill: currentColor;
+}
+
+.debug-texture-probe {
+  width: min(256px, 44vmin);
+  height: min(256px, 44vmin);
 }
 
 /* button-selected paints white-on-black in the panel; keep that meaning here
@@ -523,10 +721,231 @@ html, body {
 
 /* On a phone the probe canvas is a large fraction of the screen; keep the
    toggles reachable and thumb-sized rather than shrinking them. */
-@media (max-width: 640px) {
-  #debug-toggle-br { bottom: 280px; }
+@media (max-width: 640px),
+       (pointer: coarse) and (hover: none) and (max-device-width: 640px),
+       (pointer: coarse) and (hover: none) and (max-device-height: 640px) {
+  #debug-toggle-tr {
+    top: auto;
+    right: 8px;
+    bottom: calc(max(8px, env(safe-area-inset-bottom)) + 48px);
+  }
+
+  #debug-toggle-br {
+    bottom: max(8px, env(safe-area-inset-bottom));
+  }
+
   .debug-toggle-corner .debug-toggle {
-    height: 32px;
-    line-height: 32px;
+    width: 40px;
+    height: 40px;
+  }
+}
+
+/* Width-only phone queries stop matching when Android "Desktop site" swaps
+   in a desktop layout viewport. Pointer capability does not, so this repeats
+   the compact geometry for the same physical device in either browser mode. */
+@media (max-width: 640px),
+       (pointer: coarse) and (hover: none) and (max-device-width: 640px),
+       (pointer: coarse) and (hover: none) and (max-device-height: 640px) {
+  :root {
+    --panel-width: calc(100% - 24px);
+    --edge-pad: 16px;
+    --canvas-max-pixel-ratio: 1;
+  }
+
+  #ui {
+    left: 12px;
+    top: 12px;
+    max-height: calc(100dvh - 24px);
+  }
+
+  #panel-body {
+    display: grid;
+    grid-template-columns: minmax(0, .96fr) minmax(0, 1.04fr);
+    align-items: start;
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .panel-column { min-width: 0; }
+  .panel-actions {
+    gap: 6px;
+    margin: 0;
+  }
+  .panel-history-actions { margin-top: 10px; }
+  .panel-bottom-controls { margin-top: 10px; }
+  .panel-actions .button { height: 28px; line-height: 28px; font-size: 10px; }
+
+  .control-label {
+    margin: 8px 0 3px;
+    font-size: 11px;
+  }
+
+  .slider {
+    width: 100%;
+    height: 14px;
+    margin: 0;
+  }
+
+  .buttons {
+    display: flex;
+    width: 100%;
+    height: 24px;
+    margin: 0;
+  }
+  .buttons div { float: none; padding-block: 3px; font-size: 9px; }
+  #qualities div { width: 33.333%; }
+  #models div { width: 50%; }
+
+  #color-picker-slot {
+    width: 100%;
+    margin: 0;
+  }
+
+  #paint-color-hex,
+  #paint-color-model {
+    bottom: 5px;
+    padding: 3px 5px;
+    font-size: 9px;
+  }
+  #paint-color-hex { left: 5px; }
+  #paint-color-model { right: 5px; }
+
+  #models { margin-top: 5px; }
+}
+
+/* Short touch viewports need density before scrolling. The body still scrolls
+   as a fallback, but common phone heights expose every action sooner. */
+@media (pointer: coarse) and (hover: none) and (max-height: 900px) {
+  #panel-bar { padding-block: 6px; }
+  .button { margin-top: 12px; }
+  .control-label { margin-top: 5px; }
+  #panel-body { padding-bottom: 10px; }
+}
+
+/* Android "Desktop site" gives a phone a desktop-sized (~980px) layout
+   viewport, then scales the complete page back onto the physical screen. A
+   fixed 12px label consequently renders around 5px high. Viewport units are
+   stable through that page scale: 3vw is the same physical proportion in the
+   normal 390px viewport and in the scaled 980px viewport. `device-width` /
+   `device-height` distinguish this from a real coarse-pointer tablet. */
+@media (pointer: coarse) and (hover: none) and (min-width: 900px) and (max-device-width: 640px),
+       (pointer: coarse) and (hover: none) and (min-width: 900px) and (max-device-height: 640px) {
+  :root { --edge-pad: 4.1vw; }
+
+  #ui {
+    left: 3.1vw;
+    top: 3.1vw;
+    border-radius: 3.1vw;
+  }
+
+  #panel-bar {
+    gap: 2.6vw;
+    padding: 2.05vw 2.56vw;
+  }
+
+  #panel-grip { width: 11.3vw; height: 6.15vw; }
+  #panel-grip span { width: .77vw; height: .77vw; }
+  #bar-size-slider,
+  #bar-hue-stripe { height: 4.62vw; border-radius: 2.31vw; }
+  #panel-extension-toggle {
+    width: 7.18vw;
+    height: 7.18vw;
+    border-radius: 1.54vw;
+    font-size: 4.87vw;
+  }
+  #bar-hue-stripe .handle {
+    width: 1.03vw;
+    height: 5.64vw;
+    margin-top: -2.82vw;
+    margin-left: -.51vw;
+  }
+
+  .button {
+    margin-top: 6.15vw;
+    width: 29.5vw;
+    height: 7.7vw;
+    line-height: 7.7vw;
+    font-size: 3.08vw;
+  }
+  #save-button,
+  #redo-button { margin-left: 2.56vw; }
+
+  #panel-body {
+    gap: 2.56vw;
+    padding: 2.56vw;
+  }
+
+  .panel-actions { gap: 1.54vw; margin: 0; }
+  .panel-history-actions { margin-top: 2.56vw; }
+  .panel-bottom-controls { margin-top: 2.56vw; }
+  .panel-actions .button,
+  .panel-actions #clear-button,
+  .panel-actions #save-button,
+  .panel-actions #undo-button,
+  .panel-actions #redo-button {
+    width: auto;
+    height: 7.18vw;
+    line-height: 7.18vw;
+    margin: 0;
+    font-size: 2.56vw;
+  }
+
+  .control-label {
+    margin: 2.05vw 0 .77vw;
+    font-size: 2.82vw;
+  }
+  .slider { width: 100%; margin: 0; height: 3.59vw; }
+  .buttons { width: 100%; margin: 0; height: 6.15vw; }
+  .buttons div { padding-block: .77vw; font-size: 2.82vw; }
+  #qualities div { width: 33.333%; }
+  #models div { width: 50%; }
+
+  #color-picker-slot {
+    width: 100%;
+    margin: 0;
+  }
+
+  #paint-color-hex,
+  #paint-color-model {
+    bottom: 1.28vw;
+    padding: .77vw 1.28vw;
+    border-radius: 1.03vw;
+  }
+  #paint-color-hex { left: 1.28vw; font-size: 2.56vw; }
+  #paint-color-model { right: 1.28vw; font-size: 2.31vw; }
+  #models { margin-top: 1.28vw; }
+
+  #panel-extension {
+    width: 61.5vw;
+    border-radius: 3.08vw;
+  }
+  .panel-extension-header { gap: 2.05vw; padding: 2.05vw; }
+  .panel-extension-tabs button,
+  #panel-extension-close {
+    min-height: 8.2vw;
+    font-size: 3.08vw;
+  }
+  #panel-extension-close { width: 8.2vw; font-size: 5.13vw; }
+  .panel-extension-page {
+    min-height: 30.8vw;
+    padding: 4.1vw;
+    font-size: 3.08vw;
+  }
+
+  .debug-toggle-corner .debug-toggle {
+    width: 10.25vw;
+    height: 10.25vw;
+  }
+  .debug-toggle-corner .debug-toggle svg {
+    width: 5.64vw;
+    height: 5.64vw;
+  }
+  #debug-toggle-tr {
+    bottom: calc(max(2.05vw, env(safe-area-inset-bottom)) + 12.3vw);
+    right: 2.05vw;
+  }
+  #debug-toggle-br {
+    bottom: max(2.05vw, env(safe-area-inset-bottom));
+    right: 2.05vw;
   }
 }

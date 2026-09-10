@@ -100,9 +100,11 @@ class Slider {
       return clientX - rect.left; // in CSS px
     };
 
-    // Redraw UI from current value
+    // Redraw UI from current value. Width AND height are read here: both can
+    // change when an orientation media query starts matching, so retaining the
+    // constructor's handle size would leave only the track responsive.
     const redraw = () => {
-      // Recompute length each time in case of responsive layout
+      // Recompute geometry each time in case of responsive layout.
       const L = element.offsetWidth;
       const H = element.offsetHeight;
 
@@ -110,10 +112,15 @@ class Slider {
       const px = Math.floor(fraction * L);
 
       sliderLeftDiv.style.width = px + 'px';
+      sliderLeftDiv.style.top = (H / 2 - SLIDER_THICKNESS / 2) + 'px';
 
       sliderRightDiv.style.width = (L - px) + 'px';
       sliderRightDiv.style.left = px + 'px';
+      sliderRightDiv.style.top = (H / 2 - SLIDER_THICKNESS / 2) + 'px';
 
+      handleDiv.style.width = H + 'px';
+      handleDiv.style.height = H + 'px';
+      handleDiv.style.borderRadius = H * 0.5 + 'px';
       handleDiv.style.left = (px - H / 2) + 'px';
     };
 
@@ -189,6 +196,31 @@ class Slider {
       redraw();
     };
     this.getValue = () => this.value;
+
+    // CSS changes the slider box at responsive breakpoints. In particular,
+    // rotating a phone swaps the portrait and landscape widths without any
+    // value change that would otherwise redraw the custom track and handle.
+    // Observe the actual box as the primary signal, and also listen for the
+    // orientation event so embedded/older browsers that delay or omit a
+    // ResizeObserver delivery still refresh after their media queries settle.
+    this.resizeObserver = typeof ResizeObserver === 'function'
+      ? new ResizeObserver(redraw)
+      : null;
+    if (this.resizeObserver) this.resizeObserver.observe(element);
+
+    this._onOrientationChange = () => {
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(redraw);
+      } else {
+        setTimeout(redraw, 0);
+      }
+    };
+    window.addEventListener('orientationchange', this._onOrientationChange, { passive: true });
+
+    this.destroy = () => {
+      if (this.resizeObserver) this.resizeObserver.disconnect();
+      window.removeEventListener('orientationchange', this._onOrientationChange);
+    };
 
     redraw();
   }
