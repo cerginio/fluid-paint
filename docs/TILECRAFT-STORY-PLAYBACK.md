@@ -113,9 +113,11 @@ URL більше не є основним інтерфейсом. Кнопка `
 - На старті controller зберігає baseline. Після `Stop` користувач явно обирає
   `Restore canvas` або `Keep partial`; `Restart` відновлює baseline і не
   накопичує попередній прогін.
-- `Previous/Next Frame` працюють по межах immutable
+- `Previous/Next Frame` циклічно працюють по межах immutable
   compiled plan. Стрибок уперед лише змінює playhead і позначає пропущену
-  частину; назад доступні виключно pending-діапазони.
+  частину; в обох напрямках вибираються тільки pending-діапазони. Після
+  останнього кадру Next переходить до першого, а Previous перед першим — до
+  останнього.
 - `UnpaintedRangeRegistry` зберігає нормалізовані half-open діапазони окремо
   від DOM та engine. `TilecraftStrokePlayer.playPlan()` перевіряє registry
   перед кожною операцією, тому нанесена фарба не дублюється.

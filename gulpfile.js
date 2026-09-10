@@ -34,6 +34,7 @@ const paths = {
     'fluid-engine/gl/glsl3.js',
     'debug/debug-flags.js',
     'debug/painting-rect-overlay.js',
+    'app/focus-overlay.js',
     'debug/gpu-profiles.js',
     'debug/texture-selftest.js',
     'debug/device-diag.js',

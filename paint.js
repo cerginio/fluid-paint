@@ -105,6 +105,7 @@ class Paint {
         this.paintingRectOverlay = this.debug.paintingRect
             ? new PaintingRectOverlay(wgl, shaderSources, this.quadVertexBuffer)
             : null;
+        this.focusOverlay = new FocusOverlay(wgl, shaderSources, this.quadVertexBuffer);
 
         // The single owner of canvas sizing, devicePixelRatio, the Y-flip and
         // all three coordinate spaces. See viewport.js.
@@ -816,6 +817,11 @@ class Paint {
         const wgl = this.wgl;
         const storyOwnsBrush = this._storyOwnsBrush();
 
+        if (this.viewport.advanceFocusTransition(performance.now())) {
+            this.rebuildProjectionMatrix();
+            this.needsRedraw = true;
+        }
+
         if (!storyOwnsBrush) this._syncBrushToPointer();
 
         const result = this.engine.advance(performance.now() / 1000,
@@ -961,6 +967,11 @@ class Paint {
 
         if (this.canvas.style.cursor !== desiredCursor) {
             this.canvas.style.cursor = desiredCursor;
+        }
+
+        const focusIndicator = this.viewport.getFocusIndicator();
+        if (focusIndicator !== null) {
+            this.focusOverlay.draw(focusIndicator, this.canvas.width, this.canvas.height);
         }
 
         // The panel, its frosted blur and its drop shadow are no longer drawn

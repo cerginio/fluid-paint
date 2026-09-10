@@ -259,7 +259,14 @@ class StoryPlaybackController {
     let destination = null;
     if (kind === 'next-frame') {
       destination = this.registry.nextFrameBoundary(this.playheadIndex, this.plan);
-      if (destination !== null) this.registry.markJump(this.playheadIndex, destination, 'frame-jump');
+      if (destination !== null) {
+        const skippedEnd = destination > this.playheadIndex
+          ? destination
+          : this.plan.operations.length;
+        if (this.playheadIndex < skippedEnd) {
+          this.registry.markJump(this.playheadIndex, skippedEnd, 'frame-jump');
+        }
+      }
     } else if (kind === 'previous-frame') {
       const range = this.registry.previousPendingFrame(this.playheadIndex, this.plan);
       destination = range && range.start;

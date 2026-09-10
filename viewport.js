@@ -86,6 +86,10 @@ class Viewport {
     this.viewOffsetY = 0;
     this.minViewScale = opts.minViewScale !== undefined ? opts.minViewScale : 0.25;
     this.maxViewScale = opts.maxViewScale !== undefined ? opts.maxViewScale : 8;
+    // A zoom-out below the overview threshold recentres the camera over a few
+    // frames. The marker is deliberately stored here too: it describes camera
+    // state, not the live pointer, and therefore cannot drift from the view.
+    this.focusTransition = null;
 
     this.resize();
   }
@@ -357,16 +361,97 @@ class Viewport {
   }
 
   panViewBy(dx, dy) {
+    this.focusTransition = null;
     this.viewOffsetX += dx;
     this.viewOffsetY += dy;
   }
 
+  /** Advance an active zoom-out autofocus transition. */
+  advanceFocusTransition(now) {
+    const transition = this.focusTransition;
+    if (transition === null) return false;
+
+    const elapsed = Math.max(0, now - transition.lastTime);
+    transition.lastTime = now;
+    // Exponential easing is frame-rate independent and remains smooth if a
+    // tab briefly misses a frame.
+    const amount = 1 - Math.exp(-elapsed * 0.014);
+    this.viewOffsetX += (transition.offsetX - this.viewOffsetX) * amount;
+    this.viewOffsetY += (transition.offsetY - this.viewOffsetY) * amount;
+    transition.x += (transition.targetX - transition.x) * amount;
+    transition.y += (transition.targetY - transition.y) * amount;
+
+    const settled =
+      Math.abs(transition.offsetX - this.viewOffsetX) < 0.1 &&
+      Math.abs(transition.offsetY - this.viewOffsetY) < 0.1 &&
+      Math.abs(transition.targetX - transition.x) < 0.1 &&
+      Math.abs(transition.targetY - transition.y) < 0.1;
+    if (settled) {
+      this.viewOffsetX = transition.offsetX;
+      this.viewOffsetY = transition.offsetY;
+      this.focusTransition = null;
+    }
+    return true;
+  }
+
+  /** The visible autofocus marker, or null when the camera is settled. */
+  getFocusIndicator() {
+    if (this.focusTransition === null) return null;
+    return { x: this.focusTransition.x, y: this.focusTransition.y };
+  }
+
   /** Set absolute zoom while keeping the world point beneath the anchor fixed. */
   zoomViewAt(screenX, screenY, nextScale) {
-    const anchor = this.screenToWorld(screenX, screenY);
     const scale = Math.max(this.minViewScale, Math.min(this.maxViewScale, nextScale));
+    // Snap to the centered, zoomed-out view only while zooming out.  When
+    // zooming back in from that range, preserve the pointer's world anchor.
+    if (scale <= 0.75 && scale < this.viewScale) {
+      // Once autofocus has begun, its focus owns subsequent wheel/pinch
+      // updates. It never chases a moved pointer, and the first focus is
+      // clamped before it can influence the camera.
+      const focusX = this.focusTransition === null
+        ? Math.max(0, Math.min(this.width, screenX))
+        : this.focusTransition.x;
+      const focusY = this.focusTransition === null
+        ? Math.max(0, Math.min(this.height, screenY))
+        : this.focusTransition.y;
+      const anchor = this.screenToWorld(focusX, focusY);
+      const offsetX = (this.width - this.width * scale) * 0.5;
+      const offsetY = (this.height - this.height * scale) * 0.5;
+      const changed = scale !== this.viewScale ||
+        offsetX !== this.viewOffsetX || offsetY !== this.viewOffsetY;
+
+      // Begin at the anchored view, then ease to the overview position. The
+      // focus marker starts at the gesture origin once and is constrained to
+      // the canvas; later pointer movement cannot pull it beyond an edge.
+      this.viewScale = scale;
+      this.viewOffsetX = focusX - anchor.x * scale;
+      this.viewOffsetY = focusY - anchor.y * scale;
+      const now = typeof performance !== 'undefined' ? performance.now() : 0;
+      if (this.focusTransition === null) {
+        this.focusTransition = {
+          x: focusX,
+          y: focusY,
+          targetX: this.width * 0.5,
+          targetY: this.height * 0.5,
+          offsetX,
+          offsetY,
+          lastTime: now,
+        };
+      } else {
+        this.focusTransition.offsetX = offsetX;
+        this.focusTransition.offsetY = offsetY;
+        this.focusTransition.targetX = this.width * 0.5;
+        this.focusTransition.targetY = this.height * 0.5;
+        this.focusTransition.lastTime = now;
+      }
+      return changed;
+    }
+
+    const anchor = this.screenToWorld(screenX, screenY);
     if (scale === this.viewScale) return false;
 
+    this.focusTransition = null;
     this.viewScale = scale;
     this.viewOffsetX = screenX - anchor.x * scale;
     this.viewOffsetY = screenY - anchor.y * scale;

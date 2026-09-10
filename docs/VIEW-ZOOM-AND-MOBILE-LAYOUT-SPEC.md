@@ -59,8 +59,9 @@ Required API:
 - `worldDeltaToScreen(dx, dy)` / `screenDeltaToWorld(dx, dy)`;
 - `worldRectToScreen(rect)`;
 - `panViewBy(dx, dy)`;
-- `zoomViewAt(screenX, screenY, nextScale)` preserving the world point under
-  the gesture centroid;
+- `zoomViewAt(screenX, screenY, nextScale)` preserves the world point under
+  the gesture centroid above 1:1; at or below 1:1 it centers the complete
+  canvas so offsets accumulated while zoomed in cannot strand it off-screen;
 - scale clamp: `0.25 <= viewScale <= 8`.
 
 ### Input contract
@@ -74,6 +75,8 @@ Required API:
   view scale captured at gesture start, so RAF batching cannot compound scale.
 - Mouse wheel continues to set brush size. `Ctrl+wheel` / `Meta+wheel` zooms
   about the cursor, covering trackpad pinch on desktop browsers.
+- Returning to 1:1 clears presentation pan offsets. Below 1:1, equal margins
+  keep the scaled canvas centered in the viewport.
 - Explicit edge/corner dragging remains the only destructive canvas resize.
 
 ### Rendering contract
@@ -137,27 +140,29 @@ Required API:
 
 1. Pinching in and out changes presentation only; paint hashes, simulation
    dimensions, snapshot index, and export dimensions stay unchanged.
-2. A point beneath the pinch centroid remains beneath it within one backing
-   pixel throughout zoom.
+2. Above 1:1, a point beneath the pinch centroid remains beneath it within one
+   backing pixel throughout zoom.
 3. Painting at 1x, zooming, then painting at the same document point deposits
    into the same simulation texels.
 4. Two-finger translation pans without resizing; a combined pan/pinch performs
    both view operations without changing the painting rectangle.
-5. Normal mobile mode and Android "Desktop site" show the same compact UI
+5. Zooming out from a panned enlargement to 1:1 restores zero view offsets;
+   zoom levels below 1:1 keep the canvas centered.
+6. Normal mobile mode and Android "Desktop site" show the same compact UI
    proportions and control placement.
-6. At 360x640, 412x915, and landscape 915x412, the panel bar remains reachable,
+7. At 360x640, 412x915, and landscape 915x412, the panel bar remains reachable,
    the body can reach every control, and no page-level vertical overflow exists.
-7. The brush-preview button never covers the compact bar. The texture-probe
+8. The brush-preview button never covers the compact bar. The texture-probe
    button touches the bottom/right safe gap rather than reserving 256 px for an
    absent probe.
-8. A panel overlapping a debug control receives the pointer event.
-9. Existing color, timing, shader lint, build, and golden paint-data checks
+9. A panel overlapping a debug control receives the pointer event.
+10. Existing color, timing, shader lint, build, and golden paint-data checks
    remain valid; screen goldens may change only where debug chrome is present.
-10. Dragging the header across the viewport midpoint flips the body without
+11. Dragging the header across the viewport midpoint flips the body without
     changing the header's screen coordinate by more than one pixel.
-11. The extension can open, close, and switch File/Player tabs; its rectangle
+12. The extension can open, close, and switch File/Player tabs; its rectangle
     remains inside the viewport or deliberately overlays the base panel when
     no adjacent side fits.
-12. Changing the picker updates the HEX readout; changing Natural/Digital
+13. Changing the picker updates the HEX readout; changing Natural/Digital
     updates the readout and its RYB/RGB label; the copy icon writes the visible
     HEX value to the clipboard.

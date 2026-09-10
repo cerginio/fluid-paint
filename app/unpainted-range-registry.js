@@ -73,35 +73,43 @@ class UnpaintedRangeRegistry {
   }
 
   nextFrameBoundary(afterIndex, plan) {
-    return this._nextBoundary(afterIndex, plan && plan.frameRanges);
+    const range = this._cyclicPendingBoundary(afterIndex, plan && plan.frameRanges, 1);
+    return range ? range.start : null;
   }
 
   previousPendingFrame(beforeIndex, plan) {
-    return this._previousPendingBoundary(beforeIndex, plan && plan.frameRanges);
+    return this._cyclicPendingBoundary(beforeIndex, plan && plan.frameRanges, -1);
   }
 
   snapshot() {
     return this.ranges.map((range) => ({ ...range }));
   }
 
-  _nextBoundary(afterIndex, boundaries) {
-    if (!Array.isArray(boundaries)) return null;
-    const current = boundaries.find((range) => afterIndex >= range.start && afterIndex < range.end);
-    if (current && current.end < this.planLength) return current.end;
-    const next = boundaries.find((range) => range.start > afterIndex);
-    return next ? next.start : null;
-  }
+  /**
+   * Find pending content in the next/previous logical frame, wrapping at both
+   * ends. The current frame is considered only after one complete cycle, so
+   * navigation produces sequences such as 1-2-3-4-1 and 3-2-1-4.
+   */
+  _cyclicPendingBoundary(position, boundaries, direction) {
+    if (!Array.isArray(boundaries) || !boundaries.length || !this.ranges.length) return null;
+    let currentIndex = boundaries.findIndex(
+      (boundary) => position >= boundary.start && position < boundary.end
+    );
+    if (currentIndex < 0) {
+      if (position >= this.planLength) {
+        currentIndex = direction > 0 ? boundaries.length - 1 : 0;
+      } else {
+        currentIndex = direction > 0 ? -1 : 0;
+      }
+    }
 
-  _previousPendingBoundary(beforeIndex, boundaries) {
-    if (!Array.isArray(boundaries)) return null;
-    for (let i = boundaries.length - 1; i >= 0; i--) {
-      const boundary = boundaries[i];
-      if (boundary.start >= beforeIndex) continue;
-      for (let j = this.ranges.length - 1; j >= 0; j--) {
-        const pending = this.ranges[j];
+    for (let step = 1; step <= boundaries.length; step++) {
+      const index = (currentIndex + direction * step + boundaries.length) % boundaries.length;
+      const boundary = boundaries[index];
+      for (const pending of this.ranges) {
         const start = Math.max(boundary.start, pending.start);
-        const end = Math.min(boundary.end, pending.end, beforeIndex);
-        if (start < end) {
+        const end = Math.min(boundary.end, pending.end);
+        if (start < end && start !== position) {
           return { start, end, reason: pending.reason, key: boundary.key, label: boundary.label };
         }
       }

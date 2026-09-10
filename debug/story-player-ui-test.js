@@ -33,6 +33,50 @@ const server = http.createServer((request, response) => {
     await page.goto(`http://127.0.0.1:${server.address().port}/index.html?debug=none`);
     await page.waitForFunction(() => window.__painter && window.__painter.storyPlaybackController);
 
+    const centeredZoom = await page.evaluate(() => {
+      const painter = window.__painter;
+      const viewport = painter.viewport;
+      viewport.zoomViewAt(viewport.width * 0.85, viewport.height * 0.2, 3);
+      viewport.panViewBy(37, -29);
+      viewport.zoomViewAt(viewport.width * 0.1, viewport.height * 0.9, 0.75);
+      const focusStart = viewport.getFocusIndicator();
+      // The overview recentres over time instead of snapping on the wheel or
+      // pinch event. Advance the deterministic camera clock to its settled
+      // state before checking the final framing.
+      viewport.advanceFocusTransition(performance.now() + 1000);
+      const belowOne = {
+        scale: viewport.viewScale,
+        x: viewport.viewOffsetX,
+        y: viewport.viewOffsetY,
+        expectedX: viewport.width * 0.125,
+        expectedY: viewport.height * 0.125,
+      };
+      // Zooming back in keeps the pointer's world position fixed; it must not
+      // reapply the zoom-out centering rule.
+      viewport.zoomViewAt(0, 0, 1);
+      return {
+        focusStart,
+        belowOne,
+        zoomedIn: {
+          scale: viewport.viewScale,
+          x: viewport.viewOffsetX,
+          y: viewport.viewOffsetY,
+          expectedX: viewport.width / 6,
+          expectedY: viewport.height / 6,
+        },
+      };
+    });
+    assert.deepEqual(centeredZoom.focusStart, { x: 100, y: 648 },
+      'zoom-out autofocus starts at the gesture focus rather than the center');
+    assert.equal(centeredZoom.zoomedIn.scale, 1);
+    assert.equal(centeredZoom.zoomedIn.x, centeredZoom.zoomedIn.expectedX);
+    assert.equal(centeredZoom.zoomedIn.y, centeredZoom.zoomedIn.expectedY,
+      'zooming in from the centered range preserves the pointer anchor');
+    assert.equal(centeredZoom.belowOne.scale, 0.75);
+    assert.equal(centeredZoom.belowOne.x, centeredZoom.belowOne.expectedX);
+    assert.equal(centeredZoom.belowOne.y, centeredZoom.belowOne.expectedY,
+      'zoom below 1:1 keeps the complete canvas centered');
+
     for (const [selector, expected] of [
       ['#fluidity-slider', /^0\.\d{2}$/],
       ['#bristles-slider', /^\d+$/],

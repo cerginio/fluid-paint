@@ -466,8 +466,8 @@ Player provides two boundary-navigation actions:
 
 | Action | Forward behaviour | Backward behaviour |
 |---|---|---|
-| Previous Frame | — | Jump to the nearest earlier frame that still contains unpainted operations. |
-| Next Frame | Skip the unpainted remainder of the current frame and continue at the next frame boundary. | — |
+| Previous Frame | — | Jump to the previous frame with unpainted operations, wrapping from the first frame to the last. |
+| Next Frame | Skip the unpainted remainder of the current frame and continue at the next pending frame, wrapping from the last frame to the first. | — |
 
 The UI label is **Previous unpainted frame** in accessible names and tooltips.
 The compact visible label may remain “⏮ Frame”. This
@@ -672,6 +672,10 @@ interface StoryPlaybackController {
 Navigation methods return `false` when no valid destination exists. They are
 serialized by the controller so rapid repeated taps cannot run overlapping
 abort/restart transitions.
+
+Frame navigation is cyclic in compiled order. Forward navigation can therefore
+produce `1 → 2 → 3 → 4 → 1`, while backward navigation can produce
+`3 → 2 → 1 → 4`. Painted frames are skipped rather than deposited twice.
 
 ## 11. Unpainted range registry
 

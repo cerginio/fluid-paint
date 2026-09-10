@@ -223,6 +223,25 @@ console.log('tilecraft stroke player: PASS (frame grouping with stable paint sta
   assert.deepEqual(plan.groupRanges.map(({ start, end }) => [start, end]), [[0, 2], [2, 4]]);
   assert.deepEqual(plan.frameRanges.map(({ start, end }) => [start, end]), [[0, 2], [2, 4]]);
 
+  const loopPlan = { frameRanges: [
+    { start: 0, end: 2, key: 'frame:1', label: 'Frame 1' },
+    { start: 2, end: 4, key: 'frame:2', label: 'Frame 2' },
+    { start: 4, end: 6, key: 'frame:3', label: 'Frame 3' },
+    { start: 6, end: 8, key: 'frame:4', label: 'Frame 4' },
+  ] };
+  const loopRegistry = new UnpaintedRangeRegistry(8);
+  assert.equal(loopRegistry.nextFrameBoundary(0, loopPlan), 2);
+  assert.equal(loopRegistry.nextFrameBoundary(2, loopPlan), 4);
+  assert.equal(loopRegistry.nextFrameBoundary(4, loopPlan), 6);
+  assert.equal(loopRegistry.nextFrameBoundary(6, loopPlan), 0,
+    'forward frame navigation wraps 1-2-3-4-1');
+  assert.equal(loopRegistry.nextFrameBoundary(8, loopPlan), 0);
+  assert.equal(loopRegistry.previousPendingFrame(4, loopPlan).start, 2);
+  assert.equal(loopRegistry.previousPendingFrame(2, loopPlan).start, 0);
+  assert.equal(loopRegistry.previousPendingFrame(0, loopPlan).start, 6,
+    'backward frame navigation wraps 3-2-1-4');
+  assert.equal(loopRegistry.previousPendingFrame(8, loopPlan).start, 6);
+
   const registry = new UnpaintedRangeRegistry(plan.operations.length);
   registry.markPainted(0, 2);
   registry.markJump(2, 4, 'frame-jump');
