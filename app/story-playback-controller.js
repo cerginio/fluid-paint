@@ -236,8 +236,6 @@ class StoryPlaybackController {
     return true;
   }
 
-  previousUnpaintedColor() { return this._navigate('previous-color'); }
-  nextColor() { return this._navigate('next-color'); }
   previousUnpaintedFrame() { return this._navigate('previous-frame'); }
   nextFrame() { return this._navigate('next-frame'); }
 
@@ -259,15 +257,9 @@ class StoryPlaybackController {
     const shouldResume = this.state === 'playing';
     await this._cancelRun();
     let destination = null;
-    if (kind === 'next-color') {
-      destination = this.registry.nextColorBoundary(this.playheadIndex, this.plan);
-      if (destination !== null) this.registry.markJump(this.playheadIndex, destination, 'color-jump');
-    } else if (kind === 'next-frame') {
+    if (kind === 'next-frame') {
       destination = this.registry.nextFrameBoundary(this.playheadIndex, this.plan);
       if (destination !== null) this.registry.markJump(this.playheadIndex, destination, 'frame-jump');
-    } else if (kind === 'previous-color') {
-      const range = this.registry.previousPendingColor(this.playheadIndex, this.plan);
-      destination = range && range.start;
     } else if (kind === 'previous-frame') {
       const range = this.registry.previousPendingFrame(this.playheadIndex, this.plan);
       destination = range && range.start;
@@ -469,7 +461,6 @@ class StoryPlaybackController {
       totalItems: total,
       playheadIndex: this.playheadIndex,
       frameId: operation && operation.frameLabel,
-      colorId: operation && operation.colorLabel,
       groupId: operation && operation.groupLabel,
       paintedOperations: total - this.registry.pendingCount,
       pendingOperations: this.registry.pendingCount,
@@ -509,9 +500,7 @@ class StoryPlaybackController {
       error: this.error,
       pendingRanges: this.registry.snapshot(),
       canPaintManually: this.canPaintManually,
-      canPreviousColor: canNavigate && !!this.registry.previousPendingColor(this.playheadIndex, this.plan),
       canPreviousFrame: canNavigate && !!this.registry.previousPendingFrame(this.playheadIndex, this.plan),
-      canNextColor: canNavigate && this.registry.nextColorBoundary(this.playheadIndex, this.plan) !== null,
       canNextFrame: canNavigate && this.registry.nextFrameBoundary(this.playheadIndex, this.plan) !== null,
     };
   }

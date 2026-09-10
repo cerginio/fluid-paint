@@ -126,27 +126,18 @@ const colorPlayer = new TilecraftStrokePlayer({
   endStroke() {},
 });
 colorPlayer.replay(colorStory, framedOptions);
-assert.deepEqual(colorCalls.map((call) => call[1]), [0, 1, 2, 3, 4, 5, 6],
-  'groups with the same canonical colour are adjacent within their frame');
+assert.deepEqual(colorCalls.map((call) => call[1]), [0, 1, 4, 5, 2, 3, 6],
+  'canonical group colours do not reorder the original within-frame paint stack');
 assert.deepEqual(colorCalls.slice(0, 2).map((call) => call[0]), ['begin', 'to'],
   'a colour change inside one group does not split its stroke');
 assert.deepEqual(colorCalls[0][2], [1, 0, 0],
   'the first tile colour is used for the whole multi-colour group');
 const colorPlan = colorPlayer.compile(colorStory, framedOptions);
-assert.deepEqual(colorPlan.operations.map((operation) => operation.point.x), [0, 1, 2, 3, 4, 5, 6],
-  'compiled playback uses the same colour-grouped order');
-assert.ok(colorPlan.operations.slice(0, 4).every((operation) => operation.colorKey === '#ff0000'));
-assert.ok(colorPlan.operations.slice(4).every((operation) => operation.colorKey === '#0000ff'));
-assert.deepEqual(colorPlan.colorRanges.map(({ start, end, label }) => [start, end, label]), [
-  [0, 4, 'Color #ff0000'], [4, 7, 'Color #0000ff'],
-], 'compiled color buckets become stable navigation ranges');
-const colorRegistry = new UnpaintedRangeRegistry(colorPlan.operations.length);
-assert.equal(colorRegistry.nextColorBoundary(0, colorPlan), 4);
-colorRegistry.markPainted(0, 4);
-colorRegistry.markJump(4, 7, 'color-jump');
-assert.equal(colorRegistry.previousPendingColor(7, colorPlan).start, 4,
-  'backward color navigation selects an earlier unpainted color range');
-console.log('tilecraft stroke player: PASS (frame and canonical-colour grouped playback)');
+assert.deepEqual(colorPlan.operations.map((operation) => operation.point.x), [0, 1, 4, 5, 2, 3, 6],
+  'compiled playback preserves the same within-frame paint stack');
+assert.deepEqual(colorPlan.operations[1].color.channels, [1, 0, 0],
+  'compiled multi-color group also keeps its first tile color');
+console.log('tilecraft stroke player: PASS (frame grouping with stable paint stacking)');
 
 (async () => {
   const liveCalls = [];
@@ -230,7 +221,6 @@ console.log('tilecraft stroke player: PASS (frame and canonical-colour grouped p
   });
   assert.equal(plan.operations.length, 4);
   assert.deepEqual(plan.groupRanges.map(({ start, end }) => [start, end]), [[0, 2], [2, 4]]);
-  assert.deepEqual(plan.colorRanges.map(({ start, end }) => [start, end]), [[0, 2], [2, 4]]);
   assert.deepEqual(plan.frameRanges.map(({ start, end }) => [start, end]), [[0, 2], [2, 4]]);
 
   const registry = new UnpaintedRangeRegistry(plan.operations.length);
@@ -254,7 +244,7 @@ console.log('tilecraft stroke player: PASS (frame and canonical-colour grouped p
   assert.equal(TilecraftStrokePlayer.brushSizeCorrectionRate, 0.5,
     'story playback exposes its fixed brush-size correction rate');
   assert.equal(registry.pendingCount, 0);
-  console.log('tilecraft plan navigation: PASS (color/frame ranges and no double paint)');
+  console.log('tilecraft plan navigation: PASS (frame ranges and no double paint)');
 
   const abortCalls = [];
   const abortController = new AbortController();

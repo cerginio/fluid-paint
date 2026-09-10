@@ -46,7 +46,7 @@ class UnpaintedRangeRegistry {
 
   markJump(start, end, reason) {
     this._validateRange(start, end);
-    if (!['color-jump', 'frame-jump', 'interrupted', 'future'].includes(reason)) {
+    if (!['frame-jump', 'interrupted', 'future'].includes(reason)) {
       throw new TypeError(`Unknown pending range reason: ${reason}.`);
     }
     const next = [];
@@ -72,16 +72,8 @@ class UnpaintedRangeRegistry {
     return this.ranges.length ? { ...this.ranges[0] } : null;
   }
 
-  nextColorBoundary(afterIndex, plan) {
-    return this._nextBoundary(afterIndex, plan && plan.colorRanges);
-  }
-
   nextFrameBoundary(afterIndex, plan) {
     return this._nextBoundary(afterIndex, plan && plan.frameRanges);
-  }
-
-  previousPendingColor(beforeIndex, plan) {
-    return this._previousPendingBoundary(beforeIndex, plan && plan.colorRanges);
   }
 
   previousPendingFrame(beforeIndex, plan) {

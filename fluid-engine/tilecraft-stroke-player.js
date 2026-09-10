@@ -16,9 +16,9 @@ class TilecraftStrokePlayer {
   }
 
   /**
-   * Replay a Tilecraft render model frame by frame and canonical colour by
-   * colour. A polyline group's first tile defines its colour; polygon tiles
-   * are independent paint spots. Other primitive families are ignored.
+   * Replay a Tilecraft render model frame by frame. Within a frame, original
+   * layer/source order determines paint stacking. A polyline group's first
+   * tile defines its colour; polygon tiles are independent paint spots.
    *
    * `mapPoint(tile, layer)` is the coordinate-boundary hook. It must return
    * finite bottom-left-origin engine coordinates; the model itself stays in its
@@ -117,7 +117,7 @@ class TilecraftStrokePlayer {
 
   /**
    * Compile Tilecraft input into one immutable execution order. The UI uses
-   * this plan for color/frame navigation; replay() and play() remain compatible
+   * this plan for frame navigation; replay() and play() remain compatible
    * with older sequential callers.
    */
   compile(model, options) {
@@ -157,9 +157,6 @@ class TilecraftStrokePlayer {
             layerTag: layer.tag,
             frameKey,
             frameLabel: this._frameLabel(firstTile.f),
-            colorKey: this._colorKey(segment.groupColor),
-            colorLabel: this._colorLabel(segment.groupColor),
-            frameColorKey: `${frameKey}:${this._colorKey(segment.groupColor)}`,
             groupKey: segmentKey,
             groupLabel: firstTile.g === undefined ? `Group ${segmentOrdinal + 1}` : `Group ${firstTile.g}`,
             segmentKey,
@@ -203,9 +200,6 @@ class TilecraftStrokePlayer {
           layerTag: layer.tag,
           frameKey,
           frameLabel: this._frameLabel(tile.f),
-          colorKey: this._colorKey(tile.c),
-          colorLabel: this._colorLabel(tile.c),
-          frameColorKey: `${frameKey}:${this._colorKey(tile.c)}`,
           groupKey,
           groupLabel: `Spot ${sourceTileIndex + 1}`,
           point,
@@ -221,8 +215,7 @@ class TilecraftStrokePlayer {
 
     const frameOrderedOperations = this._groupByFrame(
       operations,
-      (operation) => operation.frameKey,
-      (operation) => operation.colorKey
+      (operation) => operation.frameKey
     );
     frameOrderedOperations.forEach((operation, index) => {
       operation.index = index;
@@ -231,7 +224,6 @@ class TilecraftStrokePlayer {
     const plan = {
       operations: Object.freeze(frameOrderedOperations),
       groupRanges: Object.freeze(this._boundaryRanges(frameOrderedOperations, 'groupKey', 'groupLabel')),
-      colorRanges: Object.freeze(this._boundaryRanges(frameOrderedOperations, 'frameColorKey', 'colorLabel')),
       frameRanges: Object.freeze(this._boundaryRanges(frameOrderedOperations, 'frameKey', 'frameLabel')),
       skipped: context.stats.skipped,
       layers: context.stats.layers,
@@ -242,7 +234,7 @@ class TilecraftStrokePlayer {
   /**
    * Play an immutable plan from one operation index. Painted indices reported
    * by a registry are skipped, which is the no-double-deposit guarantee used
-   * by backward color/frame navigation.
+   * by backward frame navigation.
    */
   async playPlan(plan, options = {}) {
     if (!plan || !Array.isArray(plan.operations)) {
@@ -473,7 +465,6 @@ class TilecraftStrokePlayer {
       layerIndex: operation.layerIndex,
       layerTag: operation.layerTag,
       frameId: operation.frameLabel,
-      colorId: operation.colorLabel,
       groupId: operation.groupLabel,
       modelTicks: stats.points,
       playheadIndex,
@@ -520,9 +511,8 @@ class TilecraftStrokePlayer {
 
   /**
    * Build render units in the legacy layer/primitive order, then make frame
-   * identity the outer ordering boundary, followed by the group's canonical
-   * colour. This keeps source order stable inside each colour bucket and
-   * guarantees one contiguous range per frame.
+   * identity the outer ordering boundary. This keeps layer/source order stable
+   * inside each frame and guarantees one contiguous range per frame.
    */
   _playbackUnits(model, context) {
     const units = [];
@@ -536,7 +526,6 @@ class TilecraftStrokePlayer {
           layer,
           segment,
           frameKey: this._frameKey(segment.tiles[0] && segment.tiles[0].f),
-          colorKey: this._colorKey(segment.groupColor),
         });
       }
     }
@@ -549,19 +538,14 @@ class TilecraftStrokePlayer {
           layer,
           tile,
           frameKey: this._frameKey(tile.f),
-          colorKey: this._colorKey(tile.c),
         });
       }
     }
 
-    return this._groupByFrame(
-      units,
-      (unit) => unit.frameKey,
-      (unit) => unit.colorKey
-    );
+    return this._groupByFrame(units, (unit) => unit.frameKey);
   }
 
-  _groupByFrame(items, keyFor, colorFor) {
+  _groupByFrame(items, keyFor) {
     const buckets = new Map();
     const unassigned = [];
     for (const item of items) {
@@ -575,26 +559,7 @@ class TilecraftStrokePlayer {
     }
     const frames = [...buckets.values()];
     if (unassigned.length) frames.push(unassigned);
-    return frames.flatMap((frameItems) => this._groupByValue(frameItems, colorFor));
-  }
-
-  _groupByValue(items, keyFor) {
-    if (typeof keyFor !== 'function') return items;
-    const buckets = new Map();
-    for (const item of items) {
-      const key = keyFor(item);
-      if (!buckets.has(key)) buckets.set(key, []);
-      buckets.get(key).push(item);
-    }
-    return [...buckets.values()].flat();
-  }
-
-  _colorKey(value) {
-    return String(value).toLowerCase();
-  }
-
-  _colorLabel(value) {
-    return `Color ${this._colorKey(value)}`;
+    return frames.flat();
   }
 
   *_polylineSegments(layer, stats, context) {

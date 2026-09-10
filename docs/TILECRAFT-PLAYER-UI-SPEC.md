@@ -169,9 +169,8 @@ The transport row in Player stays sticky at the bottom on short viewports.
 │ Speed          Actual          │
 │ 8×             6.4×            │
 │                                │
-│ Frame 2 / 4 · Color #e33a28    │
+│ Frame 2 / 4 · Group 94 / 936   │
 │ [⏮ Frame]          [Frame ⏭]   │
-│ [‹ Color]          [Color ›]   │
 │                                │
 │ [ Restart ] [ ❚❚ Pause ] [Stop]│
 └────────────────────────────────┘
@@ -461,24 +460,22 @@ Seeking is a separate feature requiring:
 Until that is implemented and benchmarked, a seekable-looking control is
 misleading.
 
-### 9.7 Navigation across colors and frames
+### 9.7 Navigation across frames
 
-Player provides four boundary-navigation actions:
+Player provides two boundary-navigation actions:
 
 | Action | Forward behaviour | Backward behaviour |
 |---|---|---|
-| Previous Color | — | Jump to the nearest earlier color bucket that still contains unpainted operations. |
-| Next Color | Skip the unpainted remainder of the current color and continue at the next color boundary. | — |
 | Previous Frame | — | Jump to the nearest earlier frame that still contains unpainted operations. |
 | Next Frame | Skip the unpainted remainder of the current frame and continue at the next frame boundary. | — |
 
-The UI labels are **Previous unpainted color/frame** in accessible names and
-tooltips. The compact visible labels may remain “‹ Color” and “⏮ Frame”. This
+The UI label is **Previous unpainted frame** in accessible names and tooltips.
+The compact visible label may remain “⏮ Frame”. This
 distinction matters: Back is not canvas rewind.
 
 #### Non-destructive backward rule
 
-Fluid paint is cumulative. Painting an already processed color bucket a second time
+Fluid paint is cumulative. Painting an already processed frame a second time
 would add more pigment and produce a different image. Therefore:
 
 - backward navigation targets only operations whose paint has not yet been
@@ -497,7 +494,7 @@ When the user jumps forward:
 1. close the currently active FluidEngine stroke safely;
 2. calculate the half-open operation range being skipped;
 3. retain that range as pending in `UnpaintedRangeRegistry`;
-4. move the playhead to the requested color/frame boundary;
+4. move the playhead to the requested frame boundary;
 5. resume only if the player was Playing before the jump.
 
 If a jump happens in the middle of a polyline group, the already emitted prefix
@@ -531,10 +528,9 @@ frames within their existing execution order.
 
 Frame ordering follows each frame's first appearance in the adapter's render
 order, not numeric sorting of IDs. The compiler groups all operations with the
-same `f` into one contiguous frame range. Inside that range, groups are bucketed
-by their canonical colour in first-appearance order. A polyline group's first
-tile supplies that canonical colour even when later tiles have other colours;
-existing layer/source order is preserved within each colour bucket.
+same `f` into one contiguous frame range. Inside that range, original
+layer/source order is preserved without colour-based reordering. A polyline
+group's first tile still supplies its immutable stroke colour.
 
 #### Coverage rail and playhead
 
@@ -553,7 +549,7 @@ painted       pending gap       painted       future
                          ▲ playhead
 ```
 
-It remains non-interactive. Color/frame buttons are the only navigation surface
+It remains non-interactive. Frame buttons are the only navigation surface
 in version 1. The rail uses pattern plus colour so pending gaps remain visible
 without relying on colour alone.
 
@@ -661,8 +657,6 @@ interface StoryPlaybackController {
   resume(): void;
   restart(): Promise<void>;
   stop(): Promise<void>;
-  previousUnpaintedColor(): Promise<boolean>;
-  nextColor(): Promise<boolean>;
   previousUnpaintedFrame(): Promise<boolean>;
   nextFrame(): Promise<boolean>;
   playEarliestRemaining(): Promise<boolean>;
@@ -685,7 +679,7 @@ Navigation requires a registry separate from DOM state and separate from
 FluidEngine snapshots. Call it `UnpaintedRangeRegistry`.
 
 The player first compiles the model into an immutable linear playback plan.
-Every atomic paint operation has a stable integer index and group/color/frame keys:
+Every atomic paint operation has a stable integer index and group/frame keys:
 
 ```ts
 interface PlaybackOperation {
@@ -694,7 +688,6 @@ interface PlaybackOperation {
   layerIndex: number;
   layerTag?: string;
   frameKey: string;
-  colorKey: string;
   groupKey: string;
   sourceTileIndex: number;
   // normalized mapping/colour/size data needed to execute the operation
@@ -703,14 +696,13 @@ interface PlaybackOperation {
 interface PlaybackPlan {
   readonly operations: readonly PlaybackOperation[];
   readonly groupRanges: readonly PlaybackBoundary[];
-  readonly colorRanges: readonly PlaybackBoundary[];
   readonly frameRanges: readonly PlaybackBoundary[];
 }
 
 interface PendingRange {
   start: number;       // inclusive plan index
   end: number;         // exclusive plan index
-  reason: 'future' | 'color-jump' | 'frame-jump' | 'interrupted';
+  reason: 'future' | 'frame-jump' | 'interrupted';
 }
 ```
 
@@ -724,7 +716,7 @@ Registry invariants:
 5. Ranges are always sorted, non-overlapping and half-open.
 6. Painted operations can never be reinserted except by full Restart after the
    baseline snapshot is restored.
-7. A backward query intersects color/frame boundaries with pending ranges and
+7. A backward query intersects frame boundaries with pending ranges and
    returns only the pending intersection.
 8. Completion is `registry.pendingCount === 0`, not `playhead === plan.length`.
 
@@ -744,8 +736,6 @@ interface UnpaintedRangeRegistry {
   reset(planLength: number): void;
   markPainted(start: number, end: number): void;
   markJump(start: number, end: number, reason: PendingRange['reason']): void;
-  previousPendingColor(beforeIndex: number, plan: PlaybackPlan): PendingRange | null;
-  nextColorBoundary(afterIndex: number, plan: PlaybackPlan): number | null;
   previousPendingFrame(beforeIndex: number, plan: PlaybackPlan): PendingRange | null;
   nextFrameBoundary(afterIndex: number, plan: PlaybackPlan): number | null;
   earliestPending(): PendingRange | null;
@@ -764,7 +754,7 @@ mutable registry instance:
 
 ```js
 controller.getPendingRanges();
-// [{ start: 120, end: 188, reason: 'color-jump' }, ...]
+// [{ start: 120, end: 188, reason: 'frame-jump' }, ...]
 ```
 
 ### Registry example
@@ -820,7 +810,7 @@ player.play(model, {
 });
 ```
 
-Sequential `play(model)` is not enough for color/frame navigation. Add a
+Sequential `play(model)` is not enough for frame navigation. Add a
 compile-once plan API so the controller can move by stable boundaries without
 re-running model grouping logic:
 
@@ -938,7 +928,7 @@ Leave the final painting visible and the canvas interactive after the run's
 active stroke is closed. Present **Keep result** as the primary completion
 action and **Replay** as secondary; a manual edit implicitly chooses Keep.
 
-### Previous/Next Color or Frame
+### Previous/Next Frame
 
 1. serialize the navigation request behind any operation already in flight;
 2. remember whether the prior state was Playing or Paused;
@@ -1015,13 +1005,10 @@ It keeps the existing shell IDs and `data-extension-*` tab hooks.
          aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
 
     <nav class="story-boundary-navigation" aria-label="Story position">
-      <output id="story-playhead-label">Frame 1 · Color #e33a28</output>
+      <output id="story-playhead-label">Frame 1 · Group 1</output>
       <button id="story-previous-frame" type="button"
               aria-label="Previous unpainted frame">Previous frame</button>
       <button id="story-next-frame" type="button">Next frame</button>
-      <button id="story-previous-color" type="button"
-              aria-label="Previous unpainted color">Previous color</button>
-      <button id="story-next-color" type="button">Next color</button>
     </nav>
 
     <div class="story-runtime-controls">
@@ -1204,7 +1191,7 @@ If the business product collects telemetry, record only operational facts:
 - layer/point count buckets;
 - selected and achieved speed;
 - playback completion/cancel/error;
-- color/frame forward and backward jump counts;
+- frame forward and backward jump counts;
 - pending-range count at Keep result;
 - elapsed time;
 - WebGL version and resolution bucket.
@@ -1248,13 +1235,13 @@ without a separate explicit privacy decision.
 - Painted coverage is monotonic even when the playhead moves backward.
 - Playhead position and painted coverage are never presented as the same value.
 
-### Color/frame navigation
+### Frame navigation
 
-- Next Color and Next Frame land on stable compiled boundaries.
+- Next Frame lands on a stable compiled boundary.
 - Every skipped forward interval remains pending in the separate registry.
-- Previous Color and Previous Frame select only earlier pending intersections.
+- Previous Frame selects only earlier pending intersections.
 - Back controls are disabled when all earlier content is already painted.
-- Returning to a partially painted color never replays its painted prefix.
+- Returning to a partially painted frame never replays its painted prefix.
 - Rapid navigation clicks are serialized and leave at most one active engine
   stroke.
 - Reaching the plan end with pending ranges enters Completed with Gaps.
@@ -1283,9 +1270,9 @@ without a separate explicit privacy decision.
 - Play, Pause/Resume, Restart and Stop/Restore;
 - fixed speed choices;
 - read-only progress;
-- compiled playback plan with color/frame boundaries;
+- compiled playback plan with frame boundaries;
 - separate `UnpaintedRangeRegistry`;
-- Previous/Next Color and Previous/Next Frame controls;
+- Previous/Next Frame controls;
 - Completed with Gaps and Paint Earliest Remaining flow;
 - controller ownership and safe manual-input hand-off;
 - `AbortSignal`, pause gate and `onProgress` hooks in the player;
@@ -1315,7 +1302,7 @@ without a separate explicit privacy decision.
 - arbitrary remote URL loading;
 - drag-to-seek timeline;
 - replaying already painted ranges when navigating backward;
-- canvas rewind on Previous Color/Frame;
+- canvas rewind on Previous Frame;
 - editing Story Model JSON;
 - per-layer enable/disable controls;
 - changing Fluid Paint brush controls during playback;

@@ -24,11 +24,11 @@ uses only those named methods; it never reaches into engine internals:
 | `endStroke()` | lift and flush the endpoint |
 
 `fluid-engine/tilecraft-stroke-player.js` is the use-case adapter. It groups
-drawable content first by `tile.f`, then by canonical group colour, and renders
-one complete frame at a time. A polyline `g` is one path, splitting at `b` or
-frame changes and closing `gz` paths; its first tile supplies the immutable
-colour for every segment in that group. Polygon tiles are individual coloured
-spots. Existing layer/source order is preserved inside each colour bucket.
+drawable content by `tile.f` and renders one complete frame at a time. Within
+each frame it preserves the original layer/source stack: polyline layers first,
+then polygon spots. A polyline `g` is one path, splitting at `b` or frame
+changes and closing `gz` paths; its first tile supplies the immutable colour
+for every segment in that group. Polygon tiles are individual coloured spots.
 Polylines select spatial `timing: 'replay'`; spots select `timing: 'live'` so
 each is an immediate sub-tick tap rather than ten settle frames. Neither route
 calls `advance()` during this synchronous import.
