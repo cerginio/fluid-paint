@@ -86,15 +86,11 @@ class Viewport {
     this.viewOffsetY = 0;
     this.minViewScale = opts.minViewScale !== undefined ? opts.minViewScale : 0.25;
     this.maxViewScale = opts.maxViewScale !== undefined ? opts.maxViewScale : 8;
-    // A zoom-out below the overview threshold recentres the camera over a few
-    // frames. The marker is deliberately stored here too: it describes camera
-    // state, not the live pointer, and therefore cannot drift from the view.
-    this.focusTransition = null;
-    this.lastZoomDirection = 0;
-    this.lastFocusX = 0;
-    this.lastFocusY = 0;
-    this.focusOverscan = 50;
-    this.focusRecenteringStep = 0.18;
+    // Zoom shows a short-lived, static cue at the gesture anchor. It is not a
+    // camera transition and never follows, eases toward, or drifts with the
+    // pointer after the zoom event.
+    this.focusIndicator = null;
+    this.focusIndicatorDuration = 600;
 
     this.resize();
   }
@@ -366,216 +362,75 @@ class Viewport {
   }
 
   panViewBy(dx, dy) {
-    this.focusTransition = null;
+    this.focusIndicator = null;
     this.viewOffsetX += dx;
     this.viewOffsetY += dy;
   }
 
-  /** Advance an active zoom-out autofocus transition. */
-  advanceFocusTransition(now) {
-    const transition = this.focusTransition;
-    if (transition === null) return false;
-
-    const elapsed = Math.max(0, now - transition.lastTime);
-    transition.lastTime = now;
-    // Exponential easing is frame-rate independent and remains smooth if a
-    // tab briefly misses a frame.
-    const amount = 1 - Math.exp(-elapsed * 0.0045);
-    if (transition.offsetX !== null) {
-      this.viewOffsetX += (transition.offsetX - this.viewOffsetX) * amount;
-      this.viewOffsetY += (transition.offsetY - this.viewOffsetY) * amount;
+  expireFocusIndicator(now) {
+    if (this.focusIndicator !== null && now >= this.focusIndicator.visibleUntil) {
+      this.focusIndicator = null;
     }
-    if (transition.markerFollowsPointer) {
-      transition.x += (transition.targetX - transition.x) * amount;
-      transition.y += (transition.targetY - transition.y) * amount;
-    }
-    this.lastFocusX = transition.x;
-    this.lastFocusY = transition.y;
-
-    const settled =
-      (transition.offsetX === null || (
-        Math.abs(transition.offsetX - this.viewOffsetX) < 0.1 &&
-        Math.abs(transition.offsetY - this.viewOffsetY) < 0.1
-      )) &&
-      (!transition.markerFollowsPointer || (
-        Math.abs(transition.targetX - transition.x) < 0.1 &&
-        Math.abs(transition.targetY - transition.y) < 0.1
-      ));
-    if (settled) {
-      if (transition.offsetX !== null) {
-        this.viewOffsetX = transition.offsetX;
-        this.viewOffsetY = transition.offsetY;
-      }
-      this.lastFocusX = transition.targetX;
-      this.lastFocusY = transition.targetY;
-      this.focusTransition = null;
-    }
-    return true;
   }
 
-  /** The visible autofocus marker, or null when the camera is settled. */
+  /** The visible zoom marker, or null outside its short display window. */
   getFocusIndicator() {
-    if (this.focusTransition === null) return null;
-    return { x: this.focusTransition.x, y: this.focusTransition.y };
+    if (this.focusIndicator === null) return null;
+    return { x: this.focusIndicator.x, y: this.focusIndicator.y };
   }
 
-  focusBounds(bounds) {
-    return bounds || new Rectangle(0, 0, this.width, this.height);
-  }
-
-  focusCenterX(bounds) {
-    const rect = this.focusBounds(bounds);
-    return rect.left + rect.width * 0.5;
-  }
-
-  focusCenterY(bounds) {
-    const rect = this.focusBounds(bounds);
-    return rect.bottom + rect.height * 0.5;
-  }
-
-  clampFocusX(x, bounds) {
-    const rect = this.focusBounds(bounds);
-    const overscan = this.cssLengthToScreen(this.focusOverscan);
-    return Math.max(rect.left - overscan, Math.min(rect.getRight() + overscan, x));
-  }
-
-  clampFocusY(y, bounds) {
-    const rect = this.focusBounds(bounds);
-    const overscan = this.cssLengthToScreen(this.focusOverscan);
-    return Math.max(rect.bottom - overscan, Math.min(rect.getTop() + overscan, y));
-  }
-
-  /** Show a clamped focus cue without changing the camera framing. */
-  showFocusIndicator(screenX, screenY, now, direction, bounds) {
-    const centerX = this.focusCenterX(bounds);
-    const centerY = this.focusCenterY(bounds);
-    const targetX = this.clampFocusX(screenX, bounds);
-    const targetY = this.clampFocusY(screenY, bounds);
-    if (direction === this.lastZoomDirection && this.focusTransition !== null) {
-      if (direction > 0) {
-        // Zoom-in focus follows the pointer gradually, including the 50px
-        // overscan where an external pointer still has a visible cue.
-        this.focusTransition.targetX = targetX;
-        this.focusTransition.targetY = targetY;
-        this.focusTransition.markerFollowsPointer = true;
-      } else {
-        // Zoom-out recentres one deliberate step for each wheel event.
-        this.focusTransition.x += (centerX - this.focusTransition.x) *
-          this.focusRecenteringStep;
-        this.focusTransition.y += (centerY - this.focusTransition.y) *
-          this.focusRecenteringStep;
-        this.focusTransition.markerFollowsPointer = false;
-        this.lastFocusX = this.focusTransition.x;
-        this.lastFocusY = this.focusTransition.y;
-      }
-      return;
-    }
-    const directionChanged = direction !== this.lastZoomDirection;
-    let x = directionChanged ? targetX : this.lastFocusX;
-    let y = directionChanged ? targetY : this.lastFocusY;
-    if (direction < 0) {
-      x += (centerX - x) * this.focusRecenteringStep;
-      y += (centerY - y) * this.focusRecenteringStep;
-    }
-    this.focusTransition = {
-      x,
-      y,
-      targetX,
-      targetY,
-      markerFollowsPointer: direction > 0,
-      offsetX: null,
-      offsetY: null,
-      lastTime: now,
+  /** Place a static focus cue at the current zoom anchor. */
+  showFocusIndicator(screenX, screenY, now) {
+    this.focusIndicator = {
+      x: screenX,
+      y: screenY,
+      visibleUntil: now + this.focusIndicatorDuration,
     };
-    this.lastFocusX = this.focusTransition.x;
-    this.lastFocusY = this.focusTransition.y;
-    this.lastZoomDirection = direction;
   }
 
   /** Set absolute zoom while keeping the world point beneath the anchor fixed. */
-  zoomViewAt(screenX, screenY, nextScale, focusBounds) {
+  zoomViewAt(screenX, screenY, nextScale, canvasBounds) {
     const scale = Math.max(this.minViewScale, Math.min(this.maxViewScale, nextScale));
-    // Snap to the centered, zoomed-out view only while zooming out.  When
-    // zooming back in from that range, preserve the pointer's world anchor.
-    if (scale <= 0.75 && scale < this.viewScale) {
-      const directionChanged = this.lastZoomDirection !== -1;
-      const centerX = this.focusCenterX(focusBounds);
-      const centerY = this.focusCenterY(focusBounds);
-      // Once autofocus has begun, its focus owns subsequent wheel/pinch
-      // updates. It never chases a moved pointer, and the first focus is
-      // clamped before it can influence the camera.
-      const anchorFocusX = directionChanged
-        ? this.clampFocusX(screenX, focusBounds)
-        : this.focusTransition === null ? this.lastFocusX : this.focusTransition.x;
-      const anchorFocusY = directionChanged
-        ? this.clampFocusY(screenY, focusBounds)
-        : this.focusTransition === null ? this.lastFocusY : this.focusTransition.y;
-      const anchor = this.screenToWorld(anchorFocusX, anchorFocusY);
-      const offsetX = (this.width - this.width * scale) * 0.5;
-      const offsetY = (this.height - this.height * scale) * 0.5;
-      const changed = scale !== this.viewScale ||
-        offsetX !== this.viewOffsetX || offsetY !== this.viewOffsetY;
-
-      // Begin at the anchored view, then ease to the overview position. The
-      // focus marker starts at the gesture origin once and is constrained to
-      // the canvas; later pointer movement cannot pull it beyond an edge.
-      this.viewScale = scale;
-      this.viewOffsetX = anchorFocusX - anchor.x * scale;
-      this.viewOffsetY = anchorFocusY - anchor.y * scale;
-      const focusX = anchorFocusX + (centerX - anchorFocusX) * this.focusRecenteringStep;
-      const focusY = anchorFocusY + (centerY - anchorFocusY) * this.focusRecenteringStep;
-      const now = typeof performance !== 'undefined' ? performance.now() : 0;
-      if (this.focusTransition === null || directionChanged) {
-        this.focusTransition = {
-          x: focusX,
-          y: focusY,
-          targetX: centerX,
-          targetY: centerY,
-          markerFollowsPointer: false,
-          offsetX,
-          offsetY,
-          lastTime: now,
-        };
-        this.lastFocusX = focusX;
-        this.lastFocusY = focusY;
-      } else {
-        this.focusTransition.offsetX = offsetX;
-        this.focusTransition.offsetY = offsetY;
-        this.focusTransition.targetX = centerX;
-        this.focusTransition.targetY = centerY;
-        this.focusTransition.x = focusX;
-        this.focusTransition.y = focusY;
-        this.focusTransition.markerFollowsPointer = false;
-        this.focusTransition.lastTime = now;
-      }
-      this.lastZoomDirection = -1;
-      return changed;
-    }
-
     if (scale === this.viewScale) return false;
 
-    // Every zoom direction gets the same focus cue. It is clamped before the
-    // view transform uses it, so a pinch centre just outside the canvas cannot
-    // place the visible focus beyond the canvas edge.
-    const direction = scale < this.viewScale ? -1 : 1;
-    const directionChanged = direction !== this.lastZoomDirection;
-    const focusX = directionChanged
-      ? this.clampFocusX(screenX, focusBounds)
-      : this.focusTransition === null ? this.lastFocusX : this.focusTransition.x;
-    const focusY = directionChanged
-      ? this.clampFocusY(screenY, focusBounds)
-      : this.focusTransition === null ? this.lastFocusY : this.focusTransition.y;
-    const focusAnchor = this.screenToWorld(focusX, focusY);
+    const now = typeof performance !== 'undefined' ? performance.now() : 0;
+    // Center an overview immediately. There is no focus-driven camera motion;
+    // the overlay only marks the zoom event's anchor.
+    if (scale <= 0.75 && scale < this.viewScale) {
+      this.viewScale = scale;
+      this.viewOffsetX = (this.width - this.width * scale) * 0.5;
+      this.viewOffsetY = (this.height - this.height * scale) * 0.5;
+      this.showFocusIndicator(screenX, screenY, now);
+      return true;
+    }
+
+    const previousScale = this.viewScale;
+    const focusAnchor = this.screenToWorld(screenX, screenY);
     this.viewScale = scale;
-    this.viewOffsetX = focusX - focusAnchor.x * scale;
-    this.viewOffsetY = focusY - focusAnchor.y * scale;
-    this.showFocusIndicator(
-      focusX,
-      focusY,
-      typeof performance !== 'undefined' ? performance.now() : 0,
-      direction,
-      focusBounds
-    );
+    this.viewOffsetX = screenX - focusAnchor.x * scale;
+    this.viewOffsetY = screenY - focusAnchor.y * scale;
+
+    // When zooming in from outside the canvas, ordinary anchor-preserving zoom
+    // expands the canvas away from the pointer. On each outside axis, translate
+    // the view back so the nearest edge moves to the pointer. The other axis is
+    // untouched and keeps its normal zoom-anchor behaviour.
+    if (scale > previousScale && canvasBounds) {
+      const ratio = scale / previousScale;
+      const oldRight = canvasBounds.getRight();
+      const oldTop = canvasBounds.getTop();
+      const zoomedLeft = screenX + (canvasBounds.left - screenX) * ratio;
+      const zoomedRight = screenX + (oldRight - screenX) * ratio;
+      const zoomedBottom = screenY + (canvasBounds.bottom - screenY) * ratio;
+      const zoomedTop = screenY + (oldTop - screenY) * ratio;
+
+      if (screenX < canvasBounds.left) this.viewOffsetX += screenX - zoomedLeft;
+      else if (screenX > oldRight) this.viewOffsetX += screenX - zoomedRight;
+
+      if (screenY < canvasBounds.bottom) this.viewOffsetY += screenY - zoomedBottom;
+      else if (screenY > oldTop) this.viewOffsetY += screenY - zoomedTop;
+    }
+
+    this.showFocusIndicator(screenX, screenY, now);
     return true;
   }
 

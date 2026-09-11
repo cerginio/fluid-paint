@@ -99,14 +99,15 @@ html, body {
   touch-action: none;
 }
 
-/* The focus cue deliberately sits outside #canvas-cell: zoom-in may show up
-   to 50px beyond an edge while tracking a pointer that left the canvas. */
+/* The focus cue deliberately sits outside #canvas-cell so it can follow a zoom
+   pointer without being clipped at the canvas or painting edge. */
 .focus-overlay {
   position: absolute;
   z-index: 10;
-  width: 108px;
-  height: 108px;
-  color: #0ea5e9;
+  width: 64px;
+  height: 64px;
+  /* color: #0ea5e9; */
+  color: #f97316;
   pointer-events: none;
   transform: translate(-50%, -50%);
   opacity: 0;

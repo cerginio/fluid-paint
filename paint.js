@@ -817,10 +817,7 @@ class Paint {
         const wgl = this.wgl;
         const storyOwnsBrush = this._storyOwnsBrush();
 
-        if (this.viewport.advanceFocusTransition(performance.now())) {
-            this.rebuildProjectionMatrix();
-            this.needsRedraw = true;
-        }
+        this.viewport.expireFocusIndicator(performance.now());
 
         if (!storyOwnsBrush) this._syncBrushToPointer();
 
@@ -1604,12 +1601,12 @@ class Paint {
         if (Math.abs(totalScale - 1) < PINCH_SCALE_DEADZONE) return;
 
         const anchor = this._toScreen(event.centerX, event.centerY);
-        const focusBounds = this.viewport.worldRectToScreen(this.paintingRectangle);
+        const canvasBounds = this.viewport.worldRectToScreen(this.paintingRectangle);
         if (this.viewport.zoomViewAt(
             anchor.x,
             anchor.y,
             this.pinchStartViewScale * totalScale,
-            focusBounds
+            canvasBounds
         )) {
             this.rebuildProjectionMatrix();
             this.needsRedraw = true;
@@ -1772,13 +1769,13 @@ class Paint {
 
         if (event.ctrlKey || event.metaKey) {
             const anchor = this.viewport.eventToScreen(event);
-            const focusBounds = this.viewport.worldRectToScreen(this.paintingRectangle);
+            const canvasBounds = this.viewport.worldRectToScreen(this.paintingRectangle);
             const factor = Math.exp(-event.deltaY * 0.0015);
             if (this.viewport.zoomViewAt(
                 anchor.x,
                 anchor.y,
                 this.viewport.viewScale * factor,
-                focusBounds
+                canvasBounds
             )) {
                 this.rebuildProjectionMatrix();
                 this.needsRedraw = true;

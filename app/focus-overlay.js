@@ -1,7 +1,7 @@
 'use strict';
 
-// The focus cue is DOM rather than a framebuffer pass so the permitted 50px
-// overscan remains visible when the focus is just beyond a canvas edge.
+// The focus cue is DOM rather than a framebuffer pass so it can follow a zoom
+// pointer anywhere, including outside the canvas and painting bounds.
 class FocusOverlay {
   constructor(canvas, viewport) {
     this.canvas = canvas;

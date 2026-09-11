@@ -48,12 +48,12 @@ const server = http.createServer((request, response) => {
       const viewport = painter.viewport;
       viewport.zoomViewAt(viewport.width * 0.85, viewport.height * 0.2, 3);
       viewport.panViewBy(37, -29);
-      viewport.zoomViewAt(viewport.width * 0.1, viewport.height * 0.9, 0.75);
+      viewport.zoomViewAt(
+        viewport.width * 0.1,
+        viewport.height * 0.9,
+        0.75
+      );
       const focusStart = viewport.getFocusIndicator();
-      // The overview recentres over time instead of snapping on the wheel or
-      // pinch event. Advance the deterministic camera clock to its settled
-      // state before checking the final framing.
-      viewport.advanceFocusTransition(performance.now() + 2500);
       const belowOne = {
         scale: viewport.viewScale,
         x: viewport.viewOffsetX,
@@ -61,11 +61,18 @@ const server = http.createServer((request, response) => {
         expectedX: viewport.width * 0.125,
         expectedY: viewport.height * 0.125,
       };
+      const visibleUntil = viewport.focusIndicator.visibleUntil;
+      viewport.expireFocusIndicator(visibleUntil - 1);
+      const focusBeforeExpiry = viewport.getFocusIndicator();
+      viewport.expireFocusIndicator(visibleUntil);
+      const focusAfterExpiry = viewport.getFocusIndicator();
       // Zooming back in keeps the pointer's world position fixed; it must not
       // reapply the zoom-out centering rule.
       viewport.zoomViewAt(0, 0, 1);
       return {
         focusStart,
+        focusBeforeExpiry,
+        focusAfterExpiry,
         belowOne,
         zoomedIn: {
           scale: viewport.viewScale,
@@ -77,8 +84,12 @@ const server = http.createServer((request, response) => {
         },
       };
     });
-    assert.deepEqual(centeredZoom.focusStart, { x: 172, y: 596.16 },
-      'each zoom-out event moves the focus one step toward the canvas center');
+    assert.deepEqual(centeredZoom.focusStart, { x: 100, y: 648 },
+      'zoom draws the focus cue at the event anchor');
+    assert.deepEqual(centeredZoom.focusBeforeExpiry, centeredZoom.focusStart,
+      'the focus cue remains static throughout its display window');
+    assert.equal(centeredZoom.focusAfterExpiry, null,
+      'the focus cue disappears after its display window');
     assert.equal(centeredZoom.zoomedIn.scale, 1);
     assert.equal(centeredZoom.zoomedIn.x, centeredZoom.zoomedIn.expectedX);
     assert.equal(centeredZoom.zoomedIn.y, centeredZoom.zoomedIn.expectedY,
@@ -93,23 +104,40 @@ const server = http.createServer((request, response) => {
     const zoomInFocus = await page.evaluate(() => {
       const painter = window.__painter;
       const viewport = painter.viewport;
-      const bounds = viewport.worldRectToScreen(painter.paintingRectangle);
-      // Start a new zoom-in direction with a pointer well outside the painting.
-      viewport.focusTransition = null;
-      viewport.lastZoomDirection = -1;
-      viewport.zoomViewAt(bounds.getRight() + 500, bounds.getTop() + 500, 2, bounds);
+      viewport.viewScale = 1;
+      viewport.viewOffsetX = 0;
+      viewport.viewOffsetY = 0;
+      viewport.focusIndicator = null;
+
+      // Outside X, inside Y: only the right edge moves to the pointer.
+      let bounds = viewport.worldRectToScreen(painter.paintingRectangle);
+      const pointerX = bounds.getRight() + 500;
+      const insideY = bounds.bottom + bounds.height * 0.5;
+      viewport.zoomViewAt(pointerX, insideY, 2, bounds);
+      const movedXBounds = viewport.worldRectToScreen(painter.paintingRectangle);
+
+      viewport.viewScale = 1;
+      viewport.viewOffsetX = 0;
+      viewport.viewOffsetY = 0;
+      bounds = viewport.worldRectToScreen(painter.paintingRectangle);
+      const insideX = bounds.left + bounds.width * 0.5;
+      const pointerY = bounds.getTop() + 500;
+      viewport.zoomViewAt(insideX, pointerY, 2, bounds);
+      const movedYBounds = viewport.worldRectToScreen(painter.paintingRectangle);
       const focus = viewport.getFocusIndicator();
       painter.focusOverlay.draw(focus);
       const visible = document.querySelector('.focus-overlay').classList.contains('is-visible');
       const result = {
         x: focus.x,
         y: focus.y,
-        maxX: bounds.getRight() + viewport.cssLengthToScreen(50),
-        maxY: bounds.getTop() + viewport.cssLengthToScreen(50),
+        insideX,
+        pointerY,
+        xEdgeAtPointer: movedXBounds.getRight(),
+        pointerX,
+        yEdgeAtPointer: movedYBounds.getTop(),
         visible,
       };
-      viewport.focusTransition = null;
-      viewport.lastZoomDirection = 0;
+      viewport.focusIndicator = null;
       viewport.viewScale = 1;
       viewport.viewOffsetX = 0;
       viewport.viewOffsetY = 0;
@@ -117,10 +145,14 @@ const server = http.createServer((request, response) => {
       painter.rebuildProjectionMatrix();
       return result;
     });
-    assert.equal(zoomInFocus.x, zoomInFocus.maxX);
-    assert.equal(zoomInFocus.y, zoomInFocus.maxY);
+    assert.equal(zoomInFocus.x, zoomInFocus.insideX);
+    assert.equal(zoomInFocus.y, zoomInFocus.pointerY);
+    assert.equal(zoomInFocus.xEdgeAtPointer, zoomInFocus.pointerX,
+      'zoom-in outside X moves the canvas right edge to the pointer');
+    assert.equal(zoomInFocus.yEdgeAtPointer, zoomInFocus.pointerY,
+      'zoom-in outside Y moves the canvas top edge to the pointer');
     assert.equal(zoomInFocus.visible, true,
-      'zoom-in focus remains visibly rendered at the permitted painting overscan');
+      'zoom focus follows a pointer beyond the painting without clamping');
 
     for (const [selector, expected] of [
       ['#fluidity-slider', /^0\.\d{2}$/],
