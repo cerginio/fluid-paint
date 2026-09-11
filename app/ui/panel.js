@@ -23,9 +23,6 @@
  * simulation code.
  */
 
-/** Where the panel is placed on a phone, where it should start out of the way. */
-const PANEL_COLLAPSE_BELOW_CSS_WIDTH = 640;
-
 class ToolPanel {
   /**
    * @param {Object} options
@@ -65,16 +62,10 @@ class ToolPanel {
     this._installHueStripe();
     this._installExtension();
 
-    // Start collapsed on a phone: the painting is what the user came for, and
-    // the bar alone is enough to paint with.
-    const coarsePhone = typeof matchMedia === 'function' &&
-      matchMedia('(pointer: coarse) and (hover: none)').matches &&
-      Math.min(screen.width, screen.height) <= PANEL_COLLAPSE_BELOW_CSS_WIDTH;
-    if (window.innerWidth <= PANEL_COLLAPSE_BELOW_CSS_WIDTH || coarsePhone) {
-      this.setCollapsed(true);
-    } else {
-      this.clampIntoView();
-    }
+    // Start compact on every device. The bar keeps the high-frequency paint
+    // controls available, while the extension can still be opened independently
+    // for the rest of the workflow.
+    this.setCollapsed(true);
 
     // Keep the panel on screen when the window changes. A panel dragged to the
     // right edge in landscape is entirely off screen in portrait, and with no
@@ -95,7 +86,6 @@ class ToolPanel {
   setCollapsed(collapsed) {
     const barTop = this._barTop();
     this.root.setAttribute('data-collapsed', collapsed ? 'true' : 'false');
-    if (collapsed) this.setExtensionOpen(false, false);
     // The body is hidden by CSS; the panel's height changes, so a panel pinned
     // near the bottom edge could end up mostly off screen when it expands.
     this.moveTo(this.root.getBoundingClientRect().left, barTop);
@@ -306,7 +296,10 @@ class ToolPanel {
   setExtensionOpen(open, notifyClose = true) {
     if (!this.extension || !this.extensionToggle) return;
     const wasOpen = !this.extension.hidden;
-    const next = !!open && !this.isCollapsed();
+    // The extension is independent of the main panel body. In particular, the
+    // compact bar's + button must expose all additional tools without forcing
+    // the painter out of compact mode.
+    const next = !!open;
     this.extension.hidden = !next;
     this.extensionToggle.setAttribute('aria-expanded', next ? 'true' : 'false');
     this.extensionToggle.textContent = next ? '−' : '+';

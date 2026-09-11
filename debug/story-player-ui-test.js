@@ -33,6 +33,16 @@ const server = http.createServer((request, response) => {
     await page.goto(`http://127.0.0.1:${server.address().port}/index.html?debug=none`);
     await page.waitForFunction(() => window.__painter && window.__painter.storyPlaybackController);
 
+    assert.equal(await page.locator('#ui').getAttribute('data-collapsed'), 'true',
+      'the app starts in compact mode');
+    await page.click('#panel-extension-toggle');
+    assert.equal(await page.locator('#panel-extension').isVisible(), true,
+      'the compact bar opens additional tools');
+    assert.equal(await page.locator('#ui').getAttribute('data-collapsed'), 'true',
+      'opening additional tools keeps the paint panel compact');
+    await page.click('#panel-extension-toggle');
+    await page.click('#panel-grip');
+
     const centeredZoom = await page.evaluate(() => {
       const painter = window.__painter;
       const viewport = painter.viewport;
