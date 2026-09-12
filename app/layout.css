@@ -22,10 +22,34 @@
 :root {
   /* Authored here and nowhere else. Nothing in JS reads it: the panel is a real
      element, so the browser decides what it covers. */
-  --panel-width: 300px;
+  /* Desktop main panel is authored at 1.2x the compact two-column geometry.
+     These are real layout pixels, never transform/zoom pixels. */
+  --panel-width: 479.6px;
   --panel-bg: rgba(32, 32, 36, 0.82);
   --panel-border: rgba(255, 255, 255, 0.14);
+  --panel-header-bg: rgba(32, 32, 36, 0.22);
+  --panel-radius: 14px;
   --edge-pad: 30px;
+  --accent-green: #75c455;
+  --action-danger: #c85759;
+  --picker-lower-shift: 35px;
+  --panel-actions-gap: 12px;
+  --panel-history-gap: 12px;
+  --panel-bottom-gap: 12px;
+  --panel-action-height: 36px;
+  --panel-action-font-size: 13.2px;
+  --panel-label-margin-top: 9.6px;
+  --panel-label-margin-bottom: 3.6px;
+  --panel-label-font-size: 14.4px;
+  --panel-slider-height: 19.2px;
+  --panel-segment-padding: 4.8px;
+  --panel-segment-font-size: 12px;
+  --panel-color-padding-top: 9.6px;
+  /* The base bar and the attached tools are one panel group, so their headers
+     share the same desktop rhythm.  Keep this in CSS rather than scaling either
+     surface: Iro and the sliders must receive untransformed pointer bounds. */
+  --panel-header-pad: 9.6px;
+  --panel-header-control-size: 33.6px;
   /* Viewport reads this presentation policy. A coarse mobile device lowers it
      below to keep desktop-site page scaling from multiplying a huge backing
      store and simulation. Explicit ?dpr= remains a diagnostic override. */
@@ -144,12 +168,12 @@ html, body {
   display: flex;
   flex-direction: column;
 
-  border-radius: 12px;
+  border-radius: var(--panel-radius);
   background: var(--panel-bg);
   -webkit-backdrop-filter: blur(18px);
   backdrop-filter: blur(18px);
   border: 1px solid var(--panel-border);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.32);
 
   /* The panel itself never scrolls as a whole -- #panel-body does. Overflow is
      visible so the optional extension can sit beside it. */
@@ -175,20 +199,21 @@ html, body {
   display: grid;
   grid-template-columns: 1fr auto 1fr auto;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
+  gap: 12px;
+  padding: var(--panel-header-pad) 12px;
   flex: none;
+  background: var(--panel-header-bg);
 }
 
 #panel-extension-toggle {
-  width: 28px;
-  height: 28px;
+  width: var(--panel-header-control-size);
+  height: var(--panel-header-control-size);
   padding: 0;
   border: 1px solid rgba(255, 255, 255, 0.35);
-  border-radius: 6px;
+  border-radius: 7.2px;
   color: white;
   background: rgba(255, 255, 255, 0.08);
-  font-size: 19px;
+  font-size: 22.8px;
   line-height: 1;
   cursor: pointer;
   touch-action: manipulation;
@@ -200,7 +225,7 @@ html, body {
    hue stripe down to a couple of pixels -- measured at 2px before this. */
 #bar-size-slider {
   position: relative;
-  height: 18px;
+  height: 21.6px;
   width: auto;
   margin: 0;
   min-width: 0;
@@ -212,8 +237,8 @@ html, body {
 /* The drag handle -- the ::: in the sketch. Dragging anywhere on it moves the
    panel; tapping it toggles collapsed/expanded. */
 #panel-grip {
-  width: 44px;
-  height: 24px;
+  width: 52.8px;
+  height: 28.8px;
   cursor: grab;
   touch-action: none;
 
@@ -246,8 +271,8 @@ html, body {
  * position, fed through the app's HSVA -> RYB path like every other hue. */
 #bar-hue-stripe {
   position: relative;
-  height: 18px;
-  border-radius: 9px;
+  height: 21.6px;
+  border-radius: 10.8px;
   cursor: pointer;
   touch-action: none;
   border: 1px solid rgba(255, 255, 255, 0.25);
@@ -261,10 +286,10 @@ html, body {
 #bar-hue-stripe .handle {
   position: absolute;
   top: 50%;
-  width: 4px;
-  height: 22px;
-  margin-top: -11px;
-  margin-left: -2px;
+  width: 4.8px;
+  height: 26.4px;
+  margin-top: -13.2px;
+  margin-left: -2.4px;
   border-radius: 2px;
   background: white;
   border: 1px solid rgba(0, 0, 0, 0.5);
@@ -275,12 +300,16 @@ html, body {
 
 #panel-body {
   min-height: 0;
-  max-height: calc(50dvh - 48px);
+  max-height: none;
+  display: grid;
+  grid-template-columns: minmax(0, .96fr) minmax(0, 1.04fr);
+  align-items: start;
+  gap: 19.2px;
+  padding: 14.4px;
+  padding-block: 12px;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding-bottom: 20px;
+  overflow: visible;
   border-top: 1px solid var(--panel-border);
 }
 
@@ -307,11 +336,11 @@ html, body {
   overflow: hidden;
   color: white;
   border: 1px solid var(--panel-border);
-  border-radius: 12px;
+  border-radius: var(--panel-radius);
   background: var(--panel-bg);
   -webkit-backdrop-filter: blur(18px);
   backdrop-filter: blur(18px);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
 }
 
 #ui[data-extension-side="right"] #panel-extension { left: calc(100% + 8px); }
@@ -322,18 +351,22 @@ html, body {
 .panel-extension-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px;
+  gap: 9.6px;
+  padding: var(--panel-header-pad);
+  /* The extension owns its divider while #panel-bar's divider belongs to
+     #panel-body.  Consume that one border pixel in the lower padding so the
+     two visible header boxes remain exactly the same height. */
+  padding-bottom: calc(var(--panel-header-pad) - 1px);
   border-bottom: 1px solid var(--panel-border);
-  background: rgba(32, 32, 36, 0.94);
+  background: var(--panel-header-bg);
 }
 
 #panel-extension[data-collapsed="true"] .panel-extension-page { display: none; }
 #panel-extension[data-collapsed="true"] .panel-extension-header { border-bottom: 0; }
 
 #panel-extension-grip {
-  width: 32px;
-  height: 32px;
+  width: var(--panel-header-control-size);
+  height: var(--panel-header-control-size);
   flex: none;
   display: flex;
   align-items: center;
@@ -355,31 +388,27 @@ html, body {
 
 .panel-extension-tabs {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0;
   flex: 1;
 }
 
 .panel-extension-tabs button,
-#story-header-play-pause,
 #panel-extension-close {
-  min-height: 32px;
+  min-height: var(--panel-header-control-size);
   border: 1px solid rgba(255, 255, 255, 0.3);
   color: white;
   background: transparent;
   cursor: pointer;
 }
 
-#story-header-play-pause { display: none; flex: 1; }
-#panel-extension[data-collapsed="true"][data-has-story="true"] .panel-extension-tabs { display: none; }
-#panel-extension[data-collapsed="true"][data-has-story="true"] #story-header-play-pause { display: block; }
-
-.panel-extension-tabs button[aria-selected="true"] {
+#panel-extension .panel-extension-tabs button[aria-selected="true"] {
   color: #111;
   background: white;
 }
 
 #panel-extension-close {
-  width: 32px;
+  width: var(--panel-header-control-size);
   padding: 0;
   border-radius: 5px;
   font-size: 20px;
@@ -399,6 +428,21 @@ html, body {
   color: rgba(255, 255, 255, 0.7);
   line-height: 1.45;
 }
+
+.bake-card {
+  display: grid;
+  gap: 12px;
+}
+
+.bake-card p { margin: 0; }
+.bake-card ul {
+  margin: 0;
+  padding-left: 20px;
+  color: rgba(255, 255, 255, 0.78);
+  line-height: 1.55;
+}
+
+#bake-button { margin-top: 4px; }
 
 /* ---- Story file and playback tools ------------------------------------- */
 
@@ -521,7 +565,7 @@ html, body {
 }
 #panel-extension button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.13); }
 #panel-extension button:disabled { opacity: 0.4; cursor: default; }
-#panel-extension .story-primary { color: #111; border-color: #75c455; background: #75c455; font-weight: 700; }
+#panel-extension .story-primary { color: #111; border-color: var(--accent-green); background: var(--accent-green); font-weight: 700; }
 #panel-extension .story-wide { width: 100%; }
 
 .story-empty { display: grid; justify-items: start; gap: 10px; padding: 10px 0; }
@@ -614,17 +658,17 @@ html, body {
 
 #clear-button {
   margin-left: var(--edge-pad);
-  background: rgb(220, 0, 40);
+  background: var(--action-danger);
 }
-#clear-button:hover  { background: rgb(210, 0, 30); }
-#clear-button:active { background: rgb(200, 0, 20); }
+#clear-button:hover  { background: #b94a4d; }
+#clear-button:active { background: #a83f43; }
 
 #save-button {
-  background: rgb(0, 170, 50);
+  background: var(--accent-green);
   margin-left: 10px;
 }
-#save-button:hover  { background: rgb(0, 160, 40); }
-#save-button:active { background: rgb(0, 150, 30); }
+#save-button:hover  { background: #68b44a; }
+#save-button:active { background: #5ba13e; }
 
 .control-label {
   margin-left: var(--edge-pad);
@@ -666,31 +710,6 @@ html, body {
   pointer-events: none;
 }
 
-.buttons {
-  margin-top: 7px;
-  margin-left: var(--edge-pad);
-  height: 26px;
-}
-
-.buttons div {
-  box-sizing: border-box;
-  float: left;
-  width: 80px;
-  padding: 3px 0px;
-  border-top: 1px solid white;
-  border-bottom: 1px solid white;
-  border-left: 1px solid white;
-  font-size: 11px;
-  text-align: center;
-  pointer-events: auto;
-}
-
-.buttons div:first-child { border-left: 1px solid white; }
-.buttons div:last-child  { border-right: 1px solid white; }
-
-#qualities div { width: 80px; }
-#models div    { width: 120px; }
-
 .button-selected {
   background: white;
   color: black;
@@ -719,13 +738,8 @@ html, body {
    only need to change the width. */
 #color-picker-slot {
   position: relative;
-  margin-left: 20px;
-  margin-top: 6px;
-  width: 260px;
   pointer-events: auto;
 }
-
-#color-picker-widget { width: 100%; }
 
 /* iro.js renders its own markup; these are the few things it cannot know.
    The wheel is centred in the slot because the slot can be wider than the
@@ -742,39 +756,68 @@ html, body {
 }
 
 /* iro's default gap is 12px; reserve another 8px for the overlaid labels. */
-#color-picker-slot .IroWheel + .IroSlider { margin-top: 20px !important; }
+#color-picker-slot .IroWheel + .IroSlider {
+  margin-top: calc(24px + var(--picker-lower-shift)) !important;
+}
 
-/* The values live in the otherwise-empty corners of the wheel's square instead
-   of consuming a row before the sliders. They remain outside iro's virtual DOM
-   so library re-renders cannot remove them. */
-
-.color-readout {
-  position: absolute;
-  z-index: 2;
-  top: 8px;
-  left: 0;
+/* Iro owns the wheel/sliders DOM, so the host labels stay outside its virtual
+   DOM. The stage overlays a CSS-grid label layer on the wheel row only; the
+   stage itself remains in normal flow and iro's sliders follow below it. */
+.color-wheel-stage {
+  display: grid;
+  grid-template-areas: "wheel-stage";
+  grid-template-columns: minmax(0, 1fr);
   width: 100%;
-  height: var(--picker-wheel-size, 200px);
-  margin: 0;
+  min-width: 0;
+}
+
+#color-picker-widget {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+#color-picker-widget,
+.color-wheel-labels { grid-area: wheel-stage; }
+
+.color-wheel-labels {
+  z-index: 2;
+  align-self: start;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  width: 100%;
+  height: calc(var(--picker-wheel-size, 200px) + var(--picker-lower-shift));
   color: white;
   pointer-events: none;
 }
 
 .adhoc-color {
-  position: absolute;
-  top: -6px;
-  transform: translateY(-8px);
-  width: 32px;
-  height: 32px;
+  position: static;
+  flex: none;
+  width: 38.4px;
+  height: 38.4px;
   padding: 0;
   border: 1px solid rgba(255, 255, 255, 0.55);
   border-radius: 50%;
-  font: 600 10px/1.2 system-ui, sans-serif;
+  font: 600 12px/1.2 system-ui, sans-serif;
   cursor: pointer;
   pointer-events: auto;
 }
-#paint-color-white { left: -2px; color: #111; background: #fff; }
-#paint-color-black { right: -2px; color: #fff; background: #050505; }
+#paint-color-white {
+  grid-area: 1 / 1;
+  place-self: start;
+  margin: -12px 0 0 -12px;
+  color: #111;
+  background: #fff;
+}
+#paint-color-black {
+  grid-area: 1 / 2;
+  place-self: start end;
+  margin: -12px -12px 0 0;
+  color: #fff;
+  background: #050505;
+}
 .adhoc-color[aria-pressed="true"] {
   border-color: #75c455 !important;
   box-shadow: 0 0 0 2px rgba(117, 196, 85, 0.7);
@@ -789,22 +832,21 @@ html, body {
 }
 
 .color-code-readout {
-  position: absolute;
-  left: 2px;
-  bottom: 6px;
-  transform: translateY(8px);
+  grid-area: 2 / 1;
+  place-self: end start;
   display: flex;
   align-items: stretch;
   gap: 3px;
+  min-width: 0;
 }
 
 #paint-color-hex,
 #paint-color-alpha {
-  padding: 4px 6px;
+  padding: 4.8px 7.2px;
   border-radius: 4px;
   background: rgba(24, 24, 28, 0.72);
   white-space: nowrap;
-  font: 600 11px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace;
+  font: 600 13.2px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace;
   letter-spacing: .04em;
   color: white;
   pointer-events: auto;
@@ -831,14 +873,13 @@ html, body {
 #paint-color-hex[data-copied="true"] { background: rgb(0, 150, 70); }
 
 #paint-color-model {
-  position: absolute;
-  right: 6px;
-  bottom: 6px;
-  transform: translateY(8px);
-  padding: 4px 6px;
+  grid-area: 2 / 2;
+  place-self: end;
+  flex: none;
+  padding: 4.8px 7.2px;
   border-radius: 4px;
   background: rgba(24, 24, 28, 0.72);
-  font-size: 11px;
+  font-size: 13.2px;
   font-weight: 600;
   letter-spacing: .08em;
   color: rgba(255, 255, 255, 0.8);
@@ -868,9 +909,74 @@ html, body {
 .panel-bottom-controls { margin-top: 16px; }
 .panel-document-actions { margin-top: 0; }
 
-.do-button-active { background: rgb(30, 100, 130); }
-.do-button-active:hover  { background: rgb(20, 90, 120); }
-.do-button-active:active { background: rgb(10, 80, 110); }
+/* The expanded paint panel is two real CSS columns. This keeps the brush
+   controls and Iro picker within half a normal viewport without scaling their
+   coordinate system; Slider and Iro therefore read the same bounds the user
+   sees. */
+.panel-column { min-width: 0; }
+#panel-body .panel-actions {
+  gap: var(--panel-actions-gap);
+  margin-inline: 0;
+}
+
+/* This follows the general extension-button rule above deliberately: that
+   rule gives page controls comfortable padding, while header controls need to
+   match #panel-bar exactly. */
+#panel-extension .panel-extension-header .panel-extension-tabs button,
+#panel-extension .panel-extension-header #panel-extension-close {
+  height: var(--panel-header-control-size);
+  min-height: var(--panel-header-control-size);
+  padding-block: 0;
+}
+#panel-extension .panel-extension-tabs button {
+  border-left-width: 0;
+  border-radius: 0;
+}
+#panel-extension .panel-extension-tabs button:first-child {
+  border-left-width: 1px;
+  border-radius: 6px 0 0 6px;
+}
+#panel-extension .panel-extension-tabs button:last-child {
+  border-radius: 0 6px 6px 0;
+}
+#panel-body .panel-history-actions { margin-top: var(--panel-history-gap); }
+#panel-body .panel-bottom-controls { margin-top: var(--panel-bottom-gap); }
+#panel-body .control-label {
+  margin: var(--panel-label-margin-top) 0 var(--panel-label-margin-bottom);
+  font-size: var(--panel-label-font-size);
+}
+#panel-body .slider { width: 100%; height: var(--panel-slider-height); margin: 0; }
+#panel-body .buttons {
+  display: flex;
+  width: 100%;
+  height: 24px;
+  margin: 6px 0;
+}
+#panel-body .buttons div {
+  float: none;
+  padding-block: var(--panel-segment-padding);
+  border-top: 1px solid white;
+  border-bottom: 1px solid white;
+  border-left: 0 solid white;
+  font-size: var(--panel-segment-font-size);
+  text-align: center;
+  pointer-events: auto;
+}
+#panel-body .buttons div:first-child { border-left-width: 1px; }
+#panel-body .buttons div:last-child { border-right: 1px solid white; }
+#panel-body #qualities div,
+#panel-body #models div { flex: 1; width: auto; }
+#panel-body .panel-column-color { padding-top: var(--panel-color-padding-top); }
+#panel-body #color-picker-slot { width: 100%; margin: 0; }
+#panel-body .panel-actions .button {
+  height: var(--panel-action-height);
+  line-height: var(--panel-action-height);
+  font-size: var(--panel-action-font-size);
+}
+
+.do-button-active { background: #6a6a6d; }
+.do-button-active:hover  { background: #767679; }
+.do-button-active:active { background: #5e5e62; }
 
 .do-button-inactive {
   cursor: default;
@@ -929,10 +1035,7 @@ html, body {
 
 /* Tablet: a narrower persistent panel. */
 @media (max-width: 1024px) {
-  :root { --panel-width: 260px; --edge-pad: 20px; }
-  .slider { width: 210px; }
-  #color-picker-slot { width: 220px; margin-left: 16px; }
-  #models div { width: 100px; }
+  :root { --panel-width: 450.8px; --edge-pad: 20px; }
 }
 
 /* Phone landscape: a side rail. The panel stays beside the canvas because
@@ -943,9 +1046,10 @@ html, body {
   .button { margin-top: 12px; }
   .control-label { margin-top: 6px; }
   .slider { width: 200px; }
-  #color-picker-slot { width: 190px; margin-left: 12px; }
-  #models div { width: 92px; }
-  #qualities div { width: 62px; }
+  #panel-body {
+    max-height: calc(100dvh - 56px);
+    overflow-y: auto;
+  }
 }
 
 /* Phone portrait. The panel floats here too -- there is no drawer/dock switch
@@ -954,7 +1058,12 @@ html, body {
    this size is only that the panel is narrower and starts collapsed, so the
    painting is unobstructed until the user asks for controls. */
 @media (max-width: 640px) {
-  :root { --panel-width: calc(100% - 24px); --edge-pad: 16px; }
+  :root {
+    --panel-width: calc(100% - 24px);
+    --edge-pad: 16px;
+    --panel-header-pad: 6px;
+    --panel-header-control-size: 44px;
+  }
 
   #ui {
     left: 12px;
@@ -963,9 +1072,6 @@ html, body {
   }
 
   .slider { width: calc(100% - 2 * var(--edge-pad)); }
-  #color-picker-slot { width: 200px; margin-left: var(--edge-pad); }
-  #models div { width: 100px; }
-
   #panel-extension {
     position: fixed;
     left: 8px !important;
@@ -1085,6 +1191,20 @@ html, body {
     --panel-width: calc(100% - 24px);
     --edge-pad: 16px;
     --canvas-max-pixel-ratio: 1;
+    --panel-header-pad: 6px;
+    --panel-header-control-size: 44px;
+    --panel-actions-gap: 6px;
+    --panel-history-gap: 10px;
+    --panel-bottom-gap: 10px;
+    --panel-action-height: 28px;
+    --panel-action-font-size: 10px;
+    --panel-label-margin-top: 8px;
+    --panel-label-margin-bottom: 3px;
+    --panel-label-font-size: 11px;
+    --panel-slider-height: 14px;
+    --panel-segment-padding: 3px;
+    --panel-segment-font-size: 9px;
+    --panel-color-padding-top: 0px;
   }
 
   #ui {
@@ -1101,51 +1221,28 @@ html, body {
     padding: 10px;
   }
 
-  .panel-column { min-width: 0; }
-  .panel-actions {
-    gap: 6px;
-    margin: 0;
+  /* The 1.2x treatment is desktop-only; phones keep the compact geometry that
+     fits beside the canvas and preserves the existing touch layout. */
+  #panel-grip { width: 44px; height: 24px; }
+  #bar-size-slider,
+  #bar-hue-stripe { height: 18px; border-radius: 9px; }
+  #bar-hue-stripe .handle {
+    width: 4px;
+    height: 22px;
+    margin-top: -11px;
+    margin-left: -2px;
   }
-  .panel-history-actions { margin-top: 10px; }
-  .panel-bottom-controls { margin-top: 10px; }
-  .panel-actions .button { height: 28px; line-height: 28px; font-size: 10px; }
-
-  .control-label {
-    margin: 8px 0 3px;
-    font-size: 11px;
+  #color-picker-slot .IroWheel + .IroSlider {
+    margin-top: calc(20px + var(--picker-lower-shift)) !important;
   }
-
-  .slider {
-    width: 100%;
-    height: 14px;
-    margin: 0;
-  }
-
-  .buttons {
-    display: flex;
-    width: 100%;
-    height: 24px;
-    margin: 0;
-  }
-  .buttons div { float: none; padding-block: 3px; font-size: 9px; }
-  #qualities div { width: 33.333%; }
-  #models div { width: 50%; }
-
-  #color-picker-slot {
-    width: 100%;
-    margin: 0;
-  }
+  .adhoc-color { width: 32px; height: 32px; font-size: 10px; }
 
   #paint-color-hex,
+  #paint-color-alpha,
   #paint-color-model {
-    bottom: 5px;
     padding: 3px 5px;
     font-size: 9px;
   }
-  #paint-color-hex { left: 5px; }
-  #paint-color-model { right: 5px; }
-
-  #models { margin-top: 5px; }
 }
 
 /* Short touch viewports need density before scrolling. The body still scrolls
@@ -1165,7 +1262,20 @@ html, body {
    `device-height` distinguish this from a real coarse-pointer tablet. */
 @media (pointer: coarse) and (hover: none) and (min-width: 900px) and (max-device-width: 640px),
        (pointer: coarse) and (hover: none) and (min-width: 900px) and (max-device-height: 640px) {
-  :root { --edge-pad: 4.1vw; }
+  :root {
+    --edge-pad: 4.1vw;
+    --panel-actions-gap: 1.54vw;
+    --panel-history-gap: 2.56vw;
+    --panel-bottom-gap: 2.56vw;
+    --panel-action-height: 7.18vw;
+    --panel-action-font-size: 2.56vw;
+    --panel-label-margin-top: 2.05vw;
+    --panel-label-margin-bottom: .77vw;
+    --panel-label-font-size: 2.82vw;
+    --panel-slider-height: 3.59vw;
+    --panel-segment-padding: .77vw;
+    --panel-segment-font-size: 2.82vw;
+  }
 
   #ui {
     left: 3.1vw;
@@ -1210,45 +1320,10 @@ html, body {
     padding: 2.56vw;
   }
 
-  .panel-actions { gap: 1.54vw; margin: 0; }
-  .panel-history-actions { margin-top: 2.56vw; }
-  .panel-bottom-controls { margin-top: 2.56vw; }
-  .panel-actions .button,
-  .panel-actions #clear-button,
-  .panel-actions #save-button,
-  .panel-actions #undo-button,
-  .panel-actions #redo-button {
-    width: auto;
-    height: 7.18vw;
-    line-height: 7.18vw;
-    margin: 0;
-    font-size: 2.56vw;
-  }
-
-  .control-label {
-    margin: 2.05vw 0 .77vw;
-    font-size: 2.82vw;
-  }
-  .slider { width: 100%; margin: 0; height: 3.59vw; }
-  .buttons { width: 100%; margin: 0; height: 6.15vw; }
-  .buttons div { padding-block: .77vw; font-size: 2.82vw; }
-  #qualities div { width: 33.333%; }
-  #models div { width: 50%; }
-
-  #color-picker-slot {
-    width: 100%;
-    margin: 0;
-  }
-
-  .color-code-readout,
-  #paint-color-model {
-    bottom: 1.28vw;
-  }
-  .color-code-readout { left: 1.28vw; gap: .77vw; }
+  .color-code-readout { gap: .77vw; }
   #paint-color-hex,
   #paint-color-alpha { padding: .77vw 1.28vw; border-radius: 1.03vw; font-size: 2.56vw; }
-  #paint-color-model { right: 1.28vw; font-size: 2.31vw; }
-  #models { margin-top: 1.28vw; }
+  #paint-color-model { font-size: 2.31vw; }
 
   #panel-extension {
     width: 61.5vw;
@@ -1257,7 +1332,6 @@ html, body {
   .panel-extension-header { gap: 2.05vw; padding: 2.05vw; }
   #panel-extension-grip { width: 44px; height: 44px; }
   .panel-extension-tabs button,
-  #story-header-play-pause,
   #panel-extension-close {
     min-height: 8.2vw;
     font-size: 3.08vw;

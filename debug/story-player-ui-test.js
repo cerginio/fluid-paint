@@ -42,6 +42,26 @@ const server = http.createServer((request, response) => {
       'opening additional tools keeps the paint panel compact');
     await page.click('#panel-extension-toggle');
     await page.click('#panel-grip');
+    const desktopPaintPanelFit = await page.locator('#ui').evaluate((panel) => {
+      const body = panel.querySelector('#panel-body');
+      const picker = panel.querySelector('#color-picker-slot');
+      const panelRect = panel.getBoundingClientRect();
+      return {
+        width: panelRect.width,
+        height: panelRect.height,
+        overflowY: getComputedStyle(body).overflowY,
+        pickerBottom: picker.getBoundingClientRect().bottom,
+        panelBottom: panelRect.bottom,
+      };
+    });
+    assert.ok(Math.abs(desktopPaintPanelFit.width - 450.8) < 0.1,
+      'both desktop paint-panel columns use the requested additional 1.2x width');
+    assert.ok(desktopPaintPanelFit.height <= 720 * 0.72 + 1,
+      'wider paint panel with Iro fits within 72% of the desktop viewport');
+    assert.notEqual(desktopPaintPanelFit.overflowY, 'auto',
+      'ordinary desktop paint panel fits without scrolling');
+    assert.ok(desktopPaintPanelFit.pickerBottom <= desktopPaintPanelFit.panelBottom + 1,
+      'scaled Iro picker remains inside the paint panel');
 
     const centeredZoom = await page.evaluate(() => {
       const painter = window.__painter;
@@ -165,6 +185,27 @@ const server = http.createServer((request, response) => {
       assert.equal(await pop.isVisible(), true, `${selector} shows its value pop`);
       assert.match(await pop.textContent(), expected, `${selector} formats its displayed value`);
     }
+    const sizePointerMapping = await page.evaluate(() => {
+      const slider = window.__painter.brushSizeSlider;
+      return {
+        value: window.__painter.brushScale,
+        expected: slider.minValue + 0.6 * (slider.maxValue - slider.minValue),
+      };
+    });
+    assert.ok(Math.abs(sizePointerMapping.value - sizePointerMapping.expected) < 1,
+      'size slider uses the same visual and pointer coordinate system');
+
+    const wheel = await page.locator('.IroWheel').boundingBox();
+    const wheelTarget = {
+      x: wheel.x + wheel.width * 0.78,
+      y: wheel.y + wheel.height * 0.5,
+    };
+    await page.mouse.click(wheelTarget.x, wheelTarget.y);
+    const wheelHandle = await page.locator('.IroWheel .IroHandle--0').boundingBox();
+    assert.ok(Math.hypot(
+      wheelHandle.x + wheelHandle.width / 2 - wheelTarget.x,
+      wheelHandle.y + wheelHandle.height / 2 - wheelTarget.y
+    ) < 12, 'Iro handle follows the pointer inside its visible border');
 
     const originalHsva = await page.evaluate(() => window.__painter.brushColorHSVA.slice());
     assert.deepEqual(await page.locator('.adhoc-color').allTextContents(), ['#fff', '#000'],
@@ -228,12 +269,19 @@ const server = http.createServer((request, response) => {
       'extension grip tap collapses the extension');
     assert.equal(await page.locator('#story-file-tab').isVisible(), true,
       'File/Player tabs remain in an empty collapsed header');
-    assert.equal(await page.locator('#story-header-play-pause').isHidden(), true,
-      'header playback stays hidden before a Story is loaded');
-    await page.click('#panel-extension-grip');
+    await page.click('#story-file-tab');
+    assert.equal(await page.locator('#panel-extension').getAttribute('data-collapsed'), 'false',
+      'clicking a tab expands the collapsed extension');
+    await page.locator('#panel-extension').click({ button: 'right', position: { x: 20, y: 20 } });
+    assert.equal(await page.locator('#panel-extension').getAttribute('data-collapsed'), 'true',
+      'right-click collapses the extension');
+    assert.equal(await page.locator('#ui').getAttribute('data-collapsed'), 'true',
+      'right-click collapses the attached main panel too');
+    await page.click('#story-file-tab');
     await page.setInputFiles('#story-file-input', fixture);
     await page.waitForFunction(() => window.__painter.storyPlaybackController.state === 'ready');
     assert.equal(await page.locator('#story-player-page').isVisible(), true, 'valid file opens Player tab');
+    await page.waitForTimeout(50);
     assert.match(await page.locator('#story-player-file-name').textContent(), /story-2026/);
     assert.deepEqual(await page.locator('.story-boundary-navigation button').evaluateAll(
       (buttons) => buttons.map((button) => button.id)
@@ -311,15 +359,17 @@ const server = http.createServer((request, response) => {
     assert.equal(await page.locator('#panel-extension').getAttribute('data-collapsed'), 'false',
       'an extension drag does not collapse it');
     await page.click('#panel-extension-grip');
-    assert.equal(await page.locator('#story-header-play-pause').isVisible(), true,
-      'collapsed loaded Story keeps Play/Pause in the header');
+    assert.equal(await page.locator('#story-player-tab').isVisible(), true,
+      'collapsed loaded Story keeps its tabs in the header');
     assert.equal(await page.evaluate(() => window.__painter.storyPlaybackController.state), 'playing',
       'collapsing the extension does not pause playback');
-    await page.click('#story-header-play-pause');
+    await page.click('#story-player-tab');
+    assert.equal(await page.locator('#panel-extension').getAttribute('data-collapsed'), 'false',
+      'clicking the active tab expands the loaded Story panel');
+    await page.click('#story-play-pause');
     await page.waitForFunction(() => window.__painter.storyPlaybackController.state === 'paused');
-    await page.click('#story-header-play-pause');
+    await page.click('#story-play-pause');
     await page.waitForFunction(() => window.__painter.storyPlaybackController.state === 'playing');
-    await page.click('#panel-extension-grip');
     await page.selectOption('#story-speed', '0.5');
     await page.locator('#story-thickness').fill('0.6');
     await page.waitForFunction(() => {
@@ -407,6 +457,15 @@ const server = http.createServer((request, response) => {
       'Remove background restores the plain canvas renderer');
 
     await page.setViewportSize({ width: 390, height: 844 });
+    await page.evaluate(() => window.__painter.toolPanel.setCollapsed(false));
+    await page.waitForFunction(() => {
+      const slot = document.getElementById('color-picker-slot').getBoundingClientRect();
+      const wheel = document.querySelector('.IroWheel').getBoundingClientRect();
+      return Math.abs(slot.width - wheel.width) < 1;
+    });
+    assert.ok(await page.locator('#ui').evaluate(
+      (panel) => panel.getBoundingClientRect().height <= window.innerHeight * 0.5 + 1
+    ), 'portrait paint panel fits within half the viewport height');
     await page.waitForFunction(() => {
       const extension = document.getElementById('panel-extension').getBoundingClientRect();
       return extension.left >= 0 && extension.right <= window.innerWidth;
@@ -438,6 +497,13 @@ const server = http.createServer((request, response) => {
       'mobile story sheet respects its viewport height limit');
     assert.deepEqual(mobileLayout.controls.filter((control) => control.height < 44), [],
       'visible mobile story controls have at least 44px touch targets');
+
+    await page.setViewportSize({ width: 844, height: 390 });
+    await page.waitForTimeout(50);
+    await page.evaluate(() => window.__painter.toolPanel.setCollapsed(false));
+    assert.equal(await page.locator('#panel-body').evaluate(
+      (body) => getComputedStyle(body).overflowY
+    ), 'auto', 'very short landscape uses paint-panel scrolling as its fallback');
 
     assert.deepEqual(errors, []);
     assert.equal(await page.evaluate(() => window.__painter.wgl.gl.getError()), 0);

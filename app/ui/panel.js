@@ -96,6 +96,16 @@ class ToolPanel {
     this.setCollapsed(!this.isCollapsed());
   }
 
+  /** Right-click treats the attached panels as one disclosure group. */
+  toggleAllCollapsed() {
+    const extensionOpen = !!this.extension && !this.extension.hidden;
+    const everythingCollapsed = this.isCollapsed() &&
+      (!extensionOpen || this.isExtensionCollapsed());
+    const collapse = !everythingCollapsed;
+    this.setCollapsed(collapse);
+    if (extensionOpen) this.setExtensionCollapsed(collapse);
+  }
+
   // --- dragging -------------------------------------------------------------
 
   _installDrag() {
@@ -258,6 +268,13 @@ class ToolPanel {
       });
     }
 
+    // The canvas already reserves right-click for panel disclosure. Apply the
+    // same gesture to the DOM panel, where canvas pointer events cannot arrive.
+    this.extension.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      this.toggleAllCollapsed();
+    });
+
     this.extensionTabs = [...this.extension.querySelectorAll('[data-extension-tab]')];
     this.extensionPages = [...this.extension.querySelectorAll('[data-extension-page]')];
     for (const [index, tab] of this.extensionTabs.entries()) {
@@ -282,6 +299,7 @@ class ToolPanel {
 
   selectExtensionTab(selected, focus = false) {
     if (!this.extension) return;
+    this.setExtensionCollapsed(false);
     for (const tab of this.extensionTabs) {
       const active = tab.getAttribute('data-extension-tab') === selected;
       tab.setAttribute('aria-selected', active ? 'true' : 'false');

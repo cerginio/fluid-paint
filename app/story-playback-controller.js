@@ -82,6 +82,18 @@ class StoryPlaybackController {
     return true;
   }
 
+  /** A bake commits the visible canvas as the new, irreversible baseline. */
+  acceptBakedBackground(summary) {
+    this.baselineValid = false;
+    this.plan = null;
+    this.registry.reset(0);
+    this.playheadIndex = 0;
+    this.progress = this._emptyProgress();
+    this.backgroundSummary = summary;
+    this.backgroundError = null;
+    this._setState(this.model ? 'ready' : 'empty');
+  }
+
   async loadModel(model, summary) {
     await this._cancelRun();
     this.model = model;

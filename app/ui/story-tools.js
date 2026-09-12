@@ -18,7 +18,6 @@ class StoryToolsUI {
     this.playhead = document.getElementById('story-playhead-label');
     this.stopDecision = document.getElementById('story-stop-decision');
     this.gaps = document.getElementById('story-player-gaps');
-    this.headerPlayPause = document.getElementById('story-header-play-pause');
     this._thicknessFrame = null;
     this._bind();
     this.unsubscribe = controller.subscribe((view) => this.render(view));
@@ -80,7 +79,6 @@ class StoryToolsUI {
       });
     });
     this._on('story-play-pause', 'click', () => this._togglePlayback());
-    this._on('story-header-play-pause', 'click', () => this._togglePlayback());
     this._on('story-restart', 'click', () => this._safe(() => this.controller.restart()));
     this._on('story-stop', 'click', () => this._safe(() => this.controller.stop()));
     this._on('story-restore-baseline', 'click', () => this._safe(() => this.controller.restoreBaseline()));
@@ -132,6 +130,7 @@ class StoryToolsUI {
         meta.textContent = `${background.sourceWidth} × ${background.sourceHeight} · ${this._formatBytes(background.byteSize)}`;
       }
     }
+
     if (this.fileStatus) {
       this.fileStatus.textContent = view.backgroundLoading
         ? 'Decoding PNG background…'
@@ -173,7 +172,7 @@ class StoryToolsUI {
 
     const playPauseText = view.state === 'playing' ? 'Pause' :
         view.state === 'paused' ? 'Resume' : view.state === 'completed' ? 'Replay' : 'Play';
-    for (const playPause of [document.getElementById('story-play-pause'), this.headerPlayPause]) {
+    for (const playPause of [document.getElementById('story-play-pause')]) {
       if (!playPause) continue;
       playPause.textContent = playPauseText;
       playPause.disabled = ['stop-decision', 'player-error'].includes(view.state);

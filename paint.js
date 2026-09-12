@@ -601,6 +601,18 @@ class Paint {
             });
         }
 
+        this.bakeButton = document.getElementById('bake-button');
+        if (this.bakeButton) {
+            this.bakeButton.addEventListener('click', () => {
+                const status = document.getElementById('bake-status');
+                if (status) status.textContent = 'Baking current appearance…';
+                this.bakeToBackground().catch((error) => {
+                    if (status) status.textContent = `Bake failed: ${error.message}`;
+                    console.error('Bake to background:', error);
+                });
+            });
+        }
+
         this.undoButton = document.getElementById('undo-button');
         if (this.undoButton) {
             this.undoButton.addEventListener('pointerdown', (event) => {
@@ -1052,20 +1064,22 @@ class Paint {
             colorModel: this.colorModel,
         });
 
-        //then we draw the pixels to a 2D canvas and then save from the canvas
-        //is there a better way?
-
-        var saveCanvas = document.createElement('canvas');
-        saveCanvas.width = saveWidth;
-        saveCanvas.height = saveHeight;
-        var saveContext = saveCanvas.getContext('2d');
-
-        var imageData = saveContext.createImageData(saveWidth, saveHeight);
-        imageData.data.set(savePixels);
-        saveContext.putImageData(imageData, 0, 0);
+        const saveCanvas = this._pixelsToCanvas(savePixels, saveWidth, saveHeight);
 
         this.saveButton.setAttribute('download', 'painting.png');
         this.saveButton.setAttribute('href', saveCanvas.toDataURL());
+    }
+
+    _pixelsToCanvas(pixels, width, height) {
+        const bitmapCanvas = document.createElement('canvas');
+        bitmapCanvas.width = width;
+        bitmapCanvas.height = height;
+        const context = bitmapCanvas.getContext('2d', { alpha: false });
+        if (!context) throw new Error('A 2D canvas is required to create the bitmap.');
+        const imageData = context.createImageData(width, height);
+        imageData.data.set(pixels);
+        context.putImageData(imageData, 0, 0);
+        return bitmapCanvas;
     }
 
     async loadBackgroundImage(file) {
@@ -1402,7 +1416,7 @@ class Paint {
         // the flag stays a MIRROR of the panel's state -- setting it here too
         // would let the two disagree the first time the grip is tapped.
         if (event.pointerType === 'mouse' && event.button !== 0) {
-            if (this.toolPanel) this.toolPanel.toggleCollapsed();
+            if (this.toolPanel) this.toolPanel.toggleAllCollapsed();
             return;
         }
 
@@ -1794,6 +1808,53 @@ class Paint {
     }
 
     // --- Editing & history ---
+    async bakeToBackground() {
+        if (this.bakeButton && this.bakeButton.disabled) return false;
+        if (this.bakeButton) this.bakeButton.disabled = true;
+        try {
+            if (this.storyPlaybackController) {
+                await this.storyPlaybackController.yieldToManualInput();
+            }
+            if (this.engine.strokeActive) this.engine.endStroke();
+
+            const width = Math.max(1, Math.round(this.paintingRectangle.width));
+            const height = Math.max(1, Math.round(this.paintingRectangle.height));
+            const pixels = this.engine.exportPixels({
+                width,
+                height,
+                resolutionScale: this.resolutionScale,
+                colorModel: this.colorModel,
+            });
+            const bakedCanvas = this._pixelsToCanvas(pixels, width, height);
+
+            // This is the commit point: the upload succeeds before wet paint
+            // and its dynamics are discarded by the same engine operation.
+            this.engine.bakeToBackground(bakedCanvas);
+            this.snapshotIndex = 0;
+            this.maxRedoIndex = 0;
+            this.undoing = false;
+            this.refreshDoButtons();
+            this.brushInitialized = false;
+            this.interactionState = InteractionMode.NONE;
+            this.needsRedraw = true;
+
+            if (this.storyPlaybackController) {
+                this.storyPlaybackController.acceptBakedBackground({
+                    fileName: 'Baked artwork',
+                    byteSize: pixels.byteLength,
+                    sourceWidth: width,
+                    sourceHeight: height,
+                    baked: true,
+                });
+            }
+            const status = document.getElementById('bake-status');
+            if (status) status.textContent = 'Baked. Wet paint and Undo history were reset.';
+            return true;
+        } finally {
+            if (this.bakeButton) this.bakeButton.disabled = false;
+        }
+    }
+
     async clear() {
         if (this.storyPlaybackController) await this.storyPlaybackController.yieldToManualInput();
         this.engine.clear();

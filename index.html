@@ -75,20 +75,20 @@
                 <!-- The iro.js wheel mounts HERE (Phase 8). It is DOM content,
                      so the two-column layout can size it directly. -->
                 <div id="color-picker-slot">
-                    <div id="color-picker-widget"></div>
-                    <div class="color-readout" aria-live="polite">
-                        <button id="paint-color-white" class="adhoc-color" type="button"
-                                aria-label="Use white" aria-pressed="false">#fff</button>
-                        <button id="paint-color-black" class="adhoc-color" type="button"
-                                aria-label="Use black" aria-pressed="false">#000</button>
-                        <span class="color-code-readout">
-                        <div class="color-code-readout">
-                            <output id="paint-color-hex" role="button" tabindex="0"
-                                    aria-label="Copy paint color" title="Copy paint color">#000000</output>
-                            <output id="paint-color-alpha" title="Alpha channel">CC</output>
+                    <div class="color-wheel-stage">
+                        <div id="color-picker-widget"></div>
+                        <div class="color-wheel-labels" aria-live="polite">
+                            <button id="paint-color-white" class="adhoc-color" type="button"
+                                    aria-label="Use white" aria-pressed="false">#fff</button>
+                            <button id="paint-color-black" class="adhoc-color" type="button"
+                                    aria-label="Use black" aria-pressed="false">#000</button>
+                            <div class="color-code-readout">
+                                <output id="paint-color-hex" role="button" tabindex="0"
+                                        aria-label="Copy paint color" title="Copy paint color">#000000</output>
+                                <output id="paint-color-alpha" title="Alpha channel">CC</output>
+                            </div>
+                            <span id="paint-color-model">RYB</span>
                         </div>
-                        </span>
-                        <span id="paint-color-model">RYB</span>
                     </div>
                 </div>
             </div>
@@ -98,7 +98,7 @@
                  aria-label="Story tools">
             <header class="panel-extension-header">
                 <div id="panel-extension-grip" role="button" tabindex="0"
-                     aria-expanded="true" aria-controls="story-file-page story-player-page"
+                     aria-expanded="true" aria-controls="story-file-page story-player-page bake-page"
                      aria-label="Drag Story tools or tap to collapse"
                      title="Drag to move, tap to collapse">
                     <span></span><span></span><span></span>
@@ -110,8 +110,10 @@
                     <button id="story-player-tab" type="button" role="tab"
                             data-extension-tab="player" aria-selected="false" tabindex="-1"
                             aria-controls="story-player-page">Player</button>
+                    <button id="bake-tab" type="button" role="tab"
+                            data-extension-tab="bake" aria-selected="false" tabindex="-1"
+                            aria-controls="bake-page">State</button>
                 </div>
-                <button id="story-header-play-pause" class="story-primary" type="button">Play</button>
                 <button id="panel-extension-close" type="button"
                         aria-label="Hide story tools">×</button>
             </header>
@@ -232,6 +234,24 @@
                         <button id="story-play-pause" class="story-primary" type="button">Play</button>
                         <button id="story-stop" type="button" disabled>Stop</button>
                     </footer>
+                </div>
+            </div>
+
+            <div id="bake-page" class="panel-extension-page bake-page"
+                 role="tabpanel" tabindex="0" aria-labelledby="bake-tab"
+                 data-extension-page="bake" hidden>
+                <div class="bake-card">
+                    <strong>Bake current painting</strong>
+                    <p>Turn the visible painting into a fixed bitmap background, then start with an empty wet-paint layer.</p>
+                    <ul>
+                        <li>Natural/Digital and lighting are fixed into the background.</li>
+                        <li>Wet paint motion stops.</li>
+                        <li>Undo and Redo history is permanently reset.</li>
+                    </ul>
+                    <button id="bake-button" class="story-primary story-wide" type="button">
+                        Bake
+                    </button>
+                    <div id="bake-status" class="story-status" role="status" aria-live="polite"></div>
                 </div>
             </div>
         </section>

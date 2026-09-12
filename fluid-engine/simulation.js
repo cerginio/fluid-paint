@@ -246,6 +246,21 @@ class Simulator {
     this.clearTextures([this.paintTexture, this.paintTextureTemp]);
   }
 
+  /**
+   * Finish a wet-paint stage after its rendered appearance has been captured.
+   * Unlike clear(), baking must leave no dynamics capable of changing the new
+   * empty material on a later frame.
+   */
+  clearPaintAndDynamics() {
+    this.clearTextures([
+      this.paintTexture,
+      this.paintTextureTemp,
+      this.velocityTexture,
+      this.velocityTextureTemp,
+    ]);
+    this.splatAreas.length = 0;
+  }
+
   copyTexture(destinationWidth, destinationHeight, sourceTexture, destinationTexture) {
     const wgl = this.wgl;
 

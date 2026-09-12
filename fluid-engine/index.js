@@ -798,6 +798,17 @@ class FluidEngine {
     this.renderer.clearBackgroundImage();
   }
 
+  /**
+   * Replace the dry image layer with an already-rendered painting and start a
+   * new, empty wet-paint stage. The host owns history invalidation.
+   */
+  bakeToBackground(source) {
+    this._assertNoStroke('bakeToBackground()');
+    this.renderer.setBackgroundImage(source);
+    this.simulator.clearPaintAndDynamics();
+    this.resetClock();
+  }
+
   /** Render the painting at full resolution and read it back as RGBA bytes. */
   exportPixels(options) {
     return this.renderer.renderToPixels(Object.assign({ simulator: this.simulator }, options));

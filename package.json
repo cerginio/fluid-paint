@@ -32,7 +32,8 @@
     "test:tilecraft": "node debug/tilecraft-stroke-player-test.js",
     "test:tilecraft:gpu": "node debug/tilecraft-story-gpu-test.js",
     "test:story-ui": "node debug/story-player-ui-test.js",
-    "test:live-gpu": "node debug/live-gpu-test.js"
+    "test:live-gpu": "node debug/live-gpu-test.js",
+    "test:bake": "node debug/bake-gpu-test.js"
   },
   "overrides": {
     "picomatch": "2.3.2"
