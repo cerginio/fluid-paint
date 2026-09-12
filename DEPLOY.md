@@ -1,5 +1,9 @@
 # Deploy — fluid-paint
 
+The full setup, test, CI, release, rollback, and operational guidance is in
+[`docs/SDLC.md`](docs/SDLC.md). The Make targets below verify the source before
+uploading the generated `dist/` artifact.
+
 One-time setup (per machine):
 ```
 npm install -g netlify-cli
@@ -20,13 +24,13 @@ Choose the existing `fluid-paint` site (`https://fluid-paint.netlify.app/`).
 ## Deploy a preview (draft)
 
 ```
-npm run build
-netlify deploy --dir=dist
+make deploy-preview
 ```
 
-Or let Netlify run the build:
+The direct CLI equivalent (without the Makefile verification gate) is:
 ```
-netlify deploy --build
+npm run build
+netlify deploy --dir=dist
 ```
 
 Check the draft URL printed in the terminal before going further.
@@ -34,8 +38,11 @@ Check the draft URL printed in the terminal before going further.
 ## Deploy to production
 
 ```
-netlify deploy --build --prod
+make deploy-prod
 ```
+
+The direct CLI equivalent is `netlify deploy --dir=dist --prod` after building
+and testing.
 
 ## Notes for this repo
 
@@ -47,7 +54,7 @@ netlify deploy --build --prod
 ## CI / non-interactive deploy
 
 ```
-NETLIFY_AUTH_TOKEN=<token> netlify deploy --build --prod --site=<SITE_ID>
+NETLIFY_AUTH_TOKEN=<token> make deploy-prod NETLIFY_FLAGS="--site=<SITE_ID>"
 ```
 
 Token: Netlify → User settings → Applications → Personal access tokens.
