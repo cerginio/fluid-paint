@@ -17,14 +17,14 @@ independently. The protocol version on both endpoints is fluid-paint-v1.
 The embedder must supply its exact origin in the iframe URL as
 ?editorOrigin=https://... . It is never inferred or widened.
 
-| Environment | Tilecraft editor origin |
-| --- | --- |
-| Development | https://dev.storytilecraft.space |
-| Preview | https://preview.storytilecraft.space |
-| Production | https://storytilecraft.space |
+| Environment | Tilecraft editor origin | Fluid Paint iframe origin |
+| --- | --- | --- |
+| Development | https://dev.storytilecraft.space | http://localhost:3000 |
+| Preview | https://preview.storytilecraft.space | Not assigned: Netlify draft URLs are per-deploy |
+| Production | https://storytilecraft.space | https://fluid-paint.netlify.app |
 
-The deployed Fluid Paint iframe origins are deployment-owned and must be added
-here before each environment is enabled; do not substitute a wildcard.
+Replace the preview placeholder with the issued Netlify origin before enabling
+that environment; do not substitute a wildcard.
 
 ## Bootstrap and acceptance
 
