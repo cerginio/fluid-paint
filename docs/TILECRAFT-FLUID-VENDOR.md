@@ -20,11 +20,12 @@ The embedder must supply its exact origin in the iframe URL as
 | Environment | Tilecraft editor origin | Fluid Paint iframe origin |
 | --- | --- | --- |
 | Development | https://dev.storytilecraft.space | http://localhost:3000 |
-| Preview | https://preview.storytilecraft.space | Not assigned: Netlify draft URLs are per-deploy |
+| Preview | https://preview.storytilecraft.space | https://6aa66981d51fa828ca46eba7--fluid-paint.netlify.app |
 | Production | https://storytilecraft.space | https://fluid-paint.netlify.app |
 
-Replace the preview placeholder with the issued Netlify origin before enabling
-that environment; do not substitute a wildcard.
+The preview iframe origin is the issued Netlify deploy URL for the current
+preview build. Replace it on each new preview deploy; do not substitute a
+wildcard.
 
 ## Bootstrap and acceptance
 
