@@ -7,6 +7,18 @@
 const TILECRAFT_BRUSH_SIZE_CORRECTION_RATE = 0.5;
 
 class TilecraftStrokePlayer {
+  /**
+   * Validate a transferred Tilecraft model before a scene is allowed to
+   * replace the active Fluid canvas. Execution-plan compilation still belongs
+   * to an instance, because it requires this canvas's FluidEngine.
+   */
+  static compile(model) {
+    if (typeof compileFluidStoryModel !== 'function') {
+      throw new Error('Tilecraft fluid-model.js must load before TilecraftStrokePlayer.compile().');
+    }
+    return compileFluidStoryModel(model);
+  }
+
   constructor(engine) {
     if (!engine || typeof engine.beginStroke !== 'function' ||
         typeof engine.strokeTo !== 'function' || typeof engine.endStroke !== 'function') {

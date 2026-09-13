@@ -1083,14 +1083,27 @@ class Paint {
     }
 
     async loadBackgroundImage(file) {
-        if (!file || !/\.png$/i.test(file.name || '') && file.type !== 'image/png') {
+        const decoded = await this.decodeBackground(file, file?.name);
+        this.engine.setBackgroundImage(decoded.source);
+        this.needsRedraw = true;
+        return decoded.summary;
+    }
+
+    /**
+     * Decode and aspect-fit a PNG without mutating the current renderer.
+     * Both the file picker and the Tilecraft embedded transfer use this
+     * staging step; the caller commits it only after the entire scene is ready.
+     */
+    async decodeBackground(blob, name = 'background.png', meta = {}) {
+        if (!(blob instanceof Blob) || (blob.type && blob.type !== 'image/png') &&
+            !/\.png$/i.test(name || '')) {
             throw new TypeError('Choose a PNG background image.');
         }
-        if (file.size > 25 * 1024 * 1024) {
+        if (blob.size > 25 * 1024 * 1024) {
             throw new RangeError('This PNG exceeds the 25 MB local limit.');
         }
 
-        const objectUrl = URL.createObjectURL(file);
+        const objectUrl = URL.createObjectURL(blob);
         const image = new Image();
         try {
             image.decoding = 'async';
@@ -1118,13 +1131,15 @@ class Paint {
                 drawWidth,
                 drawHeight
             );
-            this.engine.setBackgroundImage(backgroundCanvas);
-            this.needsRedraw = true;
             return {
-                fileName: file.name || 'background.png',
-                byteSize: file.size || 0,
-                sourceWidth: image.naturalWidth,
-                sourceHeight: image.naturalHeight,
+                source: backgroundCanvas,
+                summary: {
+                    fileName: name || 'background.png',
+                    byteSize: blob.size || 0,
+                    sourceWidth: image.naturalWidth,
+                    sourceHeight: image.naturalHeight,
+                    transferId: meta.transferId || null,
+                },
             };
         } finally {
             URL.revokeObjectURL(objectUrl);

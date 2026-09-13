@@ -107,6 +107,36 @@ class StoryPlaybackController {
     this._setState('ready');
   }
 
+  /**
+   * Commit a fully staged transfer. The bridge calls this only after both the
+   * JSON has passed TilecraftStrokePlayer.compile() and the PNG was decoded.
+   */
+  async loadScene({ model, background, transferId } = {}) {
+    if (!model) throw new TypeError('A transferred scene requires a model.');
+    await this._cancelRun();
+    if (background) {
+      this.painter.engine.setBackgroundImage(background.source || background);
+      this.painter.needsRedraw = true;
+      this.backgroundSummary = background.summary || {
+        fileName: 'background.png',
+        byteSize: 0,
+        sourceWidth: null,
+        sourceHeight: null,
+        transferId: transferId || null,
+      };
+      this.backgroundError = null;
+    }
+    this.model = model;
+    this.modelSummary = StoryFileLoader.summarize(model, 'tilecraft-transfer.json');
+    this.plan = null;
+    this.registry.reset(0);
+    this.playheadIndex = 0;
+    this.progress = this._emptyProgress();
+    this.error = null;
+    this.baselineValid = false;
+    this._setState('ready');
+  }
+
   async removeFile() {
     await this._cancelRun();
     if (this.baselineValid) await this.restoreBaseline();

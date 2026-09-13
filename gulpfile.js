@@ -55,6 +55,10 @@ const paths = {
     // Optional Tilecraft story-model adapter. It only uses FluidEngine's public
     // Stroke API and is inert until a host constructs it.
     'fluid-engine/tilecraft-stroke-player.js',
+    // Pinned Tilecraft transport/model/embedded bridge: keep this exact order.
+    'vendor/tilecraft/message-api.js',
+    'vendor/tilecraft/fluid-model.js',
+    'vendor/tilecraft/fluid-gamifier-bridge.js',
     'app/unpainted-range-registry.js',
     'app/story-file-loader.js',
     'app/story-playback-controller.js',
@@ -78,7 +82,8 @@ const paths = {
     'app/ui/panel.js',
     'app/ui/story-tools.js',
     'paint-setup.js',
-    'paint.js'
+    'paint.js',
+    'app/fluid-embed-bootstrap.js'
 
   ],
   // Two shader trees since Phase 4. Each is copied to the same relative place

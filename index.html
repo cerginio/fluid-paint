@@ -305,6 +305,9 @@
     <script src="fluid-engine/renderer.js"></script>
     <script src="fluid-engine/index.js"></script>
     <script src="fluid-engine/tilecraft-stroke-player.js"></script>
+    <script src="vendor/tilecraft/message-api.js"></script>
+    <script src="vendor/tilecraft/fluid-model.js"></script>
+    <script src="vendor/tilecraft/fluid-gamifier-bridge.js"></script>
     <script src="app/unpainted-range-registry.js"></script>
     <script src="app/story-file-loader.js"></script>
     <script src="app/story-playback-controller.js"></script>
@@ -326,6 +329,7 @@
     <script src="app/ui/story-tools.js"></script>
     <script src="paint-setup.js"></script>
     <script src="paint.js"></script>
+    <script src="app/fluid-embed-bootstrap.js"></script>
 
     <script>
         // ---- globals ----
@@ -433,6 +437,11 @@
 
                     const painter = new Paint(canvas, wgl, { container: canvasCell });
                     window.__painter = painter;   // handle for the golden harness
+                    if (window.parent !== window) {
+                        window.startFluidEmbed?.().catch((error) => {
+                            console.error('Fluid embedded client failed to start:', error);
+                        });
+                    }
 
                     /*
                      * Tilecraft demonstration player. `?story=1` is purposely
