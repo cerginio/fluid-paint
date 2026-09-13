@@ -8,9 +8,9 @@ This repository vendors one indivisible Tilecraft protocol set:
 | vendor/tilecraft/fluid-model.js | tilecraft/lib/fluid-model.js |
 | vendor/tilecraft/fluid-gamifier-bridge.js | tilecraft/lib/fluid-gamifier-bridge.js |
 
-The Fluid Paint integration worktree started at commit df640cf. Do not update
-one of these files independently. The protocol version on both endpoints is
-fluid-paint-v1.
+The Fluid Paint integration worktree started at commit df640cf; vendor was
+added in Fluid Paint commit e35f086. Do not update one of these files
+independently. The protocol version on both endpoints is fluid-paint-v1.
 
 ## Exact editor origins
 
