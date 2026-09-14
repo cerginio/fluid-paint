@@ -328,6 +328,46 @@ The following values must use one consistent coordinate space:
 
 `resolutionScale` then maps painting pixels to simulation texels.
 
+### 6.1 Bristle footprint
+
+By default the brush's bristles fill a disc, so a tap deposits a round mark.
+`beginStroke({ brushShape })` clamps that distribution into a regular polygon
+instead:
+
+```js
+engine.beginStroke({
+  // ...
+  brushShape: { sides: 6, aspect: 1, rotation: 0 },
+});
+```
+
+- `sides` is `3`..`8`. Anything lower, or `brushShape: null`, is the round
+  default — that path is bit-identical to a brush with no footprint set.
+- `aspect` is width / height, so `{ sides: 4, aspect: 3 }` is a wide rectangle.
+- `rotation` orients the polygon, in radians.
+
+The footprint is chosen per press. It is applied before the bristles are drawn
+and persists for the whole stroke: it cannot change mid-stroke, because
+deforming a settled brush would fight its own distance constraints. A
+`beginStroke()` without `brushShape` restores the round default rather than
+inheriting the previous press's shape.
+
+`brushSize` keeps one meaning across every shape. The bristle radius is divided
+by the shape's area fraction, so a triangle, a hexagon and a disc of the same
+`brushSize` cover the same area — without that, a triangle would paint at about
+half width.
+
+**Expect softened corners.** The footprint sets where bristles start; between it
+and the canvas sit the position-based-dynamics solver and the splat pass, which
+sweeps each bristle segment into a capsule of radius `splatRadius`. Corners are
+therefore convolved with a disc of that radius. The shape reads clearly at large
+brush sizes and fades toward a circle as the brush shrinks or the side count
+rises. Measured on SwiftShader (`npm run test:bristle-shape`), the n-th harmonic
+of the deposit's radius profile is about `0.25` for a triangle, `0.12` for a
+square, `0.056` for a hexagon and `0.018` for an octagon, against a round
+baseline near `0.005`. An octagon is close to indistinguishable from a disc;
+that is inherent to the splat model, not a tuning bug.
+
 ## 7. Colour contract
 
 `beginStroke()` accepts an explicit pigment payload:
@@ -850,7 +890,12 @@ engine.beginStroke({
   },
   resolutionScale?: number,       // default 1; > 0
   spacing?: number,               // default derived from brushSize; > 0
-  timing?: 'live' | 'replay'      // default 'replay'
+  timing?: 'live' | 'replay',     // default 'replay'
+  brushShape?: {                  // default null = round
+    sides: number,                // 3..8
+    aspect?: number,              // default 1; width / height, > 0
+    rotation?: number             // default 0; radians
+  } | null
 }): { steps: number, simulationUpdated: boolean }
 
 engine.strokeTo({ x, y, pressure? }): {

@@ -329,7 +329,7 @@ class FluidEngine {
    * time; legacy replay mode settles synchronously for offline compatibility.
    * @param {object} options Pass timing:'live' in interactive hosts.
    */
-  beginStroke({ x, y, pressure = 1, brushSize, paintingRectangle, color, resolutionScale = 1, spacing, timing = 'replay' }) {
+  beginStroke({ x, y, pressure = 1, brushSize, paintingRectangle, color, resolutionScale = 1, spacing, timing = 'replay', brushShape = null }) {
     if (this.strokeActive) {
       throw this._strokeError('FluidEngine: a stroke is already active; call endStroke() first.');
     }
@@ -344,6 +344,18 @@ class FluidEngine {
     this._validateNumber(brushSize, 'brushSize', { positive: true });
     this._validateNumber(resolutionScale, 'resolutionScale', { positive: true });
     if (spacing !== undefined) this._validateNumber(spacing, 'spacing', { positive: true });
+    if (brushShape !== null && brushShape !== undefined) {
+      if (typeof brushShape !== 'object') {
+        throw this._strokeError('FluidEngine: brushShape must be an object or null.');
+      }
+      this._validateNumber(brushShape.sides, 'brushShape.sides', { min: 3, max: 8 });
+      if (brushShape.aspect !== undefined) {
+        this._validateNumber(brushShape.aspect, 'brushShape.aspect', { positive: true });
+      }
+      if (brushShape.rotation !== undefined) {
+        this._validateNumber(brushShape.rotation, 'brushShape.rotation');
+      }
+    }
 
     if (!paintingRectangle) {
       throw this._strokeError('FluidEngine: paintingRectangle is required.');
@@ -407,6 +419,19 @@ class FluidEngine {
       pending: { x, y, pressure },
       remainder: 0,
     };
+
+    /* Select the footprint before either initialize() below: initialize() is
+     * what draws the bristles, so the shape must already be in place. It
+     * persists on the brush until the next beginStroke, which is why a stroke
+     * without brushShape explicitly restores the round default rather than
+     * inheriting the previous press's shape. */
+    if (typeof this.brush.setBristleShape === 'function') {
+      this.brush.setBristleShape(brushShape);
+    } else if (brushShape) {
+      // A brush without footprint support would silently paint round, which is
+      // worse than saying so: the caller asked for a shape it will not get.
+      throw this._strokeError('FluidEngine: this brush does not support brushShape.');
+    }
 
     if (timing === 'live') {
       try {

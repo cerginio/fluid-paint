@@ -17,8 +17,33 @@ uniform float u_jitter;
  * a single shared angle would read as a stamp being visibly spun. */
 uniform float u_strokeVariation;
 
+/* Phase B: bristle footprint.
+ *
+ * u_bristleSides < 3.0 is the round default and costs nothing beyond one
+ * compare -- the disc path below is bit-identical to the pre-shape shader.
+ * 3..8 clamp the sunflower into a regular n-gon; u_bristleAspect then scales
+ * x against y so a square becomes a rectangle. u_bristleRotation orients the
+ * polygon, in radians. */
+uniform float u_bristleSides;
+uniform float u_bristleAspect;
+uniform float u_bristleRotation;
+
 const float PHI = 1.618033988749895;
 const float PI = 3.14159265;
+
+/*
+ * Normalized radius of a regular n-gon at angle theta, as a fraction of its
+ * circumradius: 1.0 at a vertex, cos(PI/n) at an edge midpoint.
+ *
+ * Folding theta into one wedge with mod() means the cost is independent of the
+ * side count -- no loop, no branch per side. This runs for every bristle on
+ * every simulation step (brush.js re-pins the bases each step), so it stays
+ * pure arithmetic on mobile GPUs.
+ */
+float polygonRadius(float theta, float sides) {
+    float halfWedge = PI / sides;
+    return cos(halfWedge) / cos(mod(theta, 2.0 * halfWedge) - halfWedge);
+}
 
 void main () {
     vec2 coordinates = gl_FragCoord.xy / u_resolution;
@@ -43,7 +68,36 @@ void main () {
     float r = sqrt(bristleIndex + (strokeRandom.y - 0.5) * u_jitter) / sqrt(u_bristleCount);
 
     float spacing = u_bristleLength / (u_verticesPerBristle - 1.0);
-    vec3 brushSpaceBristlePosition = vec3(r * cos(theta), r * sin(theta), -vertexIndex * spacing);
+    vec2 crossSection = vec2(r * cos(theta), r * sin(theta));
+
+    if (u_bristleSides >= 3.0) {
+        /* Clamp the disc into the polygon by scaling each bristle's radius by
+         * the polygon's own radius at that angle. Because r = sqrt(i/N) is an
+         * equal-area distribution, scaling it radially maps that even density
+         * onto the polygon -- bristles do not bunch up at the vertices, which
+         * is what rejection sampling or vertex snapping would produce.
+         *
+         * The clamp is applied AFTER the jitter above, so this press's
+         * variation survives intact rather than being quantized by the shape. */
+        float oriented = theta + u_bristleRotation;
+        float shaped = r * polygonRadius(oriented, u_bristleSides);
+
+        /* An n-gon inscribed in the unit disc covers less area than the disc,
+         * so the same brushSize would paint a visibly thinner stroke -- a
+         * triangle loses about half. Divide by the shape's area fraction
+         * (n/(2*PI) * sin(2*PI/n)) so a shaped brush keeps the round brush's
+         * covered area and brushSize keeps meaning one thing. */
+        float wedge = 2.0 * PI / u_bristleSides;
+        float areaFraction = (u_bristleSides / (2.0 * PI)) * sin(wedge);
+        shaped /= sqrt(areaFraction);
+
+        crossSection = vec2(shaped * cos(oriented), shaped * sin(oriented));
+        // Aspect stretches x against y; 1.0 leaves a regular polygon alone.
+        crossSection.x *= u_bristleAspect;
+        crossSection /= sqrt(u_bristleAspect); // keep area independent of aspect
+    }
+
+    vec3 brushSpaceBristlePosition = vec3(crossSection, -vertexIndex * spacing);
 
     vec3 bristlePosition = u_brushPosition + brushSpaceBristlePosition * u_brushScale;
 

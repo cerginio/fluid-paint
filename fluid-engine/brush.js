@@ -7,6 +7,13 @@ const VERTICES_PER_BRISTLE = 10;
 const BRISTLE_LENGTH = 4.5; // relative to a scale of 1
 const BRISTLE_JITTER = 0.5;
 
+/* Bristle footprint. ROUND_SIDES is any value below the shader's 3.0 cutoff:
+ * it selects the original disc, which stays the default for every brush that
+ * does not ask for a shape. */
+const ROUND_SIDES = 0;
+const MIN_BRISTLE_SIDES = 3;
+const MAX_BRISTLE_SIDES = 8;
+
 const ITERATIONS = 20;
 const GRAVITY = 30.0;
 const BRUSH_DAMPING = 0.75;
@@ -26,6 +33,14 @@ class Brush {
     /* Drawn once per press by initialize(), never per frame, per bristle or
      * per splat -- a redraw mid-stroke would make one press wander. */
     this.strokeVariation = 0;
+
+    /* Bristle footprint for the current press. Like strokeVariation this is
+     * brush state, not per-draw state: setbristles runs again every simulation
+     * step to re-pin the bristle bases, and all three call sites must agree or
+     * the footprint would change shape mid-stroke. */
+    this.bristleSides = ROUND_SIDES;
+    this.bristleAspect = 1;
+    this.bristleRotation = 0;
 
     this.wgl = wgl;
 
@@ -219,6 +234,56 @@ class Brush {
     return value;
   }
 
+  /**
+   * Choose the bristle footprint for subsequent presses.
+   *
+   * `null` (or a side count below 3) restores the round default. Sides are
+   * clamped to 3..8: below 3 there is no polygon, and past 8 the shape is
+   * indistinguishable from a disc once splatRadius rounds its corners.
+   *
+   * This does not redraw the bristles -- initialize() does, on the next press.
+   * Changing the footprint mid-stroke would deform an already-settled brush
+   * against its own distance constraints.
+   */
+  setBristleShape(shape) {
+    if (!shape) {
+      this.bristleSides = ROUND_SIDES;
+      this.bristleAspect = 1;
+      this.bristleRotation = 0;
+      return;
+    }
+    const { sides, aspect = 1, rotation = 0 } = shape;
+    if (!isFinite(sides) || sides < MIN_BRISTLE_SIDES) {
+      this.bristleSides = ROUND_SIDES;
+      this.bristleAspect = 1;
+      this.bristleRotation = 0;
+      return;
+    }
+    if (!isFinite(aspect) || aspect <= 0) {
+      throw new RangeError('FluidEngine: bristle shape aspect must be a positive finite number.');
+    }
+    if (!isFinite(rotation)) {
+      throw new RangeError('FluidEngine: bristle shape rotation must be a finite number.');
+    }
+    this.bristleSides = Math.min(MAX_BRISTLE_SIDES, Math.round(sides));
+    this.bristleAspect = aspect;
+    this.bristleRotation = rotation;
+  }
+
+  /**
+   * Apply the footprint uniforms to a setbristles draw state.
+   *
+   * Every setbristles call site must use this: the per-step base re-pin
+   * (updateBrush) reseeds row 0 from the same shader, so a site that omitted
+   * these uniforms would silently reset that press's footprint to round.
+   */
+  _uniformBristleShape(drawState) {
+    return drawState
+      .uniform1f('u_bristleSides', this.bristleSides)
+      .uniform1f('u_bristleAspect', this.bristleAspect)
+      .uniform1f('u_bristleRotation', this.bristleRotation);
+  }
+
   // sets all the bristle vertices
   //
   // Also draws this press's bristle-layout variation (Phase 8a). Every call is
@@ -237,7 +302,7 @@ class Brush {
 
     const wgl = this.wgl;
 
-    const setBristlesDrawState = wgl
+    const setBristlesDrawState = this._uniformBristleShape(wgl
       .createDrawState()
       .bindFramebuffer(this.simulationFramebuffer)
       .viewport(0, 0, this.bristleCount, VERTICES_PER_BRISTLE)
@@ -250,7 +315,7 @@ class Brush {
       .uniform1f('u_jitter', BRISTLE_JITTER)
       .uniform1f('u_strokeVariation', this.strokeVariation)
       .uniform2f('u_resolution', this.maxBristleCount, VERTICES_PER_BRISTLE)
-      .uniformTexture('u_randomsTexture', 2, wgl.TEXTURE_2D, this.randomsTexture)
+      .uniformTexture('u_randomsTexture', 2, wgl.TEXTURE_2D, this.randomsTexture))
       .vertexAttribPointer(
         this.quadVertexBuffer,
         this.setBristlesProgram.getAttribLocation('a_position'),
@@ -287,7 +352,7 @@ class Brush {
 
     // set any newly added bristles
     if (newBristleCount > this.bristleCount) {
-      const setBristlesDrawState = wgl
+      const setBristlesDrawState = this._uniformBristleShape(wgl
         .createDrawState()
         .bindFramebuffer(this.simulationFramebuffer)
         .viewport(this.bristleCount, 0, newBristleCount - this.bristleCount, VERTICES_PER_BRISTLE)
@@ -298,8 +363,9 @@ class Brush {
         .uniform1f('u_bristleLength', BRISTLE_LENGTH)
         .uniform1f('u_verticesPerBristle', VERTICES_PER_BRISTLE)
         .uniform1f('u_jitter', BRISTLE_JITTER)
+        .uniform1f('u_strokeVariation', this.strokeVariation)
         .uniform2f('u_resolution', this.maxBristleCount, VERTICES_PER_BRISTLE)
-        .uniformTexture('u_randomsTexture', 2, wgl.TEXTURE_2D, this.randomsTexture)
+        .uniformTexture('u_randomsTexture', 2, wgl.TEXTURE_2D, this.randomsTexture))
         .vertexAttribPointer(
           this.quadVertexBuffer,
           this.setBristlesProgram.getAttribLocation('a_position'),
@@ -382,7 +448,7 @@ class Brush {
 
 
     // set bristle bases (first vertex/row)
-    const setBristlesDrawState = wgl
+    const setBristlesDrawState = this._uniformBristleShape(wgl
       .createDrawState()
       .bindFramebuffer(this.simulationFramebuffer)
       .viewport(0, 0, this.bristleCount, 1)
@@ -393,8 +459,9 @@ class Brush {
       .uniform1f('u_bristleLength', BRISTLE_LENGTH)
       .uniform1f('u_jitter', BRISTLE_JITTER)
       .uniform1f('u_verticesPerBristle', VERTICES_PER_BRISTLE)
+      .uniform1f('u_strokeVariation', this.strokeVariation)
       .uniform2f('u_resolution', this.maxBristleCount, VERTICES_PER_BRISTLE)
-      .uniformTexture('u_randomsTexture', 2, wgl.TEXTURE_2D, this.randomsTexture)
+      .uniformTexture('u_randomsTexture', 2, wgl.TEXTURE_2D, this.randomsTexture))
       .vertexAttribPointer(
         this.quadVertexBuffer,
         this.setBristlesProgram.getAttribLocation('a_position'),
