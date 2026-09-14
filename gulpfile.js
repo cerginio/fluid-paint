@@ -94,7 +94,7 @@ const paths = {
   engineShaders: 'fluid-engine/shaders/**/*.{glsl,frag,vert}',
   appShaders: 'app/shaders/**/*.{glsl,frag,vert}',
   html: 'index.html',
-  static: ['LICENSE']
+  static: ['LICENSE', 'favicon-64x64.png']
 };
 
 // Clean dist using Node's fs.rm so we avoid extra deps
@@ -184,7 +184,9 @@ function html() {
 
 // ---------- STATIC (optional) ----------
 function staticFiles() {
-  return src(paths.static, { allowEmpty: true })
+  // encoding:false обов'язковий — gulp 5 інакше читає файл як UTF-8 і псує
+  // будь-який бінарник: у PNG байт 0x89 стає efbfbd, і іконка не відкривається.
+  return src(paths.static, { allowEmpty: true, encoding: false })
     .pipe(dest(paths.dist));
 }
 

@@ -27,6 +27,25 @@
         return { width, height, padding };
     }
 
+    function fluidFitBox(source, viewport) {
+        const { width, height, padding } = validateFluidModelViewport(viewport);
+        const sourceWidth = Math.max(1, source?.width);
+        const sourceHeight = Math.max(1, source?.height);
+        if (!Number.isFinite(sourceWidth) || !Number.isFinite(sourceHeight)) {
+            throw structuredFluidError("INVALID_MODEL", "Fluid fit source must have finite size");
+        }
+        const availableWidth = width - 2 * padding;
+        const availableHeight = height - 2 * padding;
+        const scale = Math.min(availableWidth / sourceWidth, availableHeight / sourceHeight);
+        return {
+            scale,
+            offsetX: padding + (availableWidth - sourceWidth * scale) / 2,
+            offsetY: padding + (availableHeight - sourceHeight * scale) / 2,
+            width: sourceWidth * scale,
+            height: sourceHeight * scale,
+        };
+    }
+
     function transformFluidStoryModel(model, viewport) {
         const { width, height, padding } = validateFluidModelViewport(viewport);
         if (!model || !Array.isArray(model.layers) || !Array.isArray(model.frames)) {
@@ -50,11 +69,8 @@
         const bottom = Math.max(...points.map((point) => point.y));
         const sourceWidth = Math.max(1, right - left);
         const sourceHeight = Math.max(1, bottom - top);
-        const availableWidth = width - 2 * padding;
-        const availableHeight = height - 2 * padding;
-        const scale = Math.min(availableWidth / sourceWidth, availableHeight / sourceHeight);
-        const offsetX = padding + (availableWidth - sourceWidth * scale) / 2;
-        const offsetY = padding + (availableHeight - sourceHeight * scale) / 2;
+        const { scale, offsetX, offsetY } = fluidFitBox(
+            { width: sourceWidth, height: sourceHeight }, { width, height, padding });
         const transformPoint = (point) => ({
             ...point,
             x: offsetX + (point.x - left) * scale,
@@ -195,12 +211,14 @@
     root.buildFluidStoryModel = buildFluidStoryModel;
     root.compileFluidStoryModel = compileFluidStoryModel;
     root.transformFluidStoryModel = transformFluidStoryModel;
+    root.fluidFitBox = fluidFitBox;
     root.validateFluidModelViewport = validateFluidModelViewport;
     if (typeof module !== "undefined" && module.exports) {
         module.exports = {
             buildFluidStoryModel,
             compileFluidStoryModel,
             transformFluidStoryModel,
+            fluidFitBox,
             validateFluidModelViewport,
         };
     }

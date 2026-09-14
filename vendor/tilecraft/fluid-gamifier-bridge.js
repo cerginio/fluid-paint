@@ -186,7 +186,7 @@
             if (!wants.length || wants.some((kind) => kind !== "model" && kind !== "background")) {
                 throw fluidError("INVALID_WANTS", "wants must contain model and/or background");
             }
-            if (wants.includes("model")) {
+            if (wants.includes("model") || request.modelViewport) {
                 assertModelViewport(request.modelViewport);
             }
             this.currentTransferId = transferId;
@@ -217,7 +217,7 @@
                 });
             };
             const sendBackground = async () => {
-                const rendered = await this.renderBackground(request.frameId);
+                const rendered = await this.renderBackground(request.frameId, request.modelViewport || null);
                 const blob = rendered instanceof Blob ? rendered : rendered?.blob;
                 if (!(blob instanceof Blob)) throw fluidError("INVALID_BACKGROUND", "Background renderer must return a Blob");
                 await this.api.sendBlob("fluid-player", blob, {
@@ -513,8 +513,7 @@
                     frameId: payload.frameId,
                     wants: [...definition.wants],
                     backgroundMode: "reference",
-                    modelViewport: definition.wants.includes("model") &&
-                        typeof controller.getModelViewport === "function"
+                    modelViewport: typeof controller.getModelViewport === "function"
                         ? controller.getModelViewport(24)
                         : undefined,
                 });
