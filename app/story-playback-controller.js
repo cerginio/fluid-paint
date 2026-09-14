@@ -11,7 +11,7 @@ class StoryPlaybackController {
     this.registry = new UnpaintedRangeRegistry();
     this.playheadIndex = 0;
     this.progress = this._emptyProgress();
-    this.speed = 8;
+    this.speed = 1;
     this.thickness = 1;
     this.canvasPolicy = 'replace';
     this.listeners = new Set();
@@ -25,6 +25,9 @@ class StoryPlaybackController {
     this._configurationPromise = Promise.resolve();
     this.activeRunSettings = null;
     this.lastStats = null;
+    this.targetDuration = 0;
+    this.elapsed = 0;
+    this.estimatedRemaining = 0;
     this.backgroundSummary = null;
     this.backgroundError = null;
     this.backgroundLoading = false;
@@ -32,6 +35,14 @@ class StoryPlaybackController {
 
   get canPaintManually() {
     return true;
+  }
+
+  getModelViewport(padding = 24) {
+    return {
+      width: this.painter.paintingRectangle.width,
+      height: this.painter.paintingRectangle.height,
+      padding,
+    };
   }
 
   subscribe(listener) {
@@ -89,6 +100,9 @@ class StoryPlaybackController {
     this.registry.reset(0);
     this.playheadIndex = 0;
     this.progress = this._emptyProgress();
+    this.targetDuration = 0;
+    this.elapsed = 0;
+    this.estimatedRemaining = 0;
     this.backgroundSummary = summary;
     this.backgroundError = null;
     this._setState(this.model ? 'ready' : 'empty');
@@ -102,17 +116,20 @@ class StoryPlaybackController {
     this.registry.reset(0);
     this.playheadIndex = 0;
     this.progress = this._emptyProgress();
+    this.targetDuration = 0;
+    this.elapsed = 0;
+    this.estimatedRemaining = 0;
     this.error = null;
     this.baselineValid = false;
     this._setState('ready');
   }
 
   /**
-   * Commit a fully staged transfer. The bridge calls this only after both the
-   * JSON has passed TilecraftStrokePlayer.compile() and the PNG was decoded.
+   * Commit a fully staged transfer. Product modes may transfer a playable JSON
+   * model, a PNG reference, or both.
    */
   async loadScene({ model, background, transferId } = {}) {
-    if (!model) throw new TypeError('A transferred scene requires a model.');
+    if (!model && !background) throw new TypeError('A transferred scene requires a model or background.');
     await this._cancelRun();
     if (background) {
       this.painter.engine.setBackgroundImage(background.source || background);
@@ -126,8 +143,8 @@ class StoryPlaybackController {
       };
       this.backgroundError = null;
     }
-    this.model = model;
-    this.modelSummary = StoryFileLoader.summarize(model, 'tilecraft-transfer.json');
+    this.model = model || null;
+    this.modelSummary = model ? StoryFileLoader.summarize(model, 'tilecraft-transfer.json') : null;
     this.plan = null;
     this.registry.reset(0);
     this.playheadIndex = 0;
@@ -156,6 +173,13 @@ class StoryPlaybackController {
     }
     if (this.speed === multiplier) return Promise.resolve(false);
     this.speed = multiplier;
+    if (this.plan) {
+      const total = this.plan.operations.length;
+      this.targetDuration = TilecraftStrokePlayer.targetPlaySeconds(total) / this.speed;
+      const painted = total - this.registry.pendingCount;
+      this.elapsed = total ? this.targetDuration * painted / total : 0;
+      this.estimatedRemaining = Math.max(0, this.targetDuration - this.elapsed);
+    }
     this._emit();
     return this._reconfigureActiveRun();
   }
@@ -240,6 +264,7 @@ class StoryPlaybackController {
     this.registry.reset(this.plan.operations.length);
     this.playheadIndex = 0;
     this.progress = this._emptyProgress(this.plan.operations.length);
+    this._resetTiming();
     return this._runFrom(0);
   }
 
@@ -333,6 +358,7 @@ class StoryPlaybackController {
     this.registry.reset(this.plan.operations.length);
     this.playheadIndex = 0;
     this.progress = this._emptyProgress(this.plan.operations.length);
+    this._resetTiming();
   }
 
   _captureBaseline() {
@@ -357,6 +383,22 @@ class StoryPlaybackController {
 
   _compilePlan() {
     const target = this.painter.paintingRectangle.clone();
+    const fit = this.model?.fit;
+    if (this._isValidFit(fit)) {
+      const player = new TilecraftStrokePlayer(this.engine);
+      this.player = player;
+      return player.compile(this.model, {
+        paintingRectangle: target,
+        resolutionScale: this.painter.getEffectiveResolutionScale(),
+        canvasSize: { width: target.width, height: target.height },
+        coordinateScale: 1,
+        blackPigment: this.painter.blackPigment,
+        mapPoint: (tile) => ({
+          x: target.left + tile.x,
+          y: target.bottom + fit.height - tile.y,
+        }),
+      });
+    }
     const bounds = this.modelSummary.bounds;
     const sourceWidth = Math.max(1, bounds.right - bounds.left);
     const sourceHeight = Math.max(1, bounds.bottom - bounds.top);
@@ -378,6 +420,16 @@ class StoryPlaybackController {
     });
   }
 
+  _isValidFit(fit) {
+    if (fit?.version !== 1 || !Number.isFinite(fit.width) || !Number.isFinite(fit.height) ||
+        fit.width <= 0 || fit.height <= 0 || fit.width > 8192 || fit.height > 8192 ||
+        !Number.isFinite(fit.padding) || fit.padding < 0 ||
+        fit.padding >= Math.min(fit.width, fit.height) / 2 ||
+        !Number.isFinite(fit.scale) || fit.scale <= 0) return false;
+    const bounds = fit.sourceBounds;
+    return bounds && ['left', 'top', 'right', 'bottom'].every((key) => Number.isFinite(bounds[key]));
+  }
+
   async _runFrom(startIndex) {
     if (!this.plan || !this.plan.operations.length) return false;
     this._paused = false;
@@ -386,9 +438,10 @@ class StoryPlaybackController {
     this._setState('playing');
     const runSettings = Object.freeze({ speed: this.speed, thickness: this.thickness });
     this.activeRunSettings = runSettings;
-    const speedOptions = runSettings.speed < 1
-      ? { framesPerStep: Math.round(1 / runSettings.speed), ticksPerFrame: 1 }
-      : { framesPerStep: 1, ticksPerFrame: Math.round(runSettings.speed) };
+    const total = this.plan.operations.length;
+    const remainingFraction = total ? this.registry.pendingCount / total : 0;
+    const runTargetDuration = this.targetDuration * remainingFraction;
+    const runElapsedBase = this.elapsed;
     const player = this.player || new TilecraftStrokePlayer(this.engine);
     const run = player.playPlan(this.plan, {
       startIndex,
@@ -396,7 +449,7 @@ class StoryPlaybackController {
       signal: abortController.signal,
       waitUntilResumed: (signal) => this._waitUntilResumed(signal),
       waitFrame: () => new Promise(requestAnimationFrame),
-      ...speedOptions,
+      targetDuration: runTargetDuration,
       brushSizeMultiplier: runSettings.thickness,
       advanceTick: () => this._advanceStoryTick(),
       resetAdvanceClock: () => this._resetStoryClock(),
@@ -404,6 +457,11 @@ class StoryPlaybackController {
       onProgress: (progress) => {
         this.progress = progress;
         this.playheadIndex = progress.playheadIndex;
+        const paintedFraction = total ? progress.paintedOperations / total : 1;
+        this.elapsed = Number.isFinite(progress.timelineElapsed)
+          ? runElapsedBase + progress.timelineElapsed
+          : this.targetDuration * paintedFraction;
+        this.estimatedRemaining = Math.max(0, this.targetDuration - this.elapsed);
         this.painter.needsRedraw = true;
         this._emit();
       },
@@ -414,6 +472,8 @@ class StoryPlaybackController {
       this.lastStats = result.stats;
       this.playheadIndex = result.nextIndex;
       if (!abortController.signal.aborted) {
+        this.elapsed = runElapsedBase + (result.stats.actualDuration ?? runTargetDuration);
+        this.estimatedRemaining = 0;
         this._setState(this.registry.pendingCount ? 'completed-with-gaps' : 'completed');
       }
       return result.stats;
@@ -463,7 +523,7 @@ class StoryPlaybackController {
   }
 
   _waitUntilResumed(signal) {
-    if (!this._paused) return Promise.resolve();
+    if (!this._paused) return Promise.resolve(false);
     return new Promise((resolve, reject) => {
       const onAbort = () => {
         this._pauseResolve = null;
@@ -475,7 +535,7 @@ class StoryPlaybackController {
       if (signal) signal.addEventListener('abort', onAbort, { once: true });
       this._pauseResolve = () => {
         if (signal) signal.removeEventListener('abort', onAbort);
-        resolve();
+        resolve(true);
       };
     });
   }
@@ -526,6 +586,13 @@ class StoryPlaybackController {
     };
   }
 
+  _resetTiming() {
+    const count = this.plan?.operations?.length || 0;
+    this.targetDuration = TilecraftStrokePlayer.targetPlaySeconds(count) / this.speed;
+    this.elapsed = 0;
+    this.estimatedRemaining = this.targetDuration;
+  }
+
   _setState(state) {
     this.state = state;
     const body = document.getElementById('panel-body');
@@ -547,6 +614,9 @@ class StoryPlaybackController {
       backgroundLoading: this.backgroundLoading,
       canvasPolicy: this.canvasPolicy,
       error: this.error,
+      targetDuration: this.targetDuration,
+      elapsed: this.elapsed,
+      estimatedRemaining: this.estimatedRemaining,
       pendingRanges: this.registry.snapshot(),
       canPaintManually: this.canPaintManually,
       canPreviousFrame: canNavigate && !!this.registry.previousPendingFrame(this.playheadIndex, this.plan),

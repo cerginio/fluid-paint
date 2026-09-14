@@ -5,8 +5,27 @@
 // to the fluid simulation.  The adapter never reads engine.brush/simulator.
 
 const TILECRAFT_BRUSH_SIZE_CORRECTION_RATE = 0.5;
+const PLAYBACK_DURATION_EXPONENT = Math.log(10) / Math.log(800);
+
+function targetPlaySeconds(operationCount) {
+  if (!Number.isFinite(operationCount) || operationCount <= 0) return 0;
+  return Math.min(50, Math.max(5 / 3,
+    5 * Math.pow(operationCount / 50, PLAYBACK_DURATION_EXPONENT)));
+}
+
+function operationVisualWeight(operation, previous) {
+  let weight = 1;
+  if (operation?.segmentStart) weight += 2;
+  if (!previous || operation?.frameKey !== previous.frameKey) weight += 6;
+  return weight;
+}
 
 class TilecraftStrokePlayer {
+  static targetPlaySeconds(operationCount) { return targetPlaySeconds(operationCount); }
+
+  static operationVisualWeight(operation, previous) {
+    return operationVisualWeight(operation, previous);
+  }
   /**
    * Validate a transferred Tilecraft model before a scene is allowed to
    * replace the active Fluid canvas. Execution-plan compilation still belongs
@@ -262,6 +281,8 @@ class TilecraftStrokePlayer {
     const framesPerStep = options.framesPerStep === undefined ? 1 : options.framesPerStep;
     const ticksPerFrame = options.ticksPerFrame === undefined ? 1 : options.ticksPerFrame;
     const brushSizeMultiplier = options.brushSizeMultiplier === undefined ? 1 : options.brushSizeMultiplier;
+    const targetDuration = options.targetDuration;
+    const timelineEnabled = Number.isFinite(targetDuration) && targetDuration >= 0;
     if (!Number.isInteger(framesPerStep) || framesPerStep < 1 ||
         !Number.isInteger(ticksPerFrame) || ticksPerFrame < 1 ||
         (ticksPerFrame > 1 && framesPerStep !== 1)) {
@@ -287,6 +308,17 @@ class TilecraftStrokePlayer {
     let previousIndex = null;
     let nextIndex = startIndex;
     let ticksThisFrame = 0;
+    let pendingProgress = null;
+    let operationsSinceFrame = 0;
+    const now = options.now || (() => performance.now());
+    const timelineStart = now();
+    let pausedMilliseconds = 0;
+    const weights = timelineEnabled
+      ? plan.operations.slice(startIndex, stopAt).map((operation, offset) =>
+        operationVisualWeight(operation, plan.operations[startIndex + offset - 1]))
+      : [];
+    const totalWeight = weights.reduce((sum, weight) => sum + weight, 0) || 1;
+    let completedWeight = 0;
 
     const checkAbort = () => {
       if (options.signal && options.signal.aborted) throw this._abortError();
@@ -294,11 +326,40 @@ class TilecraftStrokePlayer {
     const waitUntilReady = async () => {
       checkAbort();
       if (typeof options.waitUntilResumed === 'function') {
-        await options.waitUntilResumed(options.signal);
+        const before = now();
+        const didPause = await options.waitUntilResumed(options.signal);
+        if (didPause) pausedMilliseconds += Math.max(0, now() - before);
       }
       checkAbort();
     };
+    const flushProgress = () => {
+      if (!pendingProgress) return;
+      onProgress(pendingProgress);
+      pendingProgress = null;
+    };
+    const waitTimeline = async (index) => {
+      if (!timelineEnabled) return;
+      const deadline = targetDuration * 1000 * completedWeight / totalWeight;
+      while (now() - timelineStart - pausedMilliseconds < deadline || operationsSinceFrame >= 32) {
+        await waitUntilReady();
+        flushProgress();
+        if (typeof options.resetAdvanceClock === 'function') options.resetAdvanceClock();
+        await waitFrame();
+        operationsSinceFrame = 0;
+        checkAbort();
+      }
+      completedWeight += weights[index - startIndex] || 0;
+      operationsSinceFrame++;
+      stats.maxCatchUpBatch = Math.max(stats.maxCatchUpBatch || 0, operationsSinceFrame);
+    };
     const waitStep = async () => {
+      if (timelineEnabled) {
+        if (typeof options.advanceTick === 'function') {
+          await options.advanceTick();
+          if (typeof options.resetAdvanceClock === 'function') options.resetAdvanceClock();
+        }
+        return;
+      }
       for (let i = 0; i < framesPerStep; i++) {
         await waitUntilReady();
         await waitFrame();
@@ -309,7 +370,13 @@ class TilecraftStrokePlayer {
       if (registry && typeof registry.markPainted === 'function') registry.markPainted(index, index + 1);
       stats.points++;
       if (operation.kind === 'polygon-spot') stats.spots++;
-      onProgress(this._planProgress(plan, registry, index + 1, operation, stats));
+      const value = this._planProgress(plan, registry, index + 1, operation, stats);
+      if (timelineEnabled) {
+        value.timelineElapsed = Math.max(0, (now() - timelineStart - pausedMilliseconds) / 1000);
+        value.timelineTarget = targetDuration;
+      }
+      if (timelineEnabled) pendingProgress = value;
+      else onProgress(value);
     };
     const advanceFast = async () => {
       await options.advanceTick();
@@ -324,7 +391,7 @@ class TilecraftStrokePlayer {
     };
     const closeStroke = () => {
       if (activeSegment !== null) {
-        this.engine.endStroke();
+        if (this.engine.strokeActive !== false) this.engine.endStroke();
         activeSegment = null;
         onPaint();
       }
@@ -334,6 +401,7 @@ class TilecraftStrokePlayer {
       for (let index = startIndex; index < stopAt; index++) {
         nextIndex = index;
         await waitUntilReady();
+        await waitTimeline(index);
         const operation = plan.operations[index];
         if (registry && !registry.contains(index)) {
           if (pendingIndex !== null) {
@@ -414,7 +482,21 @@ class TilecraftStrokePlayer {
         markPainted(pendingIndex, plan.operations[pendingIndex]);
         pendingIndex = null;
       }
+      if (timelineEnabled) {
+        while (now() - timelineStart - pausedMilliseconds < targetDuration * 1000) {
+          await waitUntilReady();
+          flushProgress();
+          if (typeof options.resetAdvanceClock === 'function') options.resetAdvanceClock();
+          await waitFrame();
+          checkAbort();
+        }
+        flushProgress();
+      }
       closeStroke();
+      if (timelineEnabled) {
+        stats.targetDuration = targetDuration;
+        stats.actualDuration = Math.max(0, (now() - timelineStart - pausedMilliseconds) / 1000);
+      }
       return { stats, nextIndex, completed: nextIndex >= plan.operations.length };
     } finally {
       // endStroke() flushes the final live mailbox target. If cancellation
@@ -428,6 +510,7 @@ class TilecraftStrokePlayer {
         closeStroke();
       }
       if (typeof options.resetAdvanceClock === 'function') options.resetAdvanceClock();
+      flushProgress();
     }
   }
 

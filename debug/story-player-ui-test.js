@@ -32,6 +32,23 @@ const server = http.createServer((request, response) => {
     page.on('pageerror', (error) => errors.push(error.message));
     await page.goto(`http://127.0.0.1:${server.address().port}/index.html?debug=none`);
     await page.waitForFunction(() => window.__painter && window.__painter.storyPlaybackController);
+    assert.equal(await page.evaluate(() => window.__painter.storyPlaybackController.speed), 1,
+      'story playback defaults to 1x');
+
+    assert.equal(await page.locator('#save-button').textContent(), 'Save As…');
+    const pngExport = await page.evaluate(async () => {
+      const painter = window.__painter;
+      const blob = await painter.exportPngBlob();
+      return {
+        type: blob.type,
+        signature: [...new Uint8Array(await blob.arrayBuffer()).slice(0, 8)],
+        width: painter.paintingRectangle.width,
+        height: painter.paintingRectangle.height,
+      };
+    });
+    assert.equal(pngExport.type, 'image/png');
+    assert.deepEqual(pngExport.signature, [137, 80, 78, 71, 13, 10, 26, 10]);
+    assert.ok(pngExport.width > 0 && pngExport.height > 0, 'PNG export uses painting dimensions');
 
     assert.equal(await page.locator('#ui').getAttribute('data-collapsed'), 'true',
       'the app starts in compact mode');
@@ -392,6 +409,22 @@ const server = http.createServer((request, response) => {
     });
     assert.equal(await page.locator('#panel-body').evaluate((element) => element.inert), false,
       'story playback never makes paint controls inert');
+    await page.waitForFunction(() => window.__painter.engine.strokeActive);
+    const disabledTouch = await page.evaluate(async () => {
+      const painter = window.__painter;
+      painter.setManualPaintingEnabled(false);
+      await painter.onGestureStart({ pointerType: 'touch', button: 0, centerX: 200, centerY: 200, pressure: 0.5 });
+      painter.onGestureEnd({ pointerType: 'touch', centerX: 200, centerY: 200, pressure: 0.5 });
+      const result = {
+        state: painter.storyPlaybackController.state,
+        strokeActive: painter.engine.strokeActive,
+        error: painter.storyPlaybackController.error,
+      };
+      painter.setManualPaintingEnabled(true);
+      return result;
+    });
+    assert.deepEqual(disabledTouch, { state: 'playing', strokeActive: true, error: null },
+      'disabled touch cannot close a player-owned stroke or enter player-error');
     const manualTakeover = await page.evaluate(async () => {
       const painter = window.__painter;
       await painter.storyPlaybackController.yieldToManualInput();
@@ -400,7 +433,7 @@ const server = http.createServer((request, response) => {
       painter.brushY = 100;
       painter._beginPaintStroke(0.5, 'mouse');
       const manualStrokeStarted = painter.engine.strokeActive;
-      painter.engine.endStroke();
+      painter.onGestureEnd({ centerX: 100, centerY: 100 });
       return { state: painter.storyPlaybackController.state, storyStrokeClosed, manualStrokeStarted };
     });
     assert.deepEqual(manualTakeover, {

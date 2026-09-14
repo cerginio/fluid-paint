@@ -1,5 +1,13 @@
 const assert = require('node:assert/strict');
 const TilecraftStrokePlayer = require('../fluid-engine/tilecraft-stroke-player.js');
+
+for (const [operations, seconds] of [
+  [1, 5 / 3], [10, 2.87], [50, 5], [100, 6.35],
+  [1000, 14.03], [10000, 31.02], [40000, 50],
+]) {
+  assert.ok(Math.abs(TilecraftStrokePlayer.targetPlaySeconds(operations) - seconds) < 0.01,
+    `target duration anchor for ${operations} operations`);
+}
 const UnpaintedRangeRegistry = require('../app/unpainted-range-registry.js');
 
 const calls = [];
@@ -264,6 +272,76 @@ console.log('tilecraft stroke player: PASS (frame grouping with stable paint sta
     'story playback exposes its fixed brush-size correction rate');
   assert.equal(registry.pendingCount, 0);
   console.log('tilecraft plan navigation: PASS (frame ranges and no double paint)');
+
+  let virtualNow = 0;
+  let timelineStrokeActive = false;
+  const timelinePlayer = new TilecraftStrokePlayer({
+    get strokeActive() { return timelineStrokeActive; },
+    beginStroke() { timelineStrokeActive = true; },
+    strokeTo() {},
+    endStroke() { timelineStrokeActive = false; },
+  });
+  const timelinePlan = timelinePlayer.compile({
+    layers: [{
+      visible: true,
+      tileShape: 'polygon',
+      gridSize: 2,
+      tiles: Array.from({ length: 50 }, (_, index) => ({
+        x: index, y: 0, c: '#ff0000', f: 1,
+      })),
+    }],
+  }, { paintingRectangle: { left: 0, bottom: 0, width: 100, height: 100 } });
+  const timelineRegistry = new UnpaintedRangeRegistry(50);
+  const timelineResult = await timelinePlayer.playPlan(timelinePlan, {
+    registry: timelineRegistry,
+    targetDuration: 5,
+    now: () => virtualNow,
+    waitFrame: async () => { virtualNow += 1000 / 60; },
+  });
+  assert.equal(timelineResult.stats.points, 50, 'deadline scheduler preserves every operation');
+  assert.equal(timelineRegistry.pendingCount, 0);
+  assert.ok(virtualNow >= 5000 && virtualNow <= 5000 + 1000 / 60 + 0.001,
+    '50-operation virtual playback completes within one RAF of five seconds');
+  assert.ok(timelineResult.stats.maxCatchUpBatch <= 32, 'deadline catch-up stays bounded');
+  console.log('tilecraft deadline player: PASS (50 operations in five virtual seconds)');
+
+  let largeNow = 0;
+  let largeStrokeActive = false;
+  const largePlayer = new TilecraftStrokePlayer({
+    get strokeActive() { return largeStrokeActive; },
+    beginStroke() { largeStrokeActive = true; },
+    strokeTo() {},
+    endStroke() { largeStrokeActive = false; },
+  });
+  const largePlan = {
+    operations: Array.from({ length: 40000 }, (_, index) => ({
+      index,
+      kind: 'polygon-spot',
+      frameKey: 'frame:1',
+      groupKey: `spot:${index}`,
+      point: { x: 0, y: 0 },
+      pressure: 1,
+      brushSize: 1,
+      color: { space: 'pigment', channels: [1, 0, 0], alpha: 1 },
+      paintingRectangle: { left: 0, bottom: 0, width: 1, height: 1 },
+      resolutionScale: 1,
+    })),
+    groupRanges: [], frameRanges: [], layers: 1, skipped: 0,
+  };
+  const largeRegistry = new UnpaintedRangeRegistry(40000);
+  const largeResult = await largePlayer.playPlan(largePlan, {
+    registry: largeRegistry,
+    targetDuration: 50,
+    now: () => largeNow,
+    waitFrame: async () => { largeNow += 1000 / 60; },
+  });
+  assert.equal(largeResult.stats.points, 40000);
+  assert.equal(largeRegistry.pendingCount, 0);
+  assert.ok(largeNow >= 50000 && largeNow <= 50000 + 1000 / 60 + 0.001);
+  assert.ok(largeResult.stats.maxCatchUpBatch <= 32);
+  assert.equal(TilecraftStrokePlayer.targetPlaySeconds(40000) / 0.5, 100);
+  assert.equal(TilecraftStrokePlayer.targetPlaySeconds(40000) / 2, 25);
+  console.log('tilecraft deadline player: PASS (40,000 operations retained in 50 virtual seconds)');
 
   const abortCalls = [];
   const abortController = new AbortController();
