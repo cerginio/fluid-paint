@@ -1,51 +1,9 @@
-function pascalRow(n) {
-  var line = [1];
-  for (var k = 0; k < n; ++k) {
-    line.push(line[k] * (n - k) / (k + 1));
-  }
-  return line;
-}
-
-//width should be an odd number
-function makeBlurShader(width) {
-  var coefficients = pascalRow(width - 1 + 2);
-
-  //take the 1s off the ends
-  coefficients.shift();
-  coefficients.pop();
-
-  var normalizationFactor = 0;
-  for (var i = 0; i < coefficients.length; ++i) {
-    normalizationFactor += coefficients[i];
-  }
-
-  var shader = [
-    'precision highp float;',
-
-    'uniform sampler2D u_input;',
-
-    'uniform vec2 u_step;',
-    'uniform vec2 u_resolution;',
-
-    'void main () {',
-    'vec4 total = vec4(0.0);',
-
-    'vec2 coordinates = gl_FragCoord.xy / u_resolution;',
-    'vec2 delta = u_step / u_resolution;',
-  ].join('\n');
-
-  shader += '\n';
-
-  for (var i = 0; i < width; ++i) {
-    var offset = i - (width - 1) / 2;
-
-    shader += 'total += texture2D(u_input, coordinates + delta * ' + offset.toFixed(1) + ') * ' + coefficients[i].toFixed(1) + '; \n';
-  }
-
-  shader += 'gl_FragColor = total / ' + normalizationFactor.toFixed(1) + ';\n }';
-
-  return shader;
-}
+// pascalRow() and makeBlurShader() were removed in Phase 7.
+//
+// They generated the separable Gaussian used to frost the canvas behind the
+// tool panel. The panel is a DOM element now and its blur is a CSS
+// backdrop-filter, so the generator, its two GL passes and the shader it built
+// at startup all have no caller. Nothing else used either function.
 
 
 function hexToRgba01(hex, a = 1) {
@@ -121,22 +79,10 @@ function mix(a, b, t) {
   return (1.0 - t) * a + t * b;
 }
 
-//the texture is always updated to be (paintingWidth x paintingHeight) x resolutionScale
-function Snapshot(texture, paintingWidth, paintingHeight, resolutionScale) {
-  this.texture = texture;
-  this.paintingWidth = paintingWidth;
-  this.paintingHeight = paintingHeight;
-  this.resolutionScale = resolutionScale;
-}
-
-// Keep Snapshot helpers prototype-based
-Snapshot.prototype.getTextureWidth = function () {
-  return Math.ceil(this.paintingWidth * this.resolutionScale);
-};
-Snapshot.prototype.getTextureHeight = function () {
-  return Math.ceil(this.paintingHeight * this.resolutionScale);
-};
-
+// Snapshot moved into the engine as PaintSnapshot in Phase 5: the host holds
+// the handles and decides how many, but only the engine can allocate one, since
+// the texture must match the paint texture type the capability probe chose.
+// See fluid-engine/index.js.
 
 function cursorForResizingSide(side) {
   if (side === ResizingSide.LEFT || side === ResizingSide.RIGHT) {
@@ -154,31 +100,69 @@ function cursorForResizingSide(side) {
   }
 }
 
-const shaderFiles = [
-  'shaders/splat.vert', 'shaders/splat.frag',
-  'shaders/fullscreen.vert',
-  'shaders/advect.frag',
-  'shaders/divergence.frag',
-  'shaders/jacobi.frag',
-  'shaders/subtract.frag',
-  'shaders/resize.frag',
-  
-  'shaders/rectborder.frag',
+// Two shader trees, each with its own base path. The names below stay the keys
+// that every shaderSources[...] lookup uses, so a tree can be relocated by
+// editing a base path and nothing else.
+//
+// The split is the Phase 4 engine/app boundary made visible: ENGINE_SHADERS are
+// what the simulation and the painting render need, APP_SHADERS are the UI
+// chrome that a different host would not want. fullscreen.vert is deliberately
+// on the engine side and used by both -- the app hosts the engine, so depending
+// on an engine asset is the right direction for that arrow.
+const ENGINE_SHADER_BASE_PATH = 'fluid-engine/';
 
-  'shaders/project.frag',
-  'shaders/distanceconstraint.frag',
-  'shaders/planeconstraint.frag',
-  'shaders/bendingconstraint.frag',
-  'shaders/setbristles.frag',
-  'shaders/updatevelocity.frag',
+const APP_SHADER_BASE_PATH = 'app/';
 
-  'shaders/brush.vert', 'shaders/brush.frag',
-  'shaders/painting.vert', 'shaders/painting.frag',
-  'shaders/picker.vert', 'shaders/picker.frag',
-  'shaders/panel.frag',
-  'shaders/output.frag',
+const APP_SHADERS = [
+  // 'shaders/panel.frag' was here until Phase 7; the panel is DOM now.
+  // 'shaders/picker.vert' / 'shaders/picker.frag' went the same way in Phase 8:
+  // the colour wheel is iro.js DOM, so the hue ring, the saturation/value square
+  // and the alpha slider are no longer drawn in GL. Two of the four remaining
+  // app shaders are the painting's own shadow and rect outline, which are
+  // presentation of the PAINTING rather than chrome -- so this list is not on
+  // its way to empty.
   'shaders/shadow.frag',
-]
+  'shaders/rectborder.frag',
+];
+
+/*
+ * The two trees to load, paired each with its own base path.
+ *
+ * A FUNCTION rather than the array constant it was until Phase 9, and the
+ * reason is load order, not taste. The engine's manifest now lives in the
+ * engine as `FluidEngine.SHADER_FILES` -- building a second host showed that
+ * hosting the engine otherwise means copying an inventory of engine internals
+ * into every host, which goes stale the moment a pass is added. But this file
+ * is loaded BEFORE fluid-engine/index.js (there is no module system; see
+ * index.html and gulpfile.js), so `FluidEngine` does not exist at the top level
+ * here. Reading it inside a function defers the lookup to call time, by which
+ * point every script has run.
+ *
+ * Do not "simplify" this back to a top-level const. It would be `undefined` at
+ * evaluation, and the failure -- a tree whose file list is undefined -- surfaces
+ * as shaders compiled from nothing, deep inside a constructor.
+ *
+ * Only the BASE PATHS are the app's, because only a host knows where it serves
+ * the files from. That is the split: the engine says which, the host says where.
+ */
+function shaderTrees() {
+  return [
+    { files: FluidEngine.SHADER_FILES, basePath: ENGINE_SHADER_BASE_PATH },
+    { files: APP_SHADERS, basePath: APP_SHADER_BASE_PATH },
+  ];
+}
+
+function loadShaderTrees(trees, onLoaded) {
+  const merged = {};
+  let remaining = trees.length;
+  for (const tree of trees) {
+    WrappedGL.loadTextFiles(tree.files, (sources) => {
+      Object.assign(merged, sources);
+      remaining -= 1;
+      if (remaining === 0) onLoaded(merged);
+    }, tree.basePath);
+  }
+}
 
 const CONSTANT_NAMES = [
   'ACTIVE_ATTRIBUTES',

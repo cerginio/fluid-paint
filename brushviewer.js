@@ -71,10 +71,19 @@ function makeYRotationMatrix(m, angle) {
 }
 
 
-// h in [0,1], s,v in [0,1]
-function fixHueForPreview(h) {
-    return 1.0 - h; // перевертання: CW ↔ CCW
-}
+/*
+ * REMOVED in Phase 10 -- kept here only as a note, with no callers.
+ *
+ * This was `return 1.0 - h`, applied to the preview's hue before hsvToRgb().
+ * It was a hand-tuned compensation for the additive/subtractive mismatch: the
+ * preview was drawn with hsvToRgb (light) while the paint went through
+ * hsvToRyb + the pigment cube, and inverting the hue got part of the wheel
+ * looking roughly right at the expense of the rest.
+ *
+ * paint.js now calls hsvToPigmentRgb() (app/ui/ryb.js), which is the actual
+ * conversion, so no correction is needed. Do NOT reinstate this on top of it --
+ * applying both puts the preview back out by exactly the amount it corrects.
+ */
 
 // --- class ---
 class BrushViewer {
@@ -104,7 +113,10 @@ class BrushViewer {
         );
     }
 
-    draw(brushX, brushY, brush, color) {
+    // `bristles` is the engine's bristle geometry (see
+    // FluidEngine.getBristleGeometry) rather than the Brush itself: this is a
+    // chrome overlay, and it needs six GL objects, not the simulation.
+    draw(brushX, brushY, bristles, color) {
         const wgl = this.wgl;
 
         const xRotationMatrix = new Float32Array(16);
@@ -141,19 +153,20 @@ class BrushViewer {
             .createDrawState()
             .bindFramebuffer(null)
             .viewport(this.left, this.bottom, this.width, this.height)
-            .vertexAttribPointer(brush.brushTextureCoordinatesBuffer, 0, 2, wgl.FLOAT, wgl.FALSE, 0, 0)
+            .vertexAttribPointer(bristles.coordinatesBuffer, 0, 2, wgl.FLOAT, wgl.FALSE, 0, 0)
             .useProgram(this.brushProgram)
-            .bindIndexBuffer(brush.brushIndexBuffer)
+            .bindIndexBuffer(bristles.indexBuffer)
             // .uniform4f('u_color', 0, 0, 1, 1.0)
             .uniform4f('u_color', color[0], color[1], color[2], 1.0)
             .uniformMatrix4fv('u_projectionViewMatrix', false, projectionViewMatrix)
+            .uniform3f('u_displayOffset', ...(bristles.displayOffset || [0, 0, 0]))
             .enable(wgl.DEPTH_TEST)
-            .uniformTexture('u_positionsTexture', 0, wgl.TEXTURE_2D, brush.positionsTexture);
+            .uniformTexture('u_positionsTexture', 0, wgl.TEXTURE_2D, bristles.positionsTexture);
 
         wgl.drawElements(
             brushDrawState,
             wgl.LINES,
-            (brush.indexCount * brush.bristleCount) / brush.maxBristleCount,
+            (bristles.indexCount * bristles.bristleCount) / bristles.maxBristleCount,
             wgl.UNSIGNED_SHORT,
             0
         );

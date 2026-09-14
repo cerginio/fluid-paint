@@ -7,7 +7,74 @@ const InteractionMode = {
 
 const PaintState = {
     showPanel: true,
+
+    // devicePixelRatio handling, overridable from the URL so a device can be
+    // checked both ways without a rebuild:
+    //
+    //   ?dpr=1     pin the ratio to 1 -- the pre-Phase-2 behaviour
+    //   ?dpr=3     raise the clamp (the default cap is 2)
+    //
+    // The cap exists because the simulation is fill-rate bound and its cost
+    // scales with the square of the ratio.
+    pixelRatioEnabled: true,
+    maxPixelRatio: 2,
+    // CSS capability media may lower the cap on coarse mobile devices. A URL
+    // override disables that policy so diagnostics can still force any DPR.
+    useResponsivePixelRatioCap: true,
+
+    // Hard ceiling on GPU memory for the resolution-dependent render targets.
+    //
+    // maxPaintingWidth already clamps each DIMENSION against MAX_TEXTURE_SIZE,
+    // but nothing clamped total memory -- and everything here scales with the
+    // painting's AREA, so a ratio of 2 costs four times as much, not twice.
+    //
+    // At this resolution the app holds 7 simulator buffers plus HISTORY_SIZE
+    // undo snapshots -- 22 float RGBA textures in all, at 16 bytes a texel.
+    // The engine owns that arithmetic now; see
+    // FluidEngine.estimateRenderTargetBytes(). A 1280x800 window at ratio 2 gives a 2520x1560
+    // painting, which is 3.93 Mtexels, so even at quality Low that is ~1.3 GB.
+    // The driver answers GL_OUT_OF_MEMORY and drops the context -- a black
+    // canvas, not a slow one -- which is why this is a hard limit rather than
+    // something to profile later.
+    //
+    // When the budget binds, the simulation scale degrades (below quality Low
+    // if it has to). The painting keeps the size the user asked for and the
+    // undo history keeps its depth; what gives is simulation fidelity, which
+    // is the one of the three that degrades gracefully.
+    //
+    // 1 GB is chosen so that the pre-DPR behaviour is untouched -- a 1280x800
+    // window at quality High needs 712 MB and stays exactly as it was -- while
+    // a ratio-2 window degrades instead of losing the context. Note this limit
+    // was always reachable without DPR: a 2560x1440 window at quality High
+    // asks for 2.6 GB today. DPR did not create the defect, it made it
+    // reachable on an ordinary window.
+    maxRenderTargetBytes: 1024 * 1024 * 1024,
 };
+
+// The render-target budget arithmetic moved into the engine in Phase 5 --
+// BYTES_PER_TEXEL and the count of resolution-sized simulator targets are
+// facts about the simulation, and the app had to read simulation.js to know
+// the second one. See FluidEngine.maxResolutionScaleForBudget().
+
+(function parsePixelRatioOverride() {
+    if (typeof window === 'undefined') return;
+    const raw = new URLSearchParams(window.location.search).get('dpr');
+    if (raw === null) return;
+
+    const value = Number.parseFloat(raw);
+    if (!Number.isFinite(value) || value <= 0) {
+        console.warn('[viewport] ignoring non-numeric dpr:', raw);
+        return;
+    }
+
+    if (value === 1) {
+        PaintState.pixelRatioEnabled = false;
+    } else {
+        PaintState.maxPixelRatio = value;
+    }
+    PaintState.useResponsivePixelRatioCap = false;
+    console.log('[viewport] dpr override:', raw);
+})();
 
 const ResizingSide = {
     NONE: 0,
@@ -21,10 +88,13 @@ const ResizingSide = {
     BOTTOM_RIGHT: 8
 };
 
-const ColorModel = {
-    RYB: 0,
-    RGB: 1
-};
+// ColorModel is GONE (Phase 8/9). It was this app's private name for a value it
+// hands straight to the engine's renderToTexture(), while the engine compared
+// against a literal of its own -- two declarations of one number, in different
+// files, with a silent failure mode (anything not exactly RGB composites as
+// RYB). It is now FluidEngine.COLOR_MODEL, published by the code that consumes
+// it, and index.js asserts at load that the two halves still agree.
+// See docs/API-FINDINGS.md.
 
 
 const QUALITIES = [
@@ -54,8 +124,46 @@ const MAX_BRISTLE_COUNT = 100;
 const MIN_BRISTLE_COUNT = 10;
 const MIN_BRUSH_SCALE = 5;
 const MAX_BRUSH_SCALE = 75;
-const BRUSH_HEIGHT = 3.0; //how high the brush is over the canvas - this is scaled with the brushScale
+// Host-controlled therapeutic modes may deliberately use a broader gesture
+// than the general-purpose Fluid UI. Keep the built-in sliders at their
+// original range while allowing the embed API to reach 50% farther.
+const MAX_EXTERNAL_BRUSH_SCALE = MAX_BRUSH_SCALE * 1.5;
+/*
+ * Bristle footprints offered in the UI, in panel order.
+ *
+ * `shape: null` is the round default and must stay first -- it is the brush
+ * every existing painting was made with, and the shader's round path is
+ * bit-identical to the pre-shape engine.
+ *
+ * Sides stop at 6 rather than the engine's 8: splatRadius rounds the corners,
+ * so a 7- or 8-gon is not visually distinguishable from a circle (measured
+ * n-th harmonic 0.018 for an octagon against a 0.005 round baseline -- see
+ * docs/FLUID-ENGINE-API-ZERO-TO-HERO.md). Offering choices a user cannot see
+ * would make the control feel broken.
+ */
+const BRISTLE_SHAPES = [
+  { name: 'Round', shape: null },
+  { name: 'Tri', shape: { sides: 3 } },
+  { name: 'Quad', shape: { sides: 4 } },
+  { name: 'Pent', shape: { sides: 5 } },
+  { name: 'Hex', shape: { sides: 6 } },
+];
+const INITIAL_BRISTLE_SHAPE = 0; // Round
+
+const BRUSH_HEIGHT = 2.0; //how high the brush is over the canvas - this is scaled with the brushScale
 const Z_THRESHOLD = 0.13333; //this is scaled with the brushScale
+
+// A two-finger gesture emits BOTH pan2 and pinch; the dispatcher only withholds
+// a pinch whose scale is exactly 1, so span jitter makes a pure drag report a
+// scale a hair off 1. Below this much scale change a two-finger gesture counts
+// as a drag, not a resize. See Paint.onGesturePinch().
+const PINCH_SCALE_DEADZONE = 0.02;
+
+// Floor for pen-pressure brush scaling (Phase 6). A pen that reports 0 -- which
+// some report on the first sample of a stroke -- would otherwise open the
+// stroke with a zero-height brush and paint nothing at the very moment of
+// contact. Only pens are scaled at all; see Paint._pressureScale().
+const MIN_PRESSURE_SCALE = 0.15;
 
 
 //splatting parameters
@@ -71,32 +179,31 @@ const THICK_MIN_ALPHA = 0.002;
 const THICK_MAX_ALPHA = 0.025;
 
 
-//panel is aligned with the top left
-const PANEL_WIDTH = 300;
-const PANEL_HEIGHT = 580;
-const PANEL_BLUR_SAMPLES = 13;
-const PANEL_BLUR_STRIDE = 8;
+// PANEL_WIDTH/PANEL_HEIGHT/PANEL_BLUR_* are gone (Phase 7). The panel is a DOM
+// element laid out by app/layout.css, so its size is a CSS property and there
+// is nothing left here to keep in sync with it -- which is the point: two
+// declarations of one dimension is how the old layout drifted.
+//
+// COLOR_PICKER_LEFT/TOP are GONE (Phase 8). They were the fallback placement
+// for the GL picker, which had to be told where to draw itself. The picker is
+// an element inside #color-picker-slot now, so the document places it and there
+// is no offset left to fall back to.
 
-const COLOR_PICKER_LEFT = 20;
-const COLOR_PICKER_TOP = 523;
-
-const RESIZING_RADIUS = 20;
-const RESIZING_FEATHER_SIZE = 8; //in pixels 
+const RESIZING_RADIUS_CSS = 20;   // CSS pixels -- convert with viewport.cssLengthToScreen
 
 //box shadow parameters
 const BOX_SHADOW_SIGMA = 5.0;
 const BOX_SHADOW_WIDTH = 10.0;
+// The PAINTING's shadow, still drawn by GL: it sits on the canvas background
+// under the painting, which is presentation of the painting rather than chrome.
+// PANEL_SHADOW_ALPHA went with the panel -- that shadow is a CSS box-shadow.
 const PAINTING_SHADOW_ALPHA = 0.5;
-const PANEL_SHADOW_ALPHA = 1.0;
 
-//rendering parameters
-const BACKGROUND_GRAY = 0.7;
-const NORMAL_SCALE = 7.0;
-const ROUGHNESS = 0.075;
-const F0 = 0.05;
-const SPECULAR_SCALE = 0.5;
-const DIFFUSE_SCALE = 0.15;
-const LIGHT_DIRECTION = [0, 1, 1];
+// The painting's rendering parameters -- background grey, normal scale,
+// roughness, F0, specular/diffuse scale, light direction and the resize
+// feather -- moved into fluid-engine/renderer.js in Phase 4. They describe how
+// the engine's wet paint reflects light, so they belong with the draw call that
+// uses them, not with the app's layout numbers above.
 
 
 const HISTORY_SIZE = 15; //number of snapshots we store - this should be number of reversible actions + 1

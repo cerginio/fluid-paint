@@ -8,41 +8,274 @@
     <meta name="description" content="Fluid paint simulation">
 
     <link href='https://fonts.googleapis.com/css?family=Open+Sans:400,300,600,700,800' rel='stylesheet' type='text/css'>
-    <link rel="stylesheet" href="paint.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon-64x64.png">
+    <link rel="stylesheet" href="app/layout.css">
 </head>
 
 <body>
+    <!--
+      Phase 7: the chrome is real DOM rather than pixels drawn into the canvas.
+      The canvas fills #canvas-cell (sized by a ResizeObserver, not by the
+      window), and #ui floats OVER it and is dragged where the user wants -- so
+      the painting never loses width to chrome.
+    -->
     <script type="text/template" id="main">
-    <div id="ui">
-        <div id="clear-button" class="button">Clear</div>
-        <a id="save-button" class="button">Save</a>
-        <div class="control-label">Quality</div>
-        <div class="buttons" id="qualities"></div>
-        <div style="clear:both"></div>
-        <div class="control-label">Color Mode</div>
-        <div class="buttons" id="models"></div>
-        <div style="clear:both"></div>
-        <div class="control-label">Paint Fluidity</div>
-        <div id="fluidity-slider" class="slider"></div>
-        <div class="control-label">Bristle Count</div>
-        <div id="bristles-slider" class="slider"></div>
-        <div class="control-label">Brush Size</div>
-        <div id="size-slider" class="slider"></div>
-        <div class="control-label">Paint Color</div>
-        <div id="undo-button" class="button">Undo</div>
-        <div id="redo-button" class="button">Redo</div>
+    <div id="canvas-cell"></div>
+
+    <!--
+      The floating tool panel. It sits OVER the canvas and is dragged by its
+      grip, so the painting never loses width to chrome -- the Phase 6 retest
+      found a docked column costs a phone too much of the picture.
+
+      #panel-bar is always visible and is the entire UI when collapsed:
+
+          [-----*------]  :::  [ |||||||||||| ]
+           brush size   grip     hue stripe
+
+      Those are the two controls a painter changes mid-stroke. Everything else
+      lives in #panel-body, which the grip toggles.
+    -->
+    <div id="ui" data-collapsed="true" hidden>
+        <div id="panel-bar">
+            <div id="bar-size-slider" class="slider" data-fluid-ui-feature="brush-size"></div>
+            <div id="panel-grip" title="Drag to move, tap to collapse">
+                <span></span><span></span><span></span>
+            </div>
+            <div id="bar-hue-stripe" data-fluid-ui-feature="color-picker"><div class="handle"></div></div>
+            <button id="panel-extension-toggle" type="button"
+                    aria-expanded="false" aria-controls="panel-extension"
+                    title="Show additional tools">+</button>
+        </div>
+
+        <div id="panel-body">
+            <div class="panel-column panel-column-controls">
+                <div class="control-label" data-fluid-ui-feature="brush-options">Paint Fluidity</div>
+                <div id="fluidity-slider" class="slider" data-fluid-ui-feature="brush-options"></div>
+                <div class="control-label" data-fluid-ui-feature="brush-options">Bristle Count</div>
+                <div id="bristles-slider" class="slider" data-fluid-ui-feature="brush-options"></div>
+                <div class="control-label" data-fluid-ui-feature="brush-size">Brush Size</div>
+                <div id="size-slider" class="slider" data-fluid-ui-feature="brush-size"></div>
+                <div class="control-label" data-fluid-ui-feature="brush-options">Bristle Shape</div>
+                <div class="buttons" id="bristle-shapes" data-fluid-ui-feature="brush-options"></div>
+                <div class="control-label" data-fluid-ui-feature="brush-options">Quality</div>
+                <div class="buttons" id="qualities" data-fluid-ui-feature="brush-options"></div>
+                <div class="panel-actions panel-history-actions" data-fluid-ui-feature="state-bake">
+                    <div id="undo-button" class="button">Undo</div>
+                    <div id="redo-button" class="button">Redo</div>
+                </div>
+                <div class="panel-bottom-controls">
+                    <div class="panel-actions panel-document-actions" data-fluid-ui-feature="state-bake">
+                        <div id="clear-button" class="button">Clear</div>
+                        <button id="save-button" class="button" type="button">Save As…</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel-column panel-column-color" data-fluid-ui-feature="color-picker">
+                <!-- The iro.js wheel mounts HERE (Phase 8). It is DOM content,
+                     so the two-column layout can size it directly. -->
+                <div id="color-picker-slot">
+                    <div class="color-wheel-stage">
+                        <div id="color-picker-widget"></div>
+                        <div class="color-wheel-labels" aria-live="polite">
+                            <button id="paint-color-white" class="adhoc-color" type="button"
+                                    aria-label="Use white" aria-pressed="false">#fff</button>
+                            <button id="paint-color-black" class="adhoc-color" type="button"
+                                    aria-label="Use black" aria-pressed="false">#000</button>
+                            <div class="color-code-readout">
+                                <output id="paint-color-hex" role="button" tabindex="0"
+                                        aria-label="Copy paint color" title="Copy paint color">#000000</output>
+                                <output id="paint-color-alpha" title="Alpha channel">CC</output>
+                            </div>
+                            <span id="paint-color-model">RYB</span>
+                        </div>
+                    </div>
+                    <div class="buttons" id="models" data-fluid-ui-feature="colors-options"></div>
+
+                </div>
+            </div>
+        </div>
+
+        <section id="panel-extension" hidden data-collapsed="false" data-has-story="false"
+                 aria-label="Story tools">
+            <header class="panel-extension-header">
+                <div id="panel-extension-grip" role="button" tabindex="0"
+                     aria-expanded="true" aria-controls="story-file-page story-player-page bake-page"
+                     aria-label="Drag Story tools or tap to collapse"
+                     title="Drag to move, tap to collapse">
+                    <span></span><span></span><span></span>
+                </div>
+                <div class="panel-extension-tabs" role="tablist" aria-label="Story tools">
+                    <button id="story-file-tab" type="button" role="tab"
+                            data-extension-tab="file" aria-selected="true"
+                            aria-controls="story-file-page">File</button>
+                    <button id="story-player-tab" type="button" role="tab"
+                            data-extension-tab="player" aria-selected="false" tabindex="-1"
+                            aria-controls="story-player-page">Player</button>
+                    <button id="bake-tab" type="button" role="tab"
+                            data-extension-tab="bake" aria-selected="false" tabindex="-1"
+                            aria-controls="bake-page">State</button>
+                </div>
+                <button id="panel-extension-close" type="button"
+                        aria-label="Hide story tools">×</button>
+            </header>
+
+            <div id="story-file-page" class="panel-extension-page"
+                 role="tabpanel" tabindex="0" aria-labelledby="story-file-tab"
+                 data-extension-page="file">
+                <input id="story-file-input" type="file"
+                       accept=".json,.png,application/json,image/png" hidden>
+                <button id="story-file-dropzone" class="story-dropzone" type="button">
+                    <span class="story-drop-icon" aria-hidden="true">⇧</span>
+                    <strong>Drop Story JSON or PNG</strong>
+                    <span>or choose a local file</span>
+                    <small>.json / .png · max 25 MB</small>
+                </button>
+                <div id="story-file-status" class="story-status" aria-live="polite"></div>
+                <section id="story-background-card" class="story-background-card" hidden>
+                    <div>
+                        <strong>Canvas background</strong>
+                        <span id="story-background-name"></span>
+                        <small id="story-background-meta"></small>
+                    </div>
+                    <button id="story-remove-background" type="button">Remove background</button>
+                </section>
+                <section id="story-file-summary" class="story-file-card" hidden>
+                    <div class="story-file-title">
+                        <span class="story-success" aria-hidden="true">✓</span>
+                        <div>
+                            <strong id="story-file-name"></strong>
+                            <small id="story-file-size"></small>
+                        </div>
+                    </div>
+                    <dl class="story-summary-grid">
+                        <div><dt>Content</dt><dd id="story-file-counts"></dd></div>
+                        <div><dt>Items</dt><dd id="story-file-items"></dd></div>
+                        <div><dt>Bounds</dt><dd id="story-file-bounds"></dd></div>
+                        <div><dt>Fit</dt><dd>Contain</dd></div>
+                    </dl>
+                    <p id="story-file-warnings" class="story-warning" hidden></p>
+                    <div class="story-actions">
+                        <button id="story-replace-file" type="button">Replace file</button>
+                        <button id="story-remove-file" type="button">Remove</button>
+                    </div>
+                    <button id="story-open-player" class="story-primary story-wide" type="button">
+                        Open Player →
+                    </button>
+                </section>
+            </div>
+
+            <div id="story-player-page" class="panel-extension-page"
+                 role="tabpanel" tabindex="0" aria-labelledby="story-player-tab"
+                 data-extension-page="player" hidden>
+                <div id="story-player-empty" class="story-empty">
+                    <strong>No story loaded</strong>
+                    <p>Load a Tilecraft JSON file to enable playback.</p>
+                    <button id="story-player-choose-file" class="story-primary" type="button">
+                        Choose file
+                    </button>
+                </div>
+
+                <div id="story-player-content" hidden>
+                    <strong id="story-player-file-name" class="story-player-file"></strong>
+                    <div id="story-player-status" class="story-status" role="status" aria-live="polite">Ready.</div>
+
+                    <div id="story-player-progress" class="story-progress" role="progressbar"
+                         aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                        <div id="story-player-progress-fill"></div>
+                    </div>
+                    <div id="story-player-coverage" class="story-progress-copy">0 / 0 operations</div>
+
+                    <nav class="story-boundary-navigation" aria-label="Story position">
+                        <output id="story-playhead-label">Frame — · Group —</output>
+                        <button id="story-previous-frame" type="button"
+                                aria-label="Previous unpainted frame" title="Previous unpainted frame">⏮ Frame</button>
+                        <button id="story-next-frame" type="button">Frame ⏭</button>
+                    </nav>
+
+                    <div class="story-runtime-controls">
+                        <label class="story-field story-speed-field">
+                            <span>Speed</span>
+                            <select id="story-speed">
+                                <option value="0.25">0.25×</option>
+                                <option value="0.5">0.5×</option>
+                                <option value="1">1×</option>
+                                <option value="2">2×</option>
+                                <option value="4">4×</option>
+                                <option value="8" selected>8×</option>
+                                <option value="16">16×</option>
+                            </select>
+                        </label>
+                        <label class="story-thickness-field">
+                            <span>Thickness <output id="story-thickness-value">1.00×</output></span>
+                            <input id="story-thickness" type="range"
+                                   min="0.1" max="1.2" step="0.05" value="1">
+                        </label>
+                    </div>
+
+                    <fieldset id="story-canvas-policy" class="story-policy">
+                        <legend>Paint onto canvas</legend>
+                        <label><input type="radio" name="story-canvas" value="replace" checked> Replace current painting</label>
+                        <label><input type="radio" name="story-canvas" value="overlay"> Add over current painting</label>
+                    </fieldset>
+
+                    <div id="story-player-gaps" class="story-callout" hidden>
+                        <strong>Unpainted ranges remain</strong>
+                        <button id="story-paint-remaining" class="story-primary" type="button">Paint earliest remaining</button>
+                        <button id="story-keep-result" type="button">Keep result</button>
+                    </div>
+
+                    <div id="story-stop-decision" class="story-callout" hidden>
+                        <strong id="story-result-decision-title">Keep the partial painting?</strong>
+                        <button id="story-restore-baseline" class="story-primary" type="button">Restore canvas</button>
+                        <button id="story-keep-partial" type="button">Keep partial</button>
+                    </div>
+
+                    <footer class="story-transport">
+                        <button id="story-restart" type="button" disabled>Restart</button>
+                        <button id="story-play-pause" class="story-primary" type="button">Play</button>
+                        <button id="story-stop" type="button" disabled>Stop</button>
+                    </footer>
+                </div>
+            </div>
+
+            <div id="bake-page" class="panel-extension-page bake-page"
+                 role="tabpanel" tabindex="0" aria-labelledby="bake-tab"
+                 data-extension-page="bake" hidden>
+                <div class="bake-card">
+                    <strong>Bake current painting</strong>
+                    <p>Turn the visible painting into a fixed bitmap background, then start with an empty wet-paint layer.</p>
+                    <ul>
+                        <li>Natural/Digital and lighting are fixed into the background.</li>
+                        <li>Wet paint motion stops.</li>
+                        <li>Undo and Redo history is permanently reset.</li>
+                    </ul>
+                    <button id="bake-button" class="story-primary story-wide" type="button">
+                        Bake
+                    </button>
+                    <div id="bake-status" class="story-status" role="status" aria-live="polite"></div>
+                </div>
+            </div>
+        </section>
     </div>
-    <!-- <div id="instructions">
-        <span>Click and hold</span> to paint <br/>
-        <span>Scroll</span> to change brush size<br/>
-        <span>Space + drag</span> to pan<br/>
-        <span>Drag edges</span> to resize canvas
-    </div> -->
-    <div id="footer">
+
+    <!--
+      Debug facility toggles, pinned to two screen corners rather than put in
+      the panel. They are deliberately OUTSIDE #ui: the panel is draggable and
+      collapsible, and a switch for an overlay should not disappear with it or
+      move when the panel moves. Each button constructs or destroys its facility
+      -- see app/ui/debug-toggles.js on why hiding would not be equivalent.
+
+      Starting state comes from ?debug= (debug/debug-flags.js), not from markup.
+    -->
+    <div id="debug-toggle-tr" class="debug-toggle-corner" data-fluid-ui-full-only></div>
+    <div id="debug-toggle-br" class="debug-toggle-corner" data-fluid-ui-full-only></div>
+
+    <div id="footer" data-fluid-ui-full-only>
         <a href="http://david.li">david.li</a> | <a href="http://github.com/dli/paint">Origin code</a>
     </div>
-        
-    <div id="panel-button" class="button">Panel</div>
 
     </script>
     <script type="text/template" id="no-support">
@@ -52,62 +285,265 @@
         </div>
     </script>
 
-    <div id="placeholder"></div>
+    <div id="app">
+        <div id="placeholder"></div>
+    </div>
 
-    <script src="wrappedgl.js"></script>
+    <script src="debug/deterministic-rng.js"></script>
+    <script src="fluid-engine/gl/glsl3.js"></script>
+    <script src="debug/debug-flags.js"></script>
+    <script src="debug/painting-rect-overlay.js"></script>
+    <script src="app/focus-overlay.js"></script>
+    <script src="debug/gpu-profiles.js"></script>
+    <script src="debug/texture-selftest.js"></script>
+    <script src="debug/device-diag.js"></script>
+    <script src="fluid-engine/gl/wrappedgl.js"></script>
     <script src="common.js"></script>
     <script src="debug.js"></script>
     <script src="utilities.js"></script>
     <script src="rectangle.js"></script>
-    <script src="brush.js"></script>
-    <script src="simulator.js"></script>
-    <script src="colorpicker.js"></script>
-    <script src="slider.js"></script>
-    <script src="buttons.js"></script>
+    <script src="viewport.js"></script>
+    <script src="fluid-engine/brush.js"></script>
+    <script src="fluid-engine/simulation.js"></script>
+    <script src="fluid-engine/renderer.js"></script>
+    <script src="fluid-engine/index.js"></script>
+    <script src="fluid-engine/tilecraft-stroke-player.js"></script>
+    <script src="vendor/tilecraft/message-api.js"></script>
+    <script src="vendor/tilecraft/fluid-model.js"></script>
+    <script src="vendor/tilecraft/fluid-gamifier-bridge.js"></script>
+    <script src="app/unpainted-range-registry.js"></script>
+    <script src="app/story-file-loader.js"></script>
+    <script src="app/story-playback-controller.js"></script>
+    <!-- colorpicker.js is GONE (Phase 8): the GL hue ring, its two programs and
+         its hand-written hit tests are replaced by the iro.js wheel below. -->
+    <!-- ryb.js BEFORE iro.js, not merely before color.js: iro builds its hue
+         ring gradients through the pigment cube at MODULE LOAD, so the cube has
+         to exist by then. Loaded the other way round the ring silently falls
+         back to RGB while every other surface is pigment. -->
+    <script src="app/ui/ryb.js"></script>
+    <script src="lib/iro.js"></script>
+    <script src="app/ui/color.js"></script>
+    <script src="app/ui/sliders.js"></script>
+    <script src="app/ui/buttons.js"></script>
+    <script src="app/ui/debug-toggles.js"></script>
     <script src="brushviewer.js"></script>
+    <script src="app/ui/pointer-dispatcher.js"></script>
+    <script src="app/ui/preset-api.js"></script>
+    <script src="app/ui/panel.js"></script>
+    <script src="app/ui/story-tools.js"></script>
     <script src="paint-setup.js"></script>
     <script src="paint.js"></script>
+    <script src="app/fluid-control-api.js"></script>
+    <script src="app/fluid-embed-bootstrap.js"></script>
 
-    <script>document.addEventListener('DOMContentLoaded', () => {
+    <script>
+        // ---- globals ----
+        let presenter;             // will be assigned after DOM is ready
+        let debugCanvas;           // global handle to the debug canvas
+        let debugCtx2d;            // (optional) its 2D context
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // The main app canvas. It is created and given a GL context BEFORE
+            // the layout template is injected, because the capability probes
+            // below decide whether the app renders at all -- and their answer
+            // decides which template gets injected. It is moved into
+            // #canvas-cell once that element exists (Phase 7); until then it
+            // stays out of the document flow so it cannot size <body>.
             const canvas = document.createElement('canvas');
-            const wgl = WrappedGL.create(canvas);
+            canvas.style.position = 'absolute';
             document.body.appendChild(canvas);
-            // PATCH#2: Ensure CSS size exists; style as you like:
-            // if (!canvas.style.width) canvas.style.width = '100vw';
-            // if (!canvas.style.height) canvas.style.height = '100vh';
-            // const doResize = () => resizeCanvasToCSS(canvas, wgl.gl);
-            // window.addEventListener('resize', doResize, { passive: true });
-            // window.addEventListener('orientationchange', doResize, { passive: true });
-            // doResize(); // initial
+
+            // ---- device-emulation harness (see docs/MOBILE-GPU-BRISTLE-COLLAPSE-SPEC.md) ----
+            // ?gpu=samsung-a56   clamp capabilities to a target mobile device
+            // ?selftest=1        run the texture round-trip assertions
+            // ?audit=1           log every FLOAT+LINEAR texture creation
+            const params = new URLSearchParams(location.search);
+            const gpuProfile = params.get('gpu');
+            let fluidUiConfig = null;
+            let fluidUiBootstrapError = null;
+            try {
+                fluidUiConfig = parseFluidUiConfig(location.search);
+                window.__fluidUiAllowsDebug = resolveFluidUiConfig(fluidUiConfig).config.mode === 'full';
+            } catch (error) {
+                fluidUiBootstrapError = error;
+                window.__fluidUiAllowsDebug = false;
+            }
+
+            const wgl = WrappedGL.create(canvas, null, (rawGl) => {
+                if (gpuProfile) installGpuClamp(rawGl, gpuProfile);
+            });
+
+            window.__wgl = wgl;   // debug handle for the test harness
+            if (wgl !== null) {
+                if (params.get('audit') === '1') auditFloatLinearTextures(wgl);
+                if (params.get('selftest') === '1') runTextureSelfTest(wgl.gl);
+                if (params.get('diag') === '1') showDeviceDiagnostics(wgl);
+            }
+
+            // The texture probe: a 2D view of a brush texture, read back each
+            // frame from brush.js. Enabled by default, ?debug=-textureProbe
+            // turns it off -- and when off nothing here is created, which is
+            // what makes brush.js's `if (presenter)` skip the readback rather
+            // than merely hide its output.
+            const debugFlags = parseDebugFlags();
+            if (!window.__fluidUiAllowsDebug) {
+                Object.keys(debugFlags).forEach((key) => { debugFlags[key] = false; });
+            }
+
+            /*
+             * Build and tear down the texture probe.
+             *
+             * Setting `presenter` back to undefined is what actually turns the
+             * facility OFF: brush.js guards its per-frame readback with
+             * `typeof presenter !== 'undefined' && presenter`, so clearing it
+             * skips the readback entirely rather than merely hiding the result.
+             * The readback is the expensive half, which is why the toggle has to
+             * do this and not just set display:none on the canvas.
+             */
+            function enableTextureProbe() {
+                if (presenter) return;
+                const dbg = setupDebugCanvas({ w: 256, h: 256, corner: 'bottom-right' });
+                debugCanvas = dbg.canvas;
+                debugCtx2d = dbg.ctx2d;
+                presenter = makeGLDebugPresenter(wgl.gl);
+            }
+
+            function disableTextureProbe() {
+                if (debugCanvas && debugCanvas.parentNode) {
+                    debugCanvas.parentNode.removeChild(debugCanvas);
+                }
+                debugCanvas = undefined;
+                debugCtx2d = undefined;
+                presenter = undefined;
+            }
+
+            // Exposed so the toggle UI (built in paint.js, which cannot see
+            // these closures) can drive them.
+            window.__textureProbe = {
+                isOn: () => !!presenter,
+                set: (on) => (on ? enableTextureProbe() : disableTextureProbe()),
+            };
+
+            if (debugFlags.textureProbe) enableTextureProbe();
 
             (async () => {
-                // PATCH#1: TEST
-                // const results = await runWebGLUsageSelfTest({
-                //     canvas,
-                //     gl: wgl.gl,
-                //     getPaintingRect: () => ({
-                //         left: 0,
-                //         bottom: 0,
-                //         width: canvas.width,
-                //         height: canvas.height
-                //     })
-                // });
-                // console.table(results);
+                // Renderable is not blendable. hasFloatTextureSupport() only
+                // asks whether a float target can be drawn into; splat()
+                // additionally needs to ALPHA-BLEND into one, and a device
+                // that cannot do so at any precision silently deposits
+                // nothing. Ask that question here rather than letting the app
+                // start up and look healthy while painting nothing.
+                const halfFloatType = wgl !== null ? wgl.getHalfFloatType() : null;
+                const canPaint = wgl !== null && wgl.hasFloatTextureSupport() &&
+                    (wgl.canBlendIntoTexture(wgl.FLOAT) ||
+                     (halfFloatType !== null && wgl.canBlendIntoTexture(halfFloatType)));
 
-                if (wgl !== null && wgl.hasFloatTextureSupport()) {
+                if (canPaint) {
 
                     //required features are supported
                     document.getElementById('placeholder').outerHTML = document.getElementById('main').innerHTML;
-                    const painter = new Paint(canvas, wgl);
-                    runWebGLSelfTest(wgl.gl)
+
+                    try {
+                        if (fluidUiBootstrapError) throw fluidUiBootstrapError;
+                        window.__fluidUiPresetApi = createFluidUiPresetApi({
+                            initialConfig: fluidUiConfig,
+                            adapter: new FluidUiDomAdapter(document),
+                        });
+                    } catch (error) {
+                        const surface = document.createElement('div');
+                        surface.id = 'fluid-ui-config-error';
+                        surface.setAttribute('role', 'alert');
+                        surface.textContent = `Fluid UI configuration error (${error.code || 'INVALID_UI_CONFIG'}). `;
+                        const reload = document.createElement('a');
+                        reload.href = location.pathname;
+                        reload.textContent = 'Open the default interface';
+                        surface.appendChild(reload);
+                        document.body.appendChild(surface);
+                        console.error('Fluid UI bootstrap:', error);
+                        return;
+                    }
+
+                    // Move the canvas into its grid cell now that the layout
+                    // exists, and drop the absolute positioning the bootstrap
+                    // used to keep it from sizing <body>: inside the cell the
+                    // stylesheet positions it. Paint's Viewport then sizes the
+                    // canvas from this element rather than from the window.
+                    const canvasCell = document.getElementById('canvas-cell');
+                    canvas.style.position = '';
+                    canvasCell.appendChild(canvas);
+
+                    const painter = new Paint(canvas, wgl, { container: canvasCell });
+                    window.__painter = painter;
+                    if (window.parent !== window) {
+                        window.startFluidEmbed?.().catch((error) => {
+                            console.error('Fluid embedded client failed to start:', error);
+                        });
+                    }
+
+                    /*
+                     * Tilecraft demonstration player. `?story=1` is purposely
+                     * pinned to the checked-in fixture rather than accepting an
+                     * arbitrary URL: it is a reproducible demo of the Story
+                     * Model Schema, not an unbounded fetch proxy. It drives the
+                     * existing app RAF through TilecraftStrokePlayer.play(), so
+                     * the paint develops visibly instead of appearing as a
+                     * synchronous final replay.
+                     */
+                    window.playTilecraftStory = async () => {
+                        while (!painter.engine) {
+                            await new Promise(requestAnimationFrame);
+                        }
+                        const story = await fetch('docs/story-2026-09-08-4-frames.json')
+                            .then((response) => {
+                                if (!response.ok) throw new Error(`Story fixture: HTTP ${response.status}`);
+                                return response.json();
+                            });
+                        // Speed is a true multiplier: storySpeed=8 advances
+                        // eight complete model ticks per displayed RAF. The
+                        // explicitly named storyFramesPerStep is the separate,
+                        // intentionally slower diagnostic mode.
+                        const hasSlowMode = params.has('storyFramesPerStep');
+                        const requestedSlowFrames = Number(params.get('storyFramesPerStep'));
+                        const framesPerStep = Number.isInteger(requestedSlowFrames) && requestedSlowFrames > 0
+                            ? requestedSlowFrames
+                            : 1;
+                        const requestedSpeed = Number(params.get('storySpeed'));
+                        const speed = !hasSlowMode
+                            ? (Number.isInteger(requestedSpeed) && requestedSpeed > 0 ? requestedSpeed : 8)
+                            : 1 / framesPerStep;
+                        const controller = painter.storyPlaybackController;
+                        await controller.loadModel(
+                            story,
+                            StoryFileLoader.summarize(story, 'story-2026-09-08-4-frames.json')
+                        );
+                        controller.setSpeed([0.25, 0.5, 1, 2, 4, 8, 16].includes(speed) ? speed : 8);
+                        const playback = controller.play();
+                        window.__tilecraftStoryPlayer = controller.player;
+                        window.__tilecraftStoryStarted = true;
+                        const stats = await playback;
+                        window.__tilecraftStoryStats = stats;
+                        return stats;
+                    };
+
+                    if (params.get('story') === '1') {
+                        window.__tilecraftStoryPromise = window.playTilecraftStory()
+                            .catch((error) => console.error('Tilecraft story playback failed:', error));
+                    }
                 } else {
                     //required features unsupported
                     document.getElementById('placeholder').outerHTML = document.getElementById('no-support').innerHTML;
 
                     if (wgl === null) {
                         document.getElementById('error').innerHTML = 'Unfortunately, your browser does not support WebGL.';
-                    } else {
+                    } else if (!wgl.hasFloatTextureSupport()) {
                         document.getElementById('error').innerHTML = 'Unfortunately, your browser does not support WebGL floating point textures.';
+                    } else {
+                        // Float textures exist and are renderable, but cannot be
+                        // blended into at any precision, so no stroke could ever
+                        // deposit paint. Say so, rather than showing a canvas
+                        // that looks fine and stays blank forever.
+                        document.getElementById('error').innerHTML =
+                            'Unfortunately, your browser cannot blend into floating point textures, which this app needs in order to paint.';
                     }
                 }
 

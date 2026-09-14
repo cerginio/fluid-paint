@@ -1,0 +1,1386 @@
+/*
+ * Phase 7 -- the responsive layout.
+ *
+ * Before this, the canvas was pinned to window.innerWidth/innerHeight and the
+ * chrome was drawn INTO it by GL (a blurred panel, a drop shadow), with the
+ * HTML controls positioned absolutely on top. That is why the layout could not
+ * be responsive: the panel geometry was hardcoded in pixels (PANEL_WIDTH 300,
+ * PANEL_HEIGHT 580, COLOR_PICKER_TOP 523) against a canvas that always filled
+ * the window, so there was no box for CSS to lay out.
+ *
+ * Now CSS owns the boxes and the canvas fills whatever cell it is given, via a
+ * ResizeObserver on #canvas-cell (viewport.js), while the panel FLOATS over the
+ * canvas and is dragged where the user wants it. The canvas keeps the full
+ * window, so the painting never loses width to chrome -- which is what the
+ * Phase 6 device retest asked for on phones.
+ *
+ * The rule that keeps this honest: no dimension here is duplicated in JS. The
+ * panel's own geometry is never read by the pointer path at all now, because
+ * the panel is a real element and the browser hit-tests it.
+ */
+
+/* UI Preset API visibility must win over component display declarations. */
+#ui[hidden],
+#ui [hidden] {
+  display: none !important;
+}
+
+html[data-reduced-motion] #ui *,
+html[data-reduced-motion] #ui *::before,
+html[data-reduced-motion] #ui *::after {
+  transition-duration: 0.01ms !important;
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+}
+
+:root {
+  /* Authored here and nowhere else. Nothing in JS reads it: the panel is a real
+     element, so the browser decides what it covers. */
+  /* Desktop main panel is authored at 1.2x the compact two-column geometry.
+     These are real layout pixels, never transform/zoom pixels. */
+  --panel-width: 479.6px;
+  --panel-bg: rgba(32, 32, 36, 0.82);
+  --panel-border: rgba(255, 255, 255, 0.14);
+  --panel-header-bg: rgba(32, 32, 36, 0.22);
+  --panel-radius: 14px;
+  --edge-pad: 30px;
+  --accent-green: #75c455;
+  --action-danger: #c85759;
+  --picker-lower-shift: 35px;
+  --panel-actions-gap: 12px;
+  --panel-history-gap: 12px;
+  --panel-bottom-gap: 12px;
+  --panel-action-height: 36px;
+  --panel-action-font-size: 13.2px;
+  --panel-label-margin-top: 9.6px;
+  --panel-label-margin-bottom: 3.6px;
+  --panel-label-font-size: 14.4px;
+  --panel-slider-height: 19.2px;
+  --panel-segment-padding: 4.8px;
+  --panel-segment-font-size: 12px;
+  --panel-color-padding-top: 9.6px;
+  /* The base bar and the attached tools are one panel group, so their headers
+     share the same desktop rhythm.  Keep this in CSS rather than scaling either
+     surface: Iro and the sliders must receive untransformed pointer bounds. */
+  --panel-header-pad: 9.6px;
+  --panel-header-control-size: 33.6px;
+  /* Viewport reads this presentation policy. A coarse mobile device lowers it
+     below to keep desktop-site page scaling from multiplying a huge backing
+     store and simulation. Explicit ?dpr= remains a diagnostic override. */
+  --canvas-max-pixel-ratio: 2;
+}
+
+* {
+  font-family: 'Open Sans', Helvetica, sans-serif;
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  height: 100dvh;
+  overflow: hidden;
+
+  user-select: none;
+  -moz-user-select: none;
+  -webkit-user-select: none;
+  -ms-user-select: none;
+}
+
+/* ---- The shell -----------------------------------------------------------
+ *
+ * The canvas fills the window; the panel FLOATS over it and is dragged wherever
+ * the user wants. That is the model chosen after the Phase 6 device retest: a
+ * docked column costs the painting a third of a phone's width, and on a phone
+ * the painting is the scarce thing.
+ *
+ * The canvas is still sized from #canvas-cell by a ResizeObserver rather than
+ * from the window, and that is not redundant just because the cell currently
+ * fills the window. It is what lets a host embed the engine in a smaller box,
+ * and it is why the pinned-to-window assumption at the old paint.js:298 is
+ * really gone rather than merely relocated.
+ *
+ * On the "canvas sizes the cell that sizes the canvas" feedback loop: it is a
+ * real failure mode for container-sized canvases, but what rules it out here is
+ * that #canvas-cell is window-bounded (html/body are height:100%). The
+ * min-width/min-height/overflow/position guards below are defence in depth for
+ * a future layout that gives the cell an auto track -- verified by removing all
+ * four at once and watching the size stay stable, so do not read their presence
+ * as proof they are what is holding.
+ */
+#app {
+  position: relative;
+  height: 100%;
+  height: 100dvh;
+  width: 100%;
+  background: #b0b0b0;
+}
+
+#canvas-cell {
+  position: absolute;
+  inset: 0;
+  min-width: 0;
+  min-height: 0;
+  /* This box sizes the canvas, so it must never be sized by it. */
+  overflow: hidden;
+}
+
+#canvas-cell > canvas {
+  /* display:block kills the inline baseline gap, which would otherwise make the
+     cell a few pixels taller than the canvas -- a slow grow, one frame at a
+     time. */
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  touch-action: none;
+}
+
+/* The focus cue deliberately sits outside #canvas-cell so it can follow a zoom
+   pointer without being clipped at the canvas or painting edge. */
+.focus-overlay {
+  position: absolute;
+  z-index: 10;
+  width: 64px;
+  height: 64px;
+  /* color: #0ea5e9; */
+  color: #f97316;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  opacity: 0;
+}
+
+.focus-overlay.is-visible {
+  opacity: 1;
+}
+
+.focus-overlay svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* ---- The floating panel --------------------------------------------------
+ *
+ * Replaces panelProgram + blurProgram: the blur is a backdrop-filter, which is
+ * what those two GL passes and their two full-canvas RGBA scratch textures
+ * existed to fake.
+ *
+ * `left`/`top` are set from JS while dragging, so they are authored here only
+ * as the initial position. `touch-action: none` on the drag handle is what lets
+ * a finger drag the panel instead of scrolling it.
+ */
+#ui {
+  position: absolute;
+  z-index: 20;
+  left: 16px;
+  top: 16px;
+  width: var(--panel-width);
+  max-height: calc(100% - 32px);
+
+  display: flex;
+  flex-direction: column;
+
+  border-radius: var(--panel-radius);
+  background: var(--panel-bg);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+  border: 1px solid var(--panel-border);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.32);
+
+  /* The panel itself never scrolls as a whole -- #panel-body does. Overflow is
+     visible so the optional extension can sit beside it. */
+  overflow: visible;
+}
+
+#ui[data-body-placement="above"] {
+  flex-direction: column-reverse;
+}
+
+/* ---- The collapsed bar ---------------------------------------------------
+ *
+ * The compact control strip, always visible:
+ *
+ *   [-----*------]  :::  :::  :::  [ |||||||||||||| ]
+ *    size slider    drag handle      hue stripe
+ *
+ * It is the whole UI when collapsed, so both controls on it have to be usable
+ * one-handed: the two things a painter changes mid-stroke are brush size and
+ * colour, which is exactly what it carries.
+ */
+#panel-bar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: var(--panel-header-pad) 12px;
+  flex: none;
+  background: var(--panel-header-bg);
+}
+
+#panel-extension-toggle {
+  width: var(--panel-header-control-size);
+  height: var(--panel-header-control-size);
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 7.2px;
+  color: white;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 22.8px;
+  line-height: 1;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+/* The bar's slider carries .slider for the Slider class's own styling, so it
+   also inherits that rule's fixed `width: 240px` and `margin-left`. Both must
+   be overridden here or the slider overflows its grid track and squeezes the
+   hue stripe down to a couple of pixels -- measured at 2px before this. */
+#bar-size-slider {
+  position: relative;
+  height: 21.6px;
+  width: auto;
+  margin: 0;
+  min-width: 0;
+  cursor: ew-resize;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+/* The drag handle -- the ::: in the sketch. Dragging anywhere on it moves the
+   panel; tapping it toggles collapsed/expanded. */
+#panel-grip {
+  width: 52.8px;
+  height: 28.8px;
+  cursor: grab;
+  touch-action: none;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+}
+
+#panel-grip:active { cursor: grabbing; }
+
+#panel-grip span {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.55);
+  box-shadow: 0 5px 0 rgba(255, 255, 255, 0.55), 0 -5px 0 rgba(255, 255, 255, 0.55);
+}
+
+/* The hue stripe: a full-spectrum gradient, tap or drag to set hue.
+ *
+ * The gradient below is a FALLBACK only. Phase 10 overwrites it at startup with
+ * the pigment sweep, via ToolPanel.paintHueStripe() -- the RGB stops here name
+ * hues about 120deg away from what the brush actually paints (blue on this
+ * stripe paints yellow), so this stripe used to disagree with both the wheel
+ * and the canvas. It is left in place so the control is still legible if
+ * scripting fails before the repaint runs.
+ *
+ * Still do not read colour back out of this gradient: the hue it reports is a
+ * position, fed through the app's HSVA -> RYB path like every other hue. */
+#bar-hue-stripe {
+  position: relative;
+  height: 21.6px;
+  border-radius: 10.8px;
+  cursor: pointer;
+  touch-action: none;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: linear-gradient(
+    to right,
+    #ff0000 0%, #ffff00 16.66%, #00ff00 33.33%,
+    #00ffff 50%, #0000ff 66.66%, #ff00ff 83.33%, #ff0000 100%
+  );
+}
+
+#bar-hue-stripe .handle {
+  position: absolute;
+  top: 50%;
+  width: 4.8px;
+  height: 26.4px;
+  margin-top: -13.2px;
+  margin-left: -2.4px;
+  border-radius: 2px;
+  background: white;
+  border: 1px solid rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+/* ---- The expanded body --------------------------------------------------- */
+
+#panel-body {
+  min-height: 0;
+  max-height: none;
+  display: grid;
+  grid-template-columns: minmax(0, .96fr) minmax(0, 1.04fr);
+  align-items: start;
+  gap: 19.2px;
+  padding: 14.4px;
+  padding-block: 12px;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  overflow: visible;
+  border-top: 1px solid var(--panel-border);
+}
+
+#ui[data-body-placement="above"] #panel-body {
+  border-top: 0;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+#ui[data-collapsed="true"] #panel-body {
+  display: none;
+}
+
+/* ---- Optional adjacent tools -------------------------------------------- */
+
+#panel-extension[hidden] { display: none; }
+#panel-extension [hidden] { display: none !important; }
+
+#panel-extension {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  width: min(320px, calc(100vw - 24px));
+  max-height: min(680px, calc(100dvh - 24px));
+  overflow: hidden;
+  color: white;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--panel-radius);
+  background: var(--panel-bg);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
+}
+
+#ui[data-extension-side="right"] #panel-extension { left: calc(100% + 8px); }
+#ui[data-extension-side="left"] #panel-extension { right: calc(100% + 8px); }
+#ui[data-extension-side="overlay-right"] #panel-extension { right: 0; }
+#ui[data-extension-side="overlay-left"] #panel-extension { left: 0; }
+
+.panel-extension-header {
+  display: flex;
+  align-items: center;
+  gap: 9.6px;
+  padding: var(--panel-header-pad);
+  /* The extension owns its divider while #panel-bar's divider belongs to
+     #panel-body.  Consume that one border pixel in the lower padding so the
+     two visible header boxes remain exactly the same height. */
+  padding-bottom: calc(var(--panel-header-pad) - 1px);
+  border-bottom: 1px solid var(--panel-border);
+  background: var(--panel-header-bg);
+}
+
+#panel-extension[data-collapsed="true"] .panel-extension-page { display: none; }
+#panel-extension[data-collapsed="true"] .panel-extension-header { border-bottom: 0; }
+
+#panel-extension-grip {
+  width: var(--panel-header-control-size);
+  height: var(--panel-header-control-size);
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border: 0;
+  border-radius: 5px;
+  cursor: grab;
+  touch-action: none;
+}
+#panel-extension-grip:active { cursor: grabbing; }
+#panel-extension-grip span {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.55);
+  box-shadow: 0 5px 0 rgba(255, 255, 255, 0.55), 0 -5px 0 rgba(255, 255, 255, 0.55);
+}
+
+.panel-extension-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0;
+  flex: 1;
+}
+
+.panel-extension-tabs button,
+#panel-extension-close {
+  min-height: var(--panel-header-control-size);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: white;
+  background: transparent;
+  cursor: pointer;
+}
+
+#panel-extension .panel-extension-tabs button[aria-selected="true"] {
+  color: #111;
+  background: white;
+}
+
+#panel-extension-close {
+  width: var(--panel-header-control-size);
+  padding: 0;
+  border-radius: 5px;
+  font-size: 20px;
+}
+
+.panel-extension-page {
+  min-height: 120px;
+  max-height: min(620px, calc(100dvh - 82px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 16px;
+  font-size: 12px;
+}
+
+.panel-extension-page p {
+  margin: 8px 0 0;
+  color: rgba(255, 255, 255, 0.7);
+  line-height: 1.45;
+}
+
+.bake-card {
+  display: grid;
+  gap: 12px;
+}
+
+.bake-card p { margin: 0; }
+.bake-card ul {
+  margin: 0;
+  padding-left: 20px;
+  color: rgba(255, 255, 255, 0.78);
+  line-height: 1.55;
+}
+
+#bake-button { margin-top: 4px; }
+
+/* ---- Story file and playback tools ------------------------------------- */
+
+.story-dropzone {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 176px;
+  padding: 22px 16px;
+  border: 1px dashed rgba(255, 255, 255, 0.42);
+  border-radius: 10px;
+  color: white;
+  background: rgba(255, 255, 255, 0.045);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.story-dropzone:hover,
+.story-dropzone.is-dragging {
+  border-color: #75c455;
+  background: rgba(117, 196, 85, 0.14);
+}
+
+.story-dropzone:focus-visible,
+#panel-extension button:focus-visible,
+#panel-extension select:focus-visible,
+#panel-extension input:focus-visible {
+  outline: 2px solid #68b5ff;
+  outline-offset: 2px;
+}
+
+.story-drop-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  color: #111;
+  background: #75c455;
+  font-size: 25px;
+  font-weight: 700;
+}
+
+.story-dropzone span:not(.story-drop-icon),
+.story-dropzone small,
+.story-file-title small {
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.story-status {
+  min-height: 18px;
+  margin: 10px 0;
+  color: rgba(255, 255, 255, 0.75);
+  line-height: 1.45;
+}
+
+.story-status.is-error { color: #ff8b88; }
+
+.story-background-card {
+  display: grid;
+  gap: 9px;
+  margin-bottom: 12px;
+  padding: 10px;
+  border: 1px solid rgba(117, 196, 85, 0.5);
+  border-radius: 7px;
+  background: rgba(117, 196, 85, 0.08);
+}
+.story-background-card > div { display: grid; gap: 3px; min-width: 0; }
+.story-background-card span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.story-background-card small { color: rgba(255, 255, 255, 0.68); }
+
+.story-file-card { display: grid; gap: 12px; }
+.story-file-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.story-file-title > div { display: grid; min-width: 0; }
+.story-file-title strong,
+.story-player-file { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.story-success { color: #75c455; font-size: 20px; }
+
+.story-summary-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 0;
+}
+.story-summary-grid div {
+  min-width: 0;
+  padding: 9px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.055);
+}
+.story-summary-grid dt { color: rgba(255, 255, 255, 0.62); font-size: 10px; }
+.story-summary-grid dd { margin: 3px 0 0; line-height: 1.35; }
+.story-warning {
+  margin: 0 !important;
+  padding: 9px;
+  border-left: 3px solid #f6c53a;
+  border-radius: 4px;
+  color: #ffe39a !important;
+  background: rgba(246, 197, 58, 0.1);
+}
+
+.story-actions,
+.story-transport,
+.story-callout {
+  display: flex;
+  gap: 8px;
+}
+
+#panel-extension button,
+#panel-extension select {
+  min-height: 36px;
+  padding: 7px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 6px;
+  color: white;
+  background: rgba(255, 255, 255, 0.06);
+  font: inherit;
+  cursor: pointer;
+}
+#panel-extension button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.13); }
+#panel-extension button:disabled { opacity: 0.4; cursor: default; }
+#panel-extension .story-primary { color: #111; border-color: var(--accent-green); background: var(--accent-green); font-weight: 700; }
+#panel-extension .story-wide { width: 100%; }
+
+.story-empty { display: grid; justify-items: start; gap: 10px; padding: 10px 0; }
+.story-empty p { margin: 0; }
+.story-player-file { display: block; }
+
+.story-progress {
+  height: 8px;
+  margin-top: 12px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: repeating-linear-gradient(135deg, rgba(255,255,255,.13) 0 4px, rgba(255,255,255,.05) 4px 8px);
+}
+#story-player-progress-fill { width: 0; height: 100%; background: #75c455; transition: width 120ms linear; }
+.story-progress-copy { margin-top: 6px; color: rgba(255,255,255,.68); font-variant-numeric: tabular-nums; }
+
+.story-boundary-navigation {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 14px;
+}
+.story-boundary-navigation output {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: rgba(255,255,255,.72);
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.story-runtime-controls {
+  display: grid;
+  grid-template-columns: auto minmax(120px, 1fr);
+  align-items: end;
+  gap: 12px;
+  margin-top: 14px;
+}
+.story-field { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; }
+.story-field select { min-width: 92px; color-scheme: dark; }
+#story-speed option { color: #111; background: #fff; }
+.story-thickness-field { display: grid; gap: 7px; min-width: 0; }
+.story-thickness-field span { display: flex; justify-content: space-between; gap: 8px; }
+.story-thickness-field output { color: rgba(255,255,255,.72); font-variant-numeric: tabular-nums; }
+#story-thickness { width: 100%; height: 36px; margin: 0; accent-color: #75c455; }
+.story-policy { display: grid; gap: 7px; margin: 14px 0 0; padding: 10px; border: 1px solid rgba(255,255,255,.14); border-radius: 7px; }
+.story-policy legend { padding: 0 5px; color: rgba(255,255,255,.7); }
+.story-policy label { display: flex; align-items: center; gap: 7px; }
+
+.story-callout {
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 12px;
+  padding: 10px;
+  border-radius: 7px;
+  background: rgba(246, 197, 58, 0.1);
+}
+.story-callout strong { flex-basis: 100%; color: #ffe39a; }
+.story-transport {
+  position: sticky;
+  bottom: -16px;
+  margin: 16px -16px -16px;
+  padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--panel-border);
+  background: rgba(32, 32, 36, 0.96);
+}
+.story-transport button { flex: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  #story-player-progress-fill { transition: none; }
+}
+
+/* ---- Controls ------------------------------------------------------------
+ * Visually as they were; only the positioning model changed.
+ */
+.button {
+  display: inline-block;
+  margin-top: 24px;
+  width: 115px;
+  height: 30px;
+  line-height: 30px;
+  text-align: center;
+  font-size: 12px;
+  color: white;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+#clear-button {
+  margin-left: var(--edge-pad);
+  background: var(--action-danger);
+}
+#clear-button:hover  { background: #b94a4d; }
+#clear-button:active { background: #a83f43; }
+
+#save-button {
+  background: var(--accent-green);
+  margin-left: 10px;
+}
+#save-button:hover  { background: #68b44a; }
+#save-button:active { background: #5ba13e; }
+
+.control-label {
+  margin-left: var(--edge-pad);
+  margin-top: 9px;
+  color: white;
+  font-size: 12px;
+}
+
+.slider {
+  margin-top: 3px;
+  margin-left: var(--edge-pad);
+  position: relative;
+  width: 240px;
+  height: 15px;
+  cursor: ew-resize;
+  pointer-events: auto;
+
+  user-select: none;
+  -moz-user-select: none;
+  -webkit-user-select: none;
+  -ms-user-select: none;
+}
+
+.slider-value-pop {
+  position: absolute;
+  z-index: 20;
+  bottom: calc(100% + 7px);
+  transform: translateX(-50%);
+  min-width: 38px;
+  padding: 4px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 5px;
+  color: #fff;
+  background: rgba(24, 24, 28, 0.94);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35);
+  font: 600 11px/1.2 system-ui, sans-serif;
+  text-align: center;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.button-selected {
+  background: white;
+  color: black;
+  cursor: default;
+}
+
+.button-unselected {
+  color: white;
+  cursor: pointer;
+}
+
+/* The colour picker host.
+ *
+ * The picker is still GL-drawn into the main canvas -- replacing it with iro.js
+ * is Phase 8 -- so this is a reserved BOX, not the widget. paint.js reads this
+ * element's rect and draws the picker there, which is what lets the picker
+ * follow the layout instead of sitting at the hardcoded COLOR_PICKER_TOP 523.
+ */
+/* The iro.js colour wheel mounts in here (Phase 8).
+   Only the WIDTH is set. iro.js takes a single `width` option and derives the
+   wheel's diameter, the two sliders and the gaps between them from it, so the
+   height is whatever that layout comes to -- a fixed height here would either
+   clip the alpha slider or leave dead space below it, and would have to be
+   re-guessed at every breakpoint. app/ui/color.js measures this element and
+   calls picker.resize() from a ResizeObserver, so the breakpoint rules below
+   only need to change the width. */
+#color-picker-slot {
+  position: relative;
+  pointer-events: auto;
+}
+
+/* iro.js renders its own markup; these are the few things it cannot know.
+   The wheel is centred in the slot because the slot can be wider than the
+   picker at some breakpoints, and touch-action:none stops a drag on the wheel
+   from being claimed by the browser as a scroll -- the same rule the sliders
+   and the canvas need. */
+#color-picker-slot .IroColorPicker {
+  margin: 0 auto;
+}
+
+#color-picker-slot .IroWheel,
+#color-picker-slot .IroSlider {
+  touch-action: none;
+}
+
+/* iro's default gap is 12px; reserve another 8px for the overlaid labels. */
+#color-picker-slot .IroWheel + .IroSlider {
+  margin-top: calc(24px + var(--picker-lower-shift)) !important;
+}
+
+/* Iro owns the wheel/sliders DOM, so the host labels stay outside its virtual
+   DOM. The stage overlays a CSS-grid label layer on the wheel row only; the
+   stage itself remains in normal flow and iro's sliders follow below it. */
+.color-wheel-stage {
+  display: grid;
+  grid-template-areas: "wheel-stage";
+  grid-template-columns: minmax(0, 1fr);
+  width: 100%;
+  min-width: 0;
+}
+
+#color-picker-widget {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+#color-picker-widget,
+.color-wheel-labels { grid-area: wheel-stage; }
+
+.color-wheel-labels {
+  z-index: 2;
+  align-self: start;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  width: 100%;
+  height: calc(var(--picker-wheel-size, 200px) + var(--picker-lower-shift));
+  color: white;
+  pointer-events: none;
+}
+
+.adhoc-color {
+  position: static;
+  flex: none;
+  width: 38.4px;
+  height: 38.4px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 50%;
+  font: 600 12px/1.2 system-ui, sans-serif;
+  cursor: pointer;
+  pointer-events: auto;
+}
+#paint-color-white {
+  grid-area: 1 / 1;
+  place-self: start;
+  margin: -12px 0 0 -12px;
+  color: #111;
+  background: #fff;
+}
+#paint-color-black {
+  grid-area: 1 / 2;
+  place-self: start end;
+  margin: -12px -12px 0 0;
+  color: #fff;
+  background: #050505;
+}
+.adhoc-color[aria-pressed="true"] {
+  border-color: #75c455 !important;
+  box-shadow: 0 0 0 2px rgba(117, 196, 85, 0.7);
+}
+.adhoc-color:focus-visible { outline: 2px solid #68b5ff; outline-offset: 2px; }
+
+#color-picker-widget[data-adhoc-color="white"] .IroWheel .IroHandle--0 circle:last-child {
+  fill: #fff !important;
+}
+#color-picker-widget[data-adhoc-color="black"] .IroWheel .IroHandle--0 circle:last-child {
+  fill: #000 !important;
+}
+
+.color-code-readout {
+  grid-area: 2 / 1;
+  place-self: end start;
+  display: flex;
+  align-items: stretch;
+  gap: 3px;
+  min-width: 0;
+}
+
+#paint-color-hex,
+#paint-color-alpha {
+  padding: 4.8px 7.2px;
+  border-radius: 4px;
+  background: rgba(24, 24, 28, 0.72);
+  white-space: nowrap;
+  font: 600 13.2px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: .04em;
+  color: white;
+  pointer-events: auto;
+}
+
+#paint-color-hex {
+  cursor: pointer;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+#paint-color-alpha {
+  min-width: 2ch;
+  text-align: center;
+  cursor: default;
+  text-shadow: 0 1px 2px #000, 0 0 2px #000;
+}
+
+#paint-color-hex:hover,
+#paint-color-hex:focus-visible {
+  background: rgba(24, 24, 28, 0.9);
+  outline: 1px solid rgba(255, 255, 255, 0.7);
+}
+#paint-color-hex[data-copied="true"] { background: rgb(0, 150, 70); }
+
+#paint-color-model {
+  grid-area: 2 / 2;
+  place-self: end;
+  flex: none;
+  padding: 4.8px 7.2px;
+  border-radius: 4px;
+  background: rgba(24, 24, 28, 0.72);
+  font-size: 13.2px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+#undo-button { margin-left: var(--edge-pad); }
+#redo-button { margin-left: 10px; }
+
+.panel-actions {
+  display: flex;
+  gap: 10px;
+  margin: 24px var(--edge-pad) 0;
+}
+
+.panel-actions .button,
+.panel-actions #clear-button,
+.panel-actions #save-button,
+.panel-actions #undo-button,
+.panel-actions #redo-button {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+  margin: 0;
+}
+
+.panel-history-actions { margin-top: 16px; }
+.panel-bottom-controls { margin-top: 16px; }
+.panel-document-actions { margin-top: 0; }
+
+/* The expanded paint panel is two real CSS columns. This keeps the brush
+   controls and Iro picker within half a normal viewport without scaling their
+   coordinate system; Slider and Iro therefore read the same bounds the user
+   sees. */
+.panel-column { min-width: 0; }
+#panel-body .panel-actions {
+  gap: var(--panel-actions-gap);
+  margin-inline: 0;
+}
+
+/* This follows the general extension-button rule above deliberately: that
+   rule gives page controls comfortable padding, while header controls need to
+   match #panel-bar exactly. */
+#panel-extension .panel-extension-header .panel-extension-tabs button,
+#panel-extension .panel-extension-header #panel-extension-close {
+  height: var(--panel-header-control-size);
+  min-height: var(--panel-header-control-size);
+  padding-block: 0;
+}
+#panel-extension .panel-extension-tabs button {
+  border-left-width: 0;
+  border-radius: 0;
+}
+#panel-extension .panel-extension-tabs button:first-child {
+  border-left-width: 1px;
+  border-radius: 6px 0 0 6px;
+}
+#panel-extension .panel-extension-tabs button:last-child {
+  border-radius: 0 6px 6px 0;
+}
+#panel-body .panel-history-actions { margin-top: var(--panel-history-gap); }
+#panel-body .panel-bottom-controls { margin-top: var(--panel-bottom-gap); }
+#panel-body .control-label {
+  margin: var(--panel-label-margin-top) 0 var(--panel-label-margin-bottom);
+  font-size: var(--panel-label-font-size);
+}
+#panel-body .slider { width: 100%; height: var(--panel-slider-height); margin: 0; }
+#panel-body .buttons {
+  display: flex;
+  width: 100%;
+  height: 24px;
+  margin: 6px 0;
+}
+#panel-body .buttons div {
+  float: none;
+  padding-block: var(--panel-segment-padding);
+  border-top: 1px solid white;
+  border-bottom: 1px solid white;
+  border-left: 0 solid white;
+  font-size: var(--panel-segment-font-size);
+  text-align: center;
+  pointer-events: auto;
+}
+#panel-body .buttons div:first-child { border-left-width: 1px; }
+#panel-body .buttons div:last-child { border-right: 1px solid white; }
+#panel-body #qualities div,
+#panel-body #models div,
+#panel-body #bristle-shapes div { flex: 1; width: auto; }
+/* Five segments in a narrow panel: let the labels shrink rather than overflow
+   the column. The names are already abbreviated (Tri/Quad/Pent/Hex). */
+#panel-body #bristle-shapes div {
+  min-width: 0;
+  padding-inline: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#panel-body .panel-column-color { padding-top: var(--panel-color-padding-top); }
+#panel-body #color-picker-slot { width: 100%; margin: 0; }
+#panel-body .panel-actions .button {
+  height: var(--panel-action-height);
+  line-height: var(--panel-action-height);
+  font-size: var(--panel-action-font-size);
+}
+
+.do-button-active { background: #6a6a6d; }
+.do-button-active:hover  { background: #767679; }
+.do-button-active:active { background: #5e5e62; }
+
+.do-button-inactive {
+  cursor: default;
+  background: #666666;
+}
+
+/* ---- Toggle + footer ----------------------------------------------------- */
+
+#panel-button {
+  position: absolute;
+  z-index: 3;
+  bottom: 4px;
+  left: 10px;
+  margin-top: 0;
+  background: rgb(0, 111, 170);
+}
+
+#footer {
+  position: absolute;
+  z-index: 3;
+  bottom: 4px;
+  right: var(--edge-pad);
+  color: #111111;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+#footer a { color: #111111; }
+
+/* ---- The no-support message ---------------------------------------------- */
+
+#no-support-container {
+  position: absolute;
+  width: 100%;
+  height: 30px;
+  top: 50%;
+  margin-top: -15px;
+  text-align: center;
+  font-size: 16px;
+  color: #333333;
+}
+
+#no-support-container a { color: #333333; }
+#backlink { margin-top: 20px; }
+
+/* ---- Breakpoints ---------------------------------------------------------
+ *
+ * Per the plan: phone portrait (collapsed drawer), phone landscape (side rail),
+ * tablet, desktop (persistent panel). Desktop and tablet are the rules above;
+ * the two phone cases are overrides.
+ *
+ * The panel floats at every size; what the breakpoints change is how wide it is
+ * and, on a phone, that it starts collapsed. There is no dock/undock switch --
+ * one positioning model everywhere is what keeps the drag code honest.
+ */
+
+/* Tablet: a narrower persistent panel. */
+@media (max-width: 1024px) {
+  :root { --panel-width: 450.8px; --edge-pad: 20px; }
+}
+
+/* Phone landscape: a side rail. The panel stays beside the canvas because
+   horizontal space is what this orientation has; vertical space is what is
+   scarce, so the panel scrolls. */
+@media (max-height: 520px) and (orientation: landscape) {
+  :root { --panel-width: 240px; --edge-pad: 14px; }
+  .button { margin-top: 12px; }
+  .control-label { margin-top: 6px; }
+  .slider { width: 200px; }
+  #panel-body {
+    max-height: calc(100dvh - 56px);
+    overflow-y: auto;
+  }
+}
+
+/* Phone portrait. The panel floats here too -- there is no drawer/dock switch
+   any more, which removes the one case where the old layout let chrome overlay
+   the canvas by a DIFFERENT mechanism than everywhere else. What changes at
+   this size is only that the panel is narrower and starts collapsed, so the
+   painting is unobstructed until the user asks for controls. */
+@media (max-width: 640px) {
+  :root {
+    --panel-width: calc(100% - 24px);
+    --edge-pad: 16px;
+    --panel-header-pad: 6px;
+    --panel-header-control-size: 44px;
+  }
+
+  #ui {
+    left: 12px;
+    top: 12px;
+    max-height: calc(100dvh - 24px);
+  }
+
+  .slider { width: calc(100% - 2 * var(--edge-pad)); }
+  #panel-extension {
+    position: fixed;
+    left: 8px !important;
+    right: 8px !important;
+    top: auto;
+    bottom: max(8px, env(safe-area-inset-bottom));
+    width: auto;
+    max-height: min(72dvh, 620px);
+    border-radius: 14px 14px 12px 12px;
+    z-index: 40;
+  }
+
+  .panel-extension-page { max-height: calc(min(72dvh, 620px) - 58px); }
+  #panel-extension button,
+  #panel-extension select { min-height: 44px; }
+  #story-thickness { min-height: 44px; }
+}
+
+/* Debug facility toggles, pinned to two corners.
+ *
+ * Outside #ui deliberately: the panel is draggable and collapsible, and a
+ * switch for an overlay must not vanish with it or move when it moves.
+ *
+ * Debug controls sit over the optional probe canvas but under #ui. On touch
+ * layouts both icon buttons form a bottom-right stack instead of reserving a
+ * permanent 256px hole for a probe that defaults off.
+ */
+.debug-toggle-corner {
+  position: fixed;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  pointer-events: none; /* the container is a layout box, not a target */
+}
+
+#debug-toggle-tr {
+  top: 8px;
+  right: 8px;
+}
+
+#debug-toggle-br {
+  bottom: max(8px, env(safe-area-inset-bottom));
+  right: 8px;
+}
+
+.debug-toggle-corner .debug-toggle {
+  pointer-events: auto;
+  /* .button's own margin-top is for the panel's stacked layout and would push
+     these apart here; the flex gap above spaces them instead. */
+  margin-top: 0;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  line-height: 1;
+  text-align: center;
+  font-size: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.55);
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+
+.debug-toggle-corner .debug-toggle svg {
+  width: 22px;
+  height: 22px;
+  fill: currentColor;
+}
+
+.debug-texture-probe {
+  width: min(256px, 44vmin);
+  height: min(256px, 44vmin);
+}
+
+/* button-selected paints white-on-black in the panel; keep that meaning here
+   but stay legible over the painting rather than over the panel's dark ground. */
+.debug-toggle-corner .debug-toggle.button-selected {
+  background: rgba(255, 255, 255, 0.9);
+  color: black;
+}
+
+.debug-toggle-corner .debug-toggle.button-unselected {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+/* On a phone the probe canvas is a large fraction of the screen; keep the
+   toggles reachable and thumb-sized rather than shrinking them. */
+@media (max-width: 640px),
+       (pointer: coarse) and (hover: none) and (max-device-width: 640px),
+       (pointer: coarse) and (hover: none) and (max-device-height: 640px) {
+  #debug-toggle-tr {
+    top: auto;
+    right: 8px;
+    bottom: calc(max(8px, env(safe-area-inset-bottom)) + 48px);
+  }
+
+  #debug-toggle-br {
+    bottom: max(8px, env(safe-area-inset-bottom));
+  }
+
+  .debug-toggle-corner .debug-toggle {
+    width: 40px;
+    height: 40px;
+  }
+}
+
+/* Width-only phone queries stop matching when Android "Desktop site" swaps
+   in a desktop layout viewport. Pointer capability does not, so this repeats
+   the compact geometry for the same physical device in either browser mode. */
+@media (max-width: 640px),
+       (pointer: coarse) and (hover: none) and (max-device-width: 640px),
+       (pointer: coarse) and (hover: none) and (max-device-height: 640px) {
+  :root {
+    --panel-width: calc(100% - 24px);
+    --edge-pad: 16px;
+    --canvas-max-pixel-ratio: 1;
+    --panel-header-pad: 6px;
+    --panel-header-control-size: 44px;
+    --panel-actions-gap: 6px;
+    --panel-history-gap: 10px;
+    --panel-bottom-gap: 10px;
+    --panel-action-height: 28px;
+    --panel-action-font-size: 10px;
+    --panel-label-margin-top: 8px;
+    --panel-label-margin-bottom: 3px;
+    --panel-label-font-size: 11px;
+    --panel-slider-height: 14px;
+    --panel-segment-padding: 3px;
+    --panel-segment-font-size: 9px;
+    --panel-color-padding-top: 0px;
+  }
+
+  #ui {
+    left: 12px;
+    top: 12px;
+    max-height: calc(100dvh - 24px);
+  }
+
+  #panel-body {
+    display: grid;
+    grid-template-columns: minmax(0, .96fr) minmax(0, 1.04fr);
+    align-items: start;
+    gap: 10px;
+    padding: 10px;
+  }
+
+  /* The 1.2x treatment is desktop-only; phones keep the compact geometry that
+     fits beside the canvas and preserves the existing touch layout. */
+  #panel-grip { width: 44px; height: 24px; }
+  #bar-size-slider,
+  #bar-hue-stripe { height: 18px; border-radius: 9px; }
+  #bar-hue-stripe .handle {
+    width: 4px;
+    height: 22px;
+    margin-top: -11px;
+    margin-left: -2px;
+  }
+  #color-picker-slot .IroWheel + .IroSlider {
+    margin-top: calc(20px + var(--picker-lower-shift)) !important;
+  }
+  .adhoc-color { width: 32px; height: 32px; font-size: 10px; }
+
+  #paint-color-hex,
+  #paint-color-alpha,
+  #paint-color-model {
+    padding: 3px 5px;
+    font-size: 9px;
+  }
+}
+
+/* Short touch viewports need density before scrolling. The body still scrolls
+   as a fallback, but common phone heights expose every action sooner. */
+@media (pointer: coarse) and (hover: none) and (max-height: 900px) {
+  #panel-bar { padding-block: 6px; }
+  .button { margin-top: 12px; }
+  .control-label { margin-top: 5px; }
+  #panel-body { padding-bottom: 10px; }
+}
+
+/* Android "Desktop site" gives a phone a desktop-sized (~980px) layout
+   viewport, then scales the complete page back onto the physical screen. A
+   fixed 12px label consequently renders around 5px high. Viewport units are
+   stable through that page scale: 3vw is the same physical proportion in the
+   normal 390px viewport and in the scaled 980px viewport. `device-width` /
+   `device-height` distinguish this from a real coarse-pointer tablet. */
+@media (pointer: coarse) and (hover: none) and (min-width: 900px) and (max-device-width: 640px),
+       (pointer: coarse) and (hover: none) and (min-width: 900px) and (max-device-height: 640px) {
+  :root {
+    --edge-pad: 4.1vw;
+    --panel-actions-gap: 1.54vw;
+    --panel-history-gap: 2.56vw;
+    --panel-bottom-gap: 2.56vw;
+    --panel-action-height: 7.18vw;
+    --panel-action-font-size: 2.56vw;
+    --panel-label-margin-top: 2.05vw;
+    --panel-label-margin-bottom: .77vw;
+    --panel-label-font-size: 2.82vw;
+    --panel-slider-height: 3.59vw;
+    --panel-segment-padding: .77vw;
+    --panel-segment-font-size: 2.82vw;
+  }
+
+  #ui {
+    left: 3.1vw;
+    top: 3.1vw;
+    border-radius: 3.1vw;
+  }
+
+  #panel-bar {
+    gap: 2.6vw;
+    padding: 2.05vw 2.56vw;
+  }
+
+  #panel-grip { width: 11.3vw; height: 6.15vw; }
+  #panel-grip span { width: .77vw; height: .77vw; }
+  #bar-size-slider,
+  #bar-hue-stripe { height: 4.62vw; border-radius: 2.31vw; }
+  #panel-extension-toggle {
+    width: 7.18vw;
+    height: 7.18vw;
+    border-radius: 1.54vw;
+    font-size: 4.87vw;
+  }
+  #bar-hue-stripe .handle {
+    width: 1.03vw;
+    height: 5.64vw;
+    margin-top: -2.82vw;
+    margin-left: -.51vw;
+  }
+
+  .button {
+    margin-top: 6.15vw;
+    width: 29.5vw;
+    height: 7.7vw;
+    line-height: 7.7vw;
+    font-size: 3.08vw;
+  }
+  #save-button,
+  #redo-button { margin-left: 2.56vw; }
+
+  #panel-body {
+    gap: 2.56vw;
+    padding: 2.56vw;
+  }
+
+  .color-code-readout { gap: .77vw; }
+  #paint-color-hex,
+  #paint-color-alpha { padding: .77vw 1.28vw; border-radius: 1.03vw; font-size: 2.56vw; }
+  #paint-color-model { font-size: 2.31vw; }
+
+  #panel-extension {
+    width: 61.5vw;
+    border-radius: 3.08vw;
+  }
+  .panel-extension-header { gap: 2.05vw; padding: 2.05vw; }
+  #panel-extension-grip { width: 44px; height: 44px; }
+  .panel-extension-tabs button,
+  #panel-extension-close {
+    min-height: 8.2vw;
+    font-size: 3.08vw;
+  }
+  #panel-extension-close { width: 8.2vw; font-size: 5.13vw; }
+  .panel-extension-page {
+    min-height: 30.8vw;
+    padding: 4.1vw;
+    font-size: 3.08vw;
+  }
+
+  .debug-toggle-corner .debug-toggle {
+    width: 10.25vw;
+    height: 10.25vw;
+  }
+  .debug-toggle-corner .debug-toggle svg {
+    width: 5.64vw;
+    height: 5.64vw;
+  }
+  #debug-toggle-tr {
+    bottom: calc(max(2.05vw, env(safe-area-inset-bottom)) + 12.3vw);
+    right: 2.05vw;
+  }
+  #debug-toggle-br {
+    bottom: max(2.05vw, env(safe-area-inset-bottom));
+    right: 2.05vw;
+  }
+}
