@@ -19,6 +19,20 @@
  * the panel is a real element and the browser hit-tests it.
  */
 
+/* UI Preset API visibility must win over component display declarations. */
+#ui[hidden],
+#ui [hidden] {
+  display: none !important;
+}
+
+html[data-reduced-motion] #ui *,
+html[data-reduced-motion] #ui *::before,
+html[data-reduced-motion] #ui *::after {
+  transition-duration: 0.01ms !important;
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+}
+
 :root {
   /* Authored here and nowhere else. Nothing in JS reads it: the panel is a real
      element, so the browser decides what it covers. */

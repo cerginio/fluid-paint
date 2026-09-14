@@ -30,13 +30,17 @@
       throw new Error('Fluid Paint controller is not ready for embedded mode.');
     }
     if (!painter.storyPlaybackController) painter.storyPlaybackController = controller;
+    const controlApi = new FluidControlApi(painter, controller);
     const embedded = await createFluidEmbeddedClient({
       createMessageApi,
       editorOrigin,
       controller,
       compileModel: TilecraftStrokePlayer.compile,
       decodeBackground: (blob, name, meta) => painter.decodeBackground(blob, name, meta),
+      uiApi: window.__fluidUiPresetApi,
+      controlApi,
     });
+    embedded.controlApi = controlApi;
     window.__fluidEmbeddedClient = embedded;
     window.requestTilecraftFluidScene = (options) => embedded.client.requestScene(options);
     return embedded;

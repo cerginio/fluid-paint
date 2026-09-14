@@ -61,6 +61,8 @@ class ToolPanel {
     this._installDrag();
     this._installHueStripe();
     this._installExtension();
+    this._onFluidUiLayoutChanged = () => this.refreshFluidUi();
+    document.addEventListener('fluid-ui-layout-changed', this._onFluidUiLayoutChanged);
 
     // Start compact on every device. The bar keeps the high-frequency paint
     // controls available, while the extension can still be opened independently
@@ -277,37 +279,56 @@ class ToolPanel {
 
     this.extensionTabs = [...this.extension.querySelectorAll('[data-extension-tab]')];
     this.extensionPages = [...this.extension.querySelectorAll('[data-extension-page]')];
-    for (const [index, tab] of this.extensionTabs.entries()) {
+    for (const tab of this.extensionTabs) {
       tab.addEventListener('click', () => {
         this.selectExtensionTab(tab.getAttribute('data-extension-tab'));
       });
       tab.addEventListener('keydown', (event) => {
-        let nextIndex = index;
-        if (event.key === 'ArrowRight') nextIndex = (index + 1) % this.extensionTabs.length;
-        else if (event.key === 'ArrowLeft') nextIndex = (index - 1 + this.extensionTabs.length) % this.extensionTabs.length;
+        const available = this.extensionTabs.filter((candidate) => !candidate.hidden);
+        const currentIndex = available.indexOf(tab);
+        let nextIndex = currentIndex;
+        if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % available.length;
+        else if (event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + available.length) % available.length;
         else if (event.key === 'Home') nextIndex = 0;
-        else if (event.key === 'End') nextIndex = this.extensionTabs.length - 1;
+        else if (event.key === 'End') nextIndex = available.length - 1;
         else return;
         event.preventDefault();
-        const next = this.extensionTabs[nextIndex];
+        const next = available[nextIndex];
         this.selectExtensionTab(next.getAttribute('data-extension-tab'), true);
       });
     }
-    const selected = this.extensionTabs.find((tab) => tab.getAttribute('aria-selected') === 'true');
+    const selected = this.extensionTabs.find((tab) => !tab.hidden && tab.getAttribute('aria-selected') === 'true') ||
+      this.extensionTabs.find((tab) => !tab.hidden);
     if (selected) this.selectExtensionTab(selected.getAttribute('data-extension-tab'));
+  }
+
+  refreshFluidUi() {
+    if (!this.extension) return;
+    const available = this.extensionTabs.filter((tab) => !tab.hidden);
+    const selected = available.find((tab) => tab.getAttribute('aria-selected') === 'true') || available[0];
+    if (selected) this.selectExtensionTab(selected.getAttribute('data-extension-tab'));
+    else this.setExtensionOpen(false, false);
+    this.clampIntoView();
   }
 
   selectExtensionTab(selected, focus = false) {
     if (!this.extension) return;
+    const targetTab = this.extensionTabs.find((tab) =>
+      !tab.hidden && tab.getAttribute('data-extension-tab') === selected
+    );
+    if (!targetTab) return;
     this.setExtensionCollapsed(false);
     for (const tab of this.extensionTabs) {
-      const active = tab.getAttribute('data-extension-tab') === selected;
+      const active = !tab.hidden && tab.getAttribute('data-extension-tab') === selected;
       tab.setAttribute('aria-selected', active ? 'true' : 'false');
       tab.setAttribute('tabindex', active ? '0' : '-1');
       if (active && focus) tab.focus();
     }
     for (const page of this.extensionPages) {
-      page.hidden = page.getAttribute('data-extension-page') !== selected;
+      const matchingTab = this.extensionTabs.find((tab) =>
+        !tab.hidden && tab.getAttribute('data-extension-tab') === page.getAttribute('data-extension-page')
+      );
+      page.hidden = !matchingTab || page.getAttribute('data-extension-page') !== selected;
     }
   }
 
@@ -450,6 +471,7 @@ class ToolPanel {
 
   destroy() {
     window.removeEventListener('resize', this._onWindowResize);
+    document.removeEventListener('fluid-ui-layout-changed', this._onFluidUiLayoutChanged);
   }
 }
 

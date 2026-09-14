@@ -402,6 +402,13 @@ class ColorControl {
     }
   }
 
+  setAdhocColor(color) {
+    if (color !== null && color !== 'white' && color !== 'black') {
+      throw new TypeError('Ad-hoc paint color must be white, black, or null.');
+    }
+    this._setAdhocColor(color);
+  }
+
   /** Release the observer. Nothing in this app tears the panel down today, but
    *  a second host might, and an observer on a removed element leaks. */
   destroy() {
