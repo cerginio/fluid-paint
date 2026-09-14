@@ -53,6 +53,19 @@ function createMessageApi({
     return api;
   } // << createMessageApi
   const defaultTimeout = 2500;
+
+  function sanitizeRpcError(error) {
+    let details = {};
+    if (error?.details && Object.getPrototypeOf(error.details) === Object.prototype) {
+      try { details = JSON.parse(JSON.stringify(error.details)); } catch (_) { details = {}; }
+    }
+    return {
+      code: typeof error?.code === "string" && error.code ? error.code : "RPC_HANDLER_ERROR",
+      message: String(error?.message || error || "RPC handler failed"),
+      details,
+    };
+  }
+
   class MessageApiImpl {
     constructor(cfg) {
       Object.assign(this, cfg);
@@ -411,7 +424,11 @@ function createMessageApi({
             clearTimeout(pending.timeoutId);
             this.pending.delete(msg.replyTo);
             if (msg.type === "ack") pending.resolve(msg.payload);
-            else pending.reject(Object.assign(new Error(msg.payload?.message || "RPC error"), { payload: msg.payload }));
+            else pending.reject(Object.assign(new Error(msg.payload?.message || "RPC error"), {
+              code: msg.payload?.code || "RPC_ERROR",
+              details: msg.payload?.details || {},
+              payload: msg.payload,
+            }));
           }
         }
   
@@ -429,7 +446,7 @@ function createMessageApi({
           Promise.resolve()
             .then(() => appHandler(msg.payload, msg, peer))
             .then((res) => this._send(peer, "ack", res ?? { ok: true }, { replyTo: msg.id }))
-            .catch((e) => this._send(peer, "error", { code: "RPC_HANDLER_ERROR", message: String(e) }, { replyTo: msg.id }));
+            .catch((e) => this._send(peer, "error", sanitizeRpcError(e), { replyTo: msg.id }));
           return;
         }
   
@@ -925,4 +942,3 @@ function createMessageApi({
     for (let i = 0; i < len; i++) u8[i] = binary.charCodeAt(i);
     return u8;
   }
-

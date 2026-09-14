@@ -14,6 +14,17 @@
         return new URL(origin).origin;
     }
 
+    function assertModelViewport({ width, height, padding = 24 } = {}) {
+        if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0 ||
+            width > 8192 || height > 8192 || !Number.isFinite(padding) || padding < 0 ||
+            padding >= Math.min(width, height) / 2) {
+            throw fluidError("INVALID_MODEL_VIEWPORT", "Fluid model viewport is invalid", {
+                width, height, padding
+            });
+        }
+        return { width, height, padding };
+    }
+
     class FluidGamifierBridge {
         constructor({
             createMessageApi,
@@ -23,6 +34,8 @@
             renderBackground,
             onSceneReady = () => {},
             onSceneFailed = () => {},
+            onUiStateChanged = () => {},
+            onModeStateChanged = () => {},
             pngLimitBytes = DEFAULT_PNG_LIMIT,
             jsonLimitBytes = DEFAULT_JSON_LIMIT,
         }) {
@@ -33,10 +46,14 @@
             this.renderBackground = renderBackground;
             this.onSceneReady = onSceneReady;
             this.onSceneFailed = onSceneFailed;
+            this.onUiStateChanged = onUiStateChanged;
+            this.onModeStateChanged = onModeStateChanged;
             this.pngLimitBytes = pngLimitBytes;
             this.jsonLimitBytes = jsonLimitBytes;
             this.api = null;
             this.currentTransferId = null;
+            this.pendingExports = new Map();
+            this.offExportStream = null;
         }
 
         async connect(timeoutMs = 8000) {
@@ -48,15 +65,115 @@
                 allowedOrigins: [this.fluidOrigin],
                 adoptSessionId: false,
                 protocolVersion: FLUID_PROTOCOL_VERSION,
-                maxIncomingBytes: this.jsonLimitBytes,
+                maxIncomingBytes: this.pngLimitBytes,
+                acceptStreamOpen(info) {
+                    return info.kind === "fluid-export" && info.mime === "image/png" &&
+                        info.size <= DEFAULT_PNG_LIMIT || {
+                        accepted: false,
+                        code: "STREAM_REFUSED",
+                        message: "TileCraft accepts only bounded Fluid PNG exports"
+                    };
+                },
             });
             this.api = api;
             api.addPeer("fluid-player", this.iframe.contentWindow, { origin: this.fluidOrigin });
             api.expose("api.fluid.requestScene", (request) => this._handleRequestScene(request));
             api.expose("api.fluid.sceneReady", (payload) => this._handleSceneReady(payload));
             api.expose("api.fluid.sceneFailed", (payload) => this._handleSceneFailed(payload));
+            api.expose("api.fluid.uiStateChanged", (payload) => {
+                if (payload?.transferId !== this.currentTransferId) return { stale: true };
+                this.onUiStateChanged(payload);
+                return { accepted: true };
+            });
+            api.expose("api.fluid.modeStateChanged", (payload) => {
+                if (payload?.transferId !== this.currentTransferId) return { stale: true };
+                this.onModeStateChanged(payload);
+                return { accepted: true };
+            });
+            this.offExportStream = api.on("stream:assembled", (stream) => this._handleExportStream(stream));
             await api.waitReady("fluid-player", timeoutMs);
             return true;
+        }
+
+        async openMode(options) {
+            if (!this.api) throw fluidError("NOT_CONNECTED", "Fluid bridge is not connected");
+            const result = await this.api.call("fluid-player", "api.fluid.openMode", options, { timeoutMs: 12000 });
+            this.currentTransferId = result.transferId;
+            return result;
+        }
+
+        control(command, value) {
+            if (!this.api || !this.currentTransferId) throw fluidError("SCENE_NOT_READY", "No active Fluid scene");
+            return this.api.call("fluid-player", "api.fluid.control", {
+                transferId: this.currentTransferId,
+                command,
+                value,
+            });
+        }
+
+        configureUi(config) {
+            if (!this.api || !this.currentTransferId) throw fluidError("SCENE_NOT_READY", "No active Fluid scene");
+            return this.api.call("fluid-player", "api.fluid.configureUi", { transferId: this.currentTransferId, config });
+        }
+
+        getUiState() {
+            if (!this.api || !this.currentTransferId) throw fluidError("SCENE_NOT_READY", "No active Fluid scene");
+            return this.api.call("fluid-player", "api.fluid.getUiState", { transferId: this.currentTransferId });
+        }
+
+        getModeState() {
+            if (!this.api || !this.currentTransferId) throw fluidError("SCENE_NOT_READY", "No active Fluid scene");
+            return this.api.call("fluid-player", "api.fluid.getModeState", { transferId: this.currentTransferId });
+        }
+
+        requestExport({ exportId = crypto.randomUUID(), name = "fluid-play.png" } = {}) {
+            if (!this.api || !this.currentTransferId) throw fluidError("SCENE_NOT_READY", "No active Fluid scene");
+            const transferId = this.currentTransferId;
+            if (this.pendingExports.has(exportId)) throw fluidError("DUPLICATE_EXPORT_ID", "exportId is already pending");
+            const result = new Promise((resolve, reject) => {
+                const timeoutId = setTimeout(() => {
+                    this.pendingExports.delete(exportId);
+                    reject(fluidError("EXPORT_TIMEOUT", "Fluid PNG export timed out"));
+                }, 20000);
+                this.pendingExports.set(exportId, { transferId, resolve, reject, timeoutId });
+            });
+            this.api.call("fluid-player", "api.fluid.requestExport", {
+                exportId, transferId, name,
+            }, { timeoutMs: 20000 }).catch((error) => {
+                const pending = this.pendingExports.get(exportId);
+                if (!pending) return;
+                clearTimeout(pending.timeoutId);
+                this.pendingExports.delete(exportId);
+                pending.reject(error);
+            });
+            return result;
+        }
+
+        _handleExportStream(stream) {
+            if (stream?.kind !== "fluid-export") return;
+            const exportId = stream.meta?.exportId;
+            const pending = this.pendingExports.get(exportId);
+            if (!pending) return;
+            clearTimeout(pending.timeoutId);
+            this.pendingExports.delete(exportId);
+            if (stream.meta?.transferId !== pending.transferId || pending.transferId !== this.currentTransferId) {
+                pending.reject(fluidError("STALE_EXPORT", "Fluid export does not belong to the active scene"));
+                return;
+            }
+            const bytes = new Uint8Array(stream.data);
+            const signature = [137, 80, 78, 71, 13, 10, 26, 10];
+            if (stream.mime !== "image/png" || signature.some((value, index) => bytes[index] !== value)) {
+                pending.reject(fluidError("INVALID_EXPORT", "Fluid export is not a valid PNG stream"));
+                return;
+            }
+            pending.resolve({
+                exportId,
+                transferId: pending.transferId,
+                name: stream.name || "fluid-play.png",
+                blob: new Blob([stream.data], { type: "image/png" }),
+                width: stream.meta?.width ?? null,
+                height: stream.meta?.height ?? null,
+            });
         }
 
         _handleRequestScene(request = {}) {
@@ -69,6 +186,9 @@
             if (!wants.length || wants.some((kind) => kind !== "model" && kind !== "background")) {
                 throw fluidError("INVALID_WANTS", "wants must contain model and/or background");
             }
+            if (wants.includes("model")) {
+                assertModelViewport(request.modelViewport);
+            }
             this.currentTransferId = transferId;
             Promise.resolve().then(() => this._sendScene({ ...request, transferId, wants }))
                 .catch((error) => this._notifyTransferFailure(transferId, error));
@@ -77,7 +197,11 @@
 
         async _sendScene(request) {
             const sendModel = async () => {
-                const result = await this.exportModel({ frameId: request.frameId, allFrames: false });
+                const result = await this.exportModel({
+                    frameId: request.frameId,
+                    allFrames: false,
+                    modelViewport: request.modelViewport,
+                });
                 await this.api.sendJSON("fluid-player", result.model, {
                     kind: "tilecraft-model",
                     name: `story-${request.frameId}.json`,
@@ -126,16 +250,23 @@
 
         async _notifyTransferFailure(transferId, error) {
             if (!this.api) return;
+            let deliveredToChild = false;
             try {
                 await this.api.call("fluid-player", "api.fluid.transferFailed", {
                     transferId,
                     code: error?.code || "SCENE_TRANSFER_FAILED",
                     message: String(error?.message || error),
                 });
+                // The child reports the same failure back through sceneFailed.
+                // Do not invoke the parent callback a second time after that
+                // acknowledged RPC path succeeds.
+                deliveredToChild = true;
             } catch {
                 // The child may already be gone; local failure reporting still runs.
             }
-            this.onSceneFailed({ transferId, code: error?.code || "SCENE_TRANSFER_FAILED", message: String(error?.message || error) });
+            if (!deliveredToChild) {
+                this.onSceneFailed({ transferId, code: error?.code || "SCENE_TRANSFER_FAILED", message: String(error?.message || error) });
+            }
         }
 
         _handleSceneReady(payload = {}) {
@@ -151,6 +282,13 @@
         }
 
         dispose() {
+            this.offExportStream?.();
+            this.offExportStream = null;
+            for (const pending of this.pendingExports.values()) {
+                clearTimeout(pending.timeoutId);
+                pending.reject(fluidError("EXPORT_CANCELLED", "Fluid session closed during export"));
+            }
+            this.pendingExports.clear();
             this.api?.dispose();
             this.api = null;
             this.currentTransferId = null;
@@ -158,11 +296,12 @@
     }
 
     class FluidSceneClient {
-        constructor({ api, controller, compileModel, decodeBackground }) {
+        constructor({ api, controller, compileModel, decodeBackground, onSceneReady = () => {} }) {
             this.api = api;
             this.controller = controller;
             this.compileModel = compileModel;
             this.decodeBackground = decodeBackground;
+            this.onSceneReady = onSceneReady;
             this.currentTransferId = null;
             this.pending = new Map();
             this.offAssembled = api.on("stream:assembled", (stream) =>
@@ -174,7 +313,13 @@
             });
         }
 
-        async requestScene({ frameId, wants = ["model", "background"], backgroundMode = "reference", streamOrder } = {}) {
+        async requestScene({
+            frameId,
+            wants = ["model", "background"],
+            backgroundMode = "reference",
+            streamOrder,
+            modelViewport,
+        } = {}) {
             const transferId = crypto.randomUUID();
             this.currentTransferId = transferId;
             for (const [id, slot] of this.pending) {
@@ -188,6 +333,7 @@
                 background: null,
                 activated: false,
                 failed: false,
+                modelViewport: modelViewport ? { ...modelViewport } : null,
             });
             try {
                 await this.api.call("editor", "api.fluid.requestScene", {
@@ -196,6 +342,7 @@
                     backgroundMode,
                     wants,
                     streamOrder,
+                    modelViewport,
                 }, { timeoutMs: 8000 });
             } catch (error) {
                 await this._fail(transferId, error);
@@ -234,6 +381,15 @@
             if (slot.activated || slot.failed || transferId !== this.currentTransferId) return;
             if (slot.wants.has("model") && !slot.model) return;
             if (slot.wants.has("background") && !slot.background) return;
+            if (slot.modelViewport && typeof this.controller.getModelViewport === "function") {
+                const current = this.controller.getModelViewport(slot.modelViewport.padding);
+                if (current.width !== slot.modelViewport.width || current.height !== slot.modelViewport.height) {
+                    throw fluidError("STALE_MODEL_VIEWPORT", "Fluid painting viewport changed during model transfer", {
+                        requested: slot.modelViewport,
+                        current,
+                    });
+                }
+            }
             slot.activated = true;
             if (typeof this.controller.loadScene === "function") {
                 await this.controller.loadScene({ model: slot.model, background: slot.background, transferId });
@@ -247,6 +403,7 @@
                 return;
             }
             await this.api.call("editor", "api.fluid.sceneReady", { transferId });
+            this.onSceneReady({ transferId });
             this.pending.delete(transferId);
         }
 
@@ -285,6 +442,8 @@
         controller,
         compileModel = root.compileFluidStoryModel,
         decodeBackground = (blob) => createImageBitmap(blob),
+        uiApi = null,
+        controlApi = null,
         timeoutMs = 8000,
     }) {
         const exactEditorOrigin = assertExactOrigin(editorOrigin);
@@ -310,13 +469,100 @@
             },
         });
         api.addParentPeer("editor", { origin: exactEditorOrigin });
-        const client = new FluidSceneClient({ api, controller, compileModel, decodeBackground });
+        const client = new FluidSceneClient({
+            api,
+            controller,
+            compileModel,
+            decodeBackground,
+            onSceneReady({ transferId }) {
+                controlApi?.startAutoplay?.(transferId);
+            },
+        });
+        const requireActiveTransfer = (payload = {}) => {
+            if (!client.currentTransferId || payload.transferId !== client.currentTransferId) {
+                throw fluidError("STALE_TRANSFER", "The request does not belong to the active Fluid scene", {
+                    expected: client.currentTransferId,
+                    received: payload.transferId || null,
+                });
+            }
+        };
+        const unexpose = [];
+        if (uiApi) {
+            unexpose.push(api.expose("api.fluid.configureUi", async (payload = {}) => {
+                requireActiveTransfer(payload);
+                const state = await uiApi.configure(payload.config);
+                await api.call("editor", "api.fluid.uiStateChanged", { transferId: payload.transferId, state });
+                return { accepted: true, transferId: payload.transferId, state };
+            }));
+            unexpose.push(api.expose("api.fluid.getUiState", (payload = {}) => {
+                requireActiveTransfer(payload);
+                return { transferId: payload.transferId, state: uiApi.getState() };
+            }));
+        }
+        if (controlApi) {
+            unexpose.push(api.expose("api.fluid.openMode", async (payload = {}) => {
+                const definition = controlApi.configureMode(payload.mode, {
+                    palette: payload.palette,
+                    reducedMotion: payload.reducedMotion,
+                    allowDrawing: payload.allowDrawing,
+                    autoplay: payload.autoplay,
+                    playbackSpeed: payload.playbackSpeed,
+                });
+                if (uiApi) await uiApi.configure(definition.ui);
+                const transferId = await client.requestScene({
+                    frameId: payload.frameId,
+                    wants: [...definition.wants],
+                    backgroundMode: "reference",
+                    modelViewport: definition.wants.includes("model") &&
+                        typeof controller.getModelViewport === "function"
+                        ? controller.getModelViewport(24)
+                        : undefined,
+                });
+                controlApi.activateTransfer(transferId);
+                return { accepted: true, transferId, mode: payload.mode, uiState: uiApi?.getState() || null };
+            }));
+            unexpose.push(api.expose("api.fluid.control", (payload) => controlApi.execute(payload)));
+            unexpose.push(api.expose("api.fluid.getModeState", (payload = {}) => {
+                requireActiveTransfer(payload);
+                return { transferId: payload.transferId, state: controlApi.getState() };
+            }));
+            unexpose.push(api.expose("api.fluid.requestExport", async (payload = {}) => {
+                requireActiveTransfer(payload);
+                const exportId = String(payload.exportId || "");
+                if (!exportId) throw fluidError("INVALID_EXPORT_ID", "exportId is required");
+                const blob = await controlApi.painter.exportPngBlob();
+                if (!(blob instanceof Blob) || blob.type !== "image/png") {
+                    throw fluidError("INVALID_EXPORT", "Fluid renderer did not produce a PNG blob");
+                }
+                await api.sendBlob("editor", blob, {
+                    kind: "fluid-export",
+                    mime: "image/png",
+                    name: String(payload.name || "fluid-play.png"),
+                    maxBytes: DEFAULT_PNG_LIMIT,
+                    readyTimeoutMs: 8000,
+                    meta: {
+                        exportId,
+                        transferId: payload.transferId,
+                        width: controlApi.painter.paintingRectangle?.width ?? null,
+                        height: controlApi.painter.paintingRectangle?.height ?? null,
+                    },
+                });
+                return { accepted: true, exportId, transferId: payload.transferId };
+            }));
+        }
+        const unsubscribeMode = controlApi?.subscribe((state) => {
+            if (!state.transferId) return;
+            api.call("editor", "api.fluid.modeStateChanged", { transferId: state.transferId, state }).catch(() => {});
+        });
         await api.waitReady("editor", timeoutMs);
         return {
             api,
             client,
             dispose() {
                 client.dispose();
+                unsubscribeMode?.();
+                unexpose.forEach((off) => off?.());
+                controlApi?.dispose?.();
                 api.dispose();
             }
         };
@@ -330,4 +576,3 @@
         module.exports = { FluidGamifierBridge, FluidSceneClient, createFluidEmbeddedClient };
     }
 })(typeof window !== "undefined" ? window : globalThis);
-
