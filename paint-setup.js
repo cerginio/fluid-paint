@@ -124,6 +124,10 @@ const MAX_BRISTLE_COUNT = 100;
 const MIN_BRISTLE_COUNT = 10;
 const MIN_BRUSH_SCALE = 5;
 const MAX_BRUSH_SCALE = 75;
+// Host-controlled therapeutic modes may deliberately use a broader gesture
+// than the general-purpose Fluid UI. Keep the built-in sliders at their
+// original range while allowing the embed API to reach 50% farther.
+const MAX_EXTERNAL_BRUSH_SCALE = MAX_BRUSH_SCALE * 1.5;
 const BRUSH_HEIGHT = 2.0; //how high the brush is over the canvas - this is scaled with the brushScale
 const Z_THRESHOLD = 0.13333; //this is scaled with the brushScale
 

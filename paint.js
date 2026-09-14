@@ -20,6 +20,9 @@ class Paint {
         // debug/debug-flags.js). Read here and branched on at construction so a
         // disabled probe is structurally absent rather than a per-frame test.
         this.debug = parseDebugFlags();
+        if (window.__fluidUiAllowsDebug === false) {
+            Object.keys(this.debug).forEach((key) => { this.debug[key] = false; });
+        }
 
         // Enable required extensions
         if (wgl.isWebGL2) {
@@ -197,6 +200,12 @@ class Paint {
         this.brushX = 0;
         this.brushY = 0;
         this.brushScale = 50;
+        this.manualPaintingEnabled = true;
+        this.manualStrokeActive = false;
+        this._manualPaintingDisablePending = false;
+        this._manualInputPending = false;
+        this._queuedManualPan = null;
+        this._queuedManualEnd = null;
         // Pen pressure, as a MULTIPLIER rather than a computed height: brushScale
         // is changed independently by the size slider and the wheel, and a stored
         // height would silently keep the old size after either of those.
@@ -378,7 +387,7 @@ class Paint {
         const toggleTR = document.getElementById('debug-toggle-tr');
         const toggleBR = document.getElementById('debug-toggle-br');
 
-        this.debugToggles = toggleTR
+        this.debugToggles = toggleTR && window.__fluidUiAllowsDebug !== false
             ? new DebugToggles({
                 element: toggleTR,
                 toggles: [{
@@ -399,7 +408,7 @@ class Paint {
             })
             : null;
 
-        this.debugTogglesBR = toggleBR
+        this.debugTogglesBR = toggleBR && window.__fluidUiAllowsDebug !== false
             ? new DebugToggles({
                 element: toggleBR,
                 toggles: [{
@@ -587,9 +596,8 @@ class Paint {
         // --- Action buttons ---
         this.saveButton = document.getElementById('save-button');
         if (this.saveButton) {
-            this.saveButton.addEventListener('pointerdown', (event) => {
-                event.preventDefault();
-                this.save && this.save();
+            this.saveButton.addEventListener('click', () => {
+                this.save('painting.png');
             });
         }
 
@@ -1045,29 +1053,34 @@ class Paint {
             this.storyPlaybackController.state === 'paused';
     }
 
-    // Renders the painting to an offscreen texture and arms the save button
-    // with a data URL. Hoisted out of update(): it closes over nothing but this,
-    // and was previously reallocated every frame.
-    save() {
-        //reset attributes so nothing gets saved if we hit an error somewhere
-        this.saveButton.removeAttribute('download');
-        this.saveButton.setAttribute('href', '#');
+    async exportPngBlob() {
         const saveWidth = this.paintingRectangle.width;
         const saveHeight = this.paintingRectangle.height;
-
-        // The engine renders and reads back; the app only knows what to do with
-        // the bytes afterwards.
         const savePixels = this.engine.exportPixels({
             width: saveWidth,
             height: saveHeight,
             resolutionScale: this.resolutionScale,
             colorModel: this.colorModel,
         });
-
         const saveCanvas = this._pixelsToCanvas(savePixels, saveWidth, saveHeight);
+        return new Promise((resolve, reject) => saveCanvas.toBlob((blob) => {
+            if (blob) resolve(blob);
+            else reject(new Error('Fluid Paint could not encode the PNG export.'));
+        }, 'image/png'));
+    }
 
-        this.saveButton.setAttribute('download', 'painting.png');
-        this.saveButton.setAttribute('href', saveCanvas.toDataURL());
+    async save(name = 'painting.png') {
+        const blob = await this.exportPngBlob();
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = name;
+        anchor.hidden = true;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 0);
+        return blob;
     }
 
     _pixelsToCanvas(pixels, width, height) {
@@ -1410,7 +1423,9 @@ class Paint {
 
     /** Start the named stroke for a press that is actually painting. */
     _beginPaintStroke(pressure, pointerType) {
-        if (this.engine.strokeActive) this.engine.endStroke();
+        if (this.engine.strokeActive) {
+            throw new Error('Cannot begin a manual stroke while another stroke owns the engine.');
+        }
         this.engine.beginStroke({
             timing: 'live',
             x: this.brushX,
@@ -1421,8 +1436,20 @@ class Paint {
             color: this._strokeColor(),
             resolutionScale: this.getEffectiveResolutionScale(),
         });
+        this.manualStrokeActive = true;
         this.brushInitialized = true;
         this.needsRedraw = true;
+    }
+
+    setManualPaintingEnabled(enabled) {
+        const next = !!enabled;
+        if (!next && this.manualStrokeActive) {
+            this._manualPaintingDisablePending = true;
+            return false;
+        }
+        this.manualPaintingEnabled = next;
+        this._manualPaintingDisablePending = false;
+        return true;
     }
 
     onGestureStart = async (event) => {
@@ -1434,6 +1461,8 @@ class Paint {
             if (this.toolPanel) this.toolPanel.toggleAllCollapsed();
             return;
         }
+
+        if (!this.manualPaintingEnabled) return;
 
         const storyNeedsYield = this.storyPlaybackController && [
             'playing', 'paused', 'stop-decision', 'completed',
@@ -1463,6 +1492,11 @@ class Paint {
         // bug -- the canvas can no longer disagree with the picker about who
         // owns a pointer.
         const mode = this.desiredInteractionMode(mouseX, mouseY);
+
+        if (mode === InteractionMode.PAINTING && !this.manualPaintingEnabled) {
+            this.interactionState = InteractionMode.NONE;
+            return;
+        }
 
         if (mode === InteractionMode.PANNING) {
             this.interactionState = InteractionMode.PANNING;
@@ -1533,7 +1567,7 @@ class Paint {
         this.brushX = position.x;
         this.brushY = position.y;
         this.brushPressure = this._pressureScale(pt.pressure, pt.pointerType);
-        if (this.engine.strokeActive) {
+        if (this.manualStrokeActive && this.engine.strokeActive) {
             this.engine.strokeTo({ x: this.brushX, y: this.brushY, pressure: this.brushPressure });
         }
     }
@@ -1556,9 +1590,7 @@ class Paint {
 
         if (this.interactionState === InteractionMode.PAINTING) {
             // Live input updates a mailbox; physics runs only in advance().
-            if (!this.engine.strokeActive) {
-                this._beginPaintStroke(event.pressure, event.pointerType);
-            } else {
+            if (this.manualStrokeActive && this.engine.strokeActive) {
                 this.engine.strokeTo({
                     x: this.brushX,
                     y: this.brushY,
@@ -1669,14 +1701,24 @@ class Paint {
         // stroke reaches where the finger actually stopped rather than the last
         // resampled point. Also covers pointercancel and pointer loss, both of
         // which the dispatcher reports as panend.
-        if (this.engine.strokeActive) {
-            if (Number.isFinite(event.centerX) && Number.isFinite(event.centerY)) {
-                const p = this._toWorld(event.centerX, event.centerY);
-                this.brushX = p.x; this.brushY = p.y;
-                this.engine.strokeTo({ x: p.x, y: p.y, pressure: this.brushPressure });
+        if (this.manualStrokeActive) {
+            try {
+                if (this.engine.strokeActive) {
+                    if (Number.isFinite(event.centerX) && Number.isFinite(event.centerY)) {
+                        const p = this._toWorld(event.centerX, event.centerY);
+                        this.brushX = p.x; this.brushY = p.y;
+                        this.engine.strokeTo({ x: p.x, y: p.y, pressure: this.brushPressure });
+                    }
+                    this.engine.endStroke();
+                    this.needsRedraw = true;
+                }
+            } finally {
+                this.manualStrokeActive = false;
+                if (this._manualPaintingDisablePending) {
+                    this.manualPaintingEnabled = false;
+                    this._manualPaintingDisablePending = false;
+                }
             }
-            this.engine.endStroke();
-            this.needsRedraw = true;
         }
 
         // The next two-finger gesture measures its span from scratch.
@@ -1874,6 +1916,39 @@ class Paint {
         if (this.storyPlaybackController) await this.storyPlaybackController.yieldToManualInput();
         this.engine.clear();
         this.needsRedraw = true;
+    }
+
+    setPaintColor(value) {
+        if (value === 'white' || value === 'black') {
+            this.adhocPaintColor = value;
+            this.colorControl?.setAdhocColor(value);
+            this.needsRedraw = true;
+            return value;
+        }
+        const hsva = Array.isArray(value) ? value : value?.hsva;
+        if (!Array.isArray(hsva) || hsva.length !== 4 || hsva.some((part) => !Number.isFinite(part))) {
+            throw new TypeError('Paint color must be white, black, or an HSVA array.');
+        }
+        const normalized = [
+            ((hsva[0] % 1) + 1) % 1,
+            Utilities.clamp(hsva[1], 0, 1),
+            Utilities.clamp(hsva[2], 0, 1),
+            Utilities.clamp(hsva[3], 0, 1),
+        ];
+        this.brushColorHSVA.splice(0, 4, ...normalized);
+        this.adhocPaintColor = null;
+        this.colorControl?.setHSVA(normalized);
+        this.toolPanel?.setHue(normalized[0]);
+        this.needsRedraw = true;
+        return [...normalized];
+    }
+
+    setPaintSize(value) {
+        if (!Number.isFinite(value)) throw new TypeError('Paint size must be a finite number.');
+        this.brushScale = Utilities.clamp(value, MIN_BRUSH_SCALE, MAX_EXTERNAL_BRUSH_SCALE);
+        this.brushSizeSlider?.setValue(this.brushScale);
+        this.barSizeSlider?.setValue(this.brushScale);
+        return this.brushScale;
     }
 
     saveSnapshot() {
