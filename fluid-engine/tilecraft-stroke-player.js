@@ -5,6 +5,10 @@
 // to the fluid simulation.  The adapter never reads engine.brush/simulator.
 
 const TILECRAFT_BRUSH_SIZE_CORRECTION_RATE = 0.5;
+// Widest-to-narrowest `s` a single immutable stroke may cover before the run
+// is split. 2x cuts the onset ramp -- where the over-width lives -- while
+// leaving ordinary pressure variation, and a 1->2 `s` step, in one stroke.
+const WIDTH_SPLIT_RATIO = 2;
 const PLAYBACK_DURATION_EXPONENT = Math.log(10) / Math.log(800);
 
 function targetPlaySeconds(operationCount) {
@@ -687,16 +691,64 @@ class TilecraftStrokePlayer {
           tile.b > 0 || tile.f !== previous.f
         );
         if (breaks) {
-          yield { tiles: segment, closes: false, groupScale, groupColor };
+          yield* this._splitByWidth(segment, false, groupScale, groupColor);
           segment = [];
         }
         segment.push(tile);
       }
       if (segment.length) {
         const closes = tiles.length > 2 && tiles.some((tile) => tile.gz === 1);
-        yield { tiles: segment, closes, groupScale, groupColor };
+        yield* this._splitByWidth(segment, closes, groupScale, groupColor);
       }
     }
+  }
+
+  /*
+   * Split one path where its per-tile `s` changes enough that a single brush
+   * width can no longer stand for the whole run.
+   *
+   * A FluidEngine stroke has ONE immutable brushSize: it fixes spacing,
+   * zThreshold and splatRadius at beginStroke, so width cannot be varied
+   * per sample.  The player therefore drew every point at the segment's
+   * widest tile (Math.max of the sizes).  Tilecraft tapers strokes with `s`
+   * -- render.js:445 scales each point on its own -- so a tapered run was
+   * painted entirely at its thick end: a 128px frame of pic-3 has 163 of 164
+   * paths with over 2x internal spread, the worst drawing an s=0.0068 tile at
+   * its group's s=5.59.  That is the blob, and it grows with fit scale.
+   *
+   * Splitting into runs of similar width restores the taper while keeping
+   * each stroke's width immutable.  Consecutive runs repeat the boundary tile
+   * so the pieces overlap and read as one continuous stroke rather than
+   * separate dashes.
+   */
+  *_splitByWidth(tiles, closes, groupScale, groupColor) {
+    if (tiles.length < 2) {
+      if (tiles.length) yield { tiles, closes, groupScale, groupColor };
+      return;
+    }
+    const sizeOf = (tile) => (tile.s === undefined ? 1 : tile.s);
+    let run = [tiles[0]];
+    let runMin = sizeOf(tiles[0]);
+    let runMax = runMin;
+    for (let i = 1; i < tiles.length; i++) {
+      const size = sizeOf(tiles[i]);
+      const low = Math.min(runMin, size);
+      const high = Math.max(runMax, size);
+      // A closed path must stay one stroke: splitting it would leave the
+      // closing leg attached to the wrong run.
+      if (!closes && low > 0 && high / low > WIDTH_SPLIT_RATIO) {
+        yield { tiles: run, closes: false, groupScale, groupColor };
+        // Repeat the boundary tile so the next run starts where this ended.
+        run = [run[run.length - 1], tiles[i]];
+        runMin = Math.min(sizeOf(run[0]), size);
+        runMax = Math.max(sizeOf(run[0]), size);
+        continue;
+      }
+      run.push(tiles[i]);
+      runMin = low;
+      runMax = high;
+    }
+    if (run.length) yield { tiles: run, closes, groupScale, groupColor };
   }
 
   _replayPolylineSegment(segment, layer, context) {

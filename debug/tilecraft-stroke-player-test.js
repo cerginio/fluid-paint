@@ -76,6 +76,71 @@ new TilecraftStrokePlayer({
 assert.equal(scaledCalls[0].brushSize, 2.5,
   'width applies Tilecraft gd scale, 3000px canvas ratio, and map coordinate scale');
 
+// A tapered Tilecraft path must not be painted at its thick end.  FluidEngine
+// strokes have one immutable brushSize, so the player used to take the segment
+// maximum: an onset ramp (s 0.05 -> 5) was drawn entirely at the widest tile,
+// which is the blob seen on small frames, where fit scale magnifies it.
+const taperCalls = [];
+new TilecraftStrokePlayer({
+  beginStroke(options) { taperCalls.push(options); },
+  strokeTo() {}, endStroke() {},
+}).replay({ layers: [{ visible: true, tileShape: 'polyline', gridSize: 10, tiles: [
+  { x: 0, y: 0, c: '#ff0000', g: 3, s: 0.05 },
+  { x: 10, y: 0, c: '#ff0000', g: 3, s: 0.5 },
+  { x: 20, y: 0, c: '#ff0000', g: 3, s: 5 },
+] }] }, {
+  paintingRectangle: { left: 0, bottom: 0, width: 100, height: 100 },
+  canvasSize: { width: 3000, height: 3000 },
+  coordinateScale: 1,
+});
+assert.ok(taperCalls.length > 1,
+  'a path whose width ramps beyond the split ratio becomes several strokes');
+assert.ok(taperCalls[0].brushSize < taperCalls[taperCalls.length - 1].brushSize,
+  'the thin end of a taper keeps a thinner brush than the thick end');
+assert.ok(taperCalls[0].brushSize < 5,
+  'the thin end is not painted at the segment maximum (which would be 50)');
+
+// Runs stay contiguous: each split repeats its boundary tile so the pieces
+// overlap and read as one stroke rather than visible dashes.
+const contiguous = [];
+new TilecraftStrokePlayer({
+  beginStroke(options) { contiguous.push([{ x: options.x, y: options.y }]); },
+  strokeTo(options) { contiguous[contiguous.length - 1].push({ x: options.x, y: options.y }); },
+  endStroke() {},
+}).replay({ layers: [{ visible: true, tileShape: 'polyline', gridSize: 10, tiles: [
+  { x: 0, y: 0, c: '#ff0000', g: 4, s: 0.1 },
+  { x: 10, y: 0, c: '#ff0000', g: 4, s: 1 },
+  { x: 20, y: 0, c: '#ff0000', g: 4, s: 10 },
+] }] }, {
+  paintingRectangle: { left: 0, bottom: 0, width: 100, height: 100 },
+  canvasSize: { width: 3000, height: 3000 },
+  coordinateScale: 1,
+});
+for (let i = 1; i < contiguous.length; i++) {
+  const previousEnd = contiguous[i - 1][contiguous[i - 1].length - 1];
+  const currentStart = contiguous[i][0];
+  assert.deepEqual(currentStart, previousEnd,
+    'a split run starts where the previous run ended, so the stroke stays joined');
+}
+
+// An `s` step within the split ratio stays a single stroke: splitting every
+// pressure wobble would shatter ordinary strokes for no visual gain.
+const singleCalls = [];
+new TilecraftStrokePlayer({
+  beginStroke(options) { singleCalls.push(options); },
+  strokeTo() {}, endStroke() {},
+}).replay({ layers: [{ visible: true, tileShape: 'polyline', gridSize: 10, tiles: [
+  { x: 0, y: 0, c: '#ff0000', g: 5, s: 1 },
+  { x: 10, y: 0, c: '#ff0000', g: 5, s: 1.5 },
+] }] }, {
+  paintingRectangle: { left: 0, bottom: 0, width: 100, height: 100 },
+  canvasSize: { width: 3000, height: 3000 },
+  coordinateScale: 1,
+});
+assert.equal(singleCalls.length, 1,
+  'a width change within the split ratio stays one stroke');
+console.log('tilecraft taper: PASS (width split keeps thin ends thin and runs joined)');
+
 const framedStory = { layers: [
   { visible: true, tileShape: 'polyline', tiles: [
     { x: 20, y: 0, c: '#ff0000', g: 20, f: 2 },
