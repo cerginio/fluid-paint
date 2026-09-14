@@ -69,8 +69,7 @@ const ColorModelRGB = 1;
  *
  * Only the x*y*z term of the interpolation touches this corner, so every pure
  * hue and every two-pigment mix is bit-identical under either value; only
- * mixes containing ALL THREE pigments move at all. That is why the paint
- * goldens did not shift when the default changed.
+ * mixes containing ALL THREE pigments move at all.
  */
 const PIGMENT_CORNER_DAVID_LI = [0.2, 0.094, 0.0];
 const PIGMENT_CORNER_BLACK = [0.0, 0.0, 0.0];

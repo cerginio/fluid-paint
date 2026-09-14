@@ -3,14 +3,13 @@
 /*
  * Phase 8 probe -- the DOM colour control.
  *
- * The goldens cannot see any of this. They drive a scripted stroke with a fixed
- * seeded colour and never touch a control, so the entire picker could be missing
- * and all 12 hashes would stay byte-identical. Worse, the one thing that WOULD
- * move the hashes -- an RGB triple leaking into the simulation -- is exactly the
- * failure this phase risks, and it would move them in a way indistinguishable
- * from any other change.
+ * A scripted stroke with a fixed seeded colour never touches a control, so the
+ * entire picker could be missing and that alone would not surface it. Worse,
+ * the one thing that WOULD show up -- an RGB triple leaking into the
+ * simulation -- is exactly the failure this phase risks, and it would look
+ * indistinguishable from any other change.
  *
- * So this drives what the goldens structurally cannot:
+ * So this drives what a scripted stroke structurally cannot:
  *
  *   1. the wheel actually mounts, inside #color-picker-slot, as real DOM
  *   2. no GL picker remains: the app boots with picker.vert/frag deleted

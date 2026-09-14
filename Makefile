@@ -6,8 +6,7 @@ NETLIFY_FLAGS ?=
 .DEFAULT_GOAL := help
 
 .PHONY: help setup install browsers dev build clean lint test test-fast \
-	test-browser test-golden test-golden-record test-golden-dist verify ci \
-	deploy-preview deploy-prod
+	test-browser verify ci deploy-preview deploy-prod
 
 help:
 	@echo "Fluid Paint development targets"
@@ -23,9 +22,6 @@ help:
 	@echo "  make test-browser        Run headless Chromium/WebGL checks"
 	@echo "  make test                Run fast and browser checks"
 	@echo "  make verify              Run the release test suite and production build"
-	@echo "  make test-golden         Compare source output with golden baselines"
-	@echo "  make test-golden-dist    Build and compare dist/ with golden baselines"
-	@echo "  make test-golden-record  Replace golden baselines after visual review"
 	@echo "  make ci                  Set up, test, and build in a clean CI job"
 	@echo "  make deploy-preview      Verify and create a Netlify draft deploy"
 	@echo "  make deploy-prod         Verify and deploy to Netlify production"
@@ -69,15 +65,6 @@ test-browser:
 test:
 	$(MAKE) test-fast
 	$(MAKE) test-browser
-
-test-golden:
-	$(NPM) run test:golden
-
-test-golden-record:
-	$(NPM) run test:golden:record
-
-test-golden-dist: build
-	$(NPM) run test:golden:dist
 
 verify:
 	$(MAKE) test

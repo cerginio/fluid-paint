@@ -52,8 +52,7 @@ presenter`. `typeof` is defined for undeclared identifiers, so the engine asks
 
 **The general rule this establishes:** the engine must not read a bare global its
 host never heard of. There is now exactly one such read left and it is guarded;
-if another appears, it will not be caught by the goldens — it will be caught by
-this probe, or by a user.
+if another appears, it will be caught by this probe, or by a user.
 
 ---
 

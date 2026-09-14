@@ -4,8 +4,8 @@
  * A single-runner lock for anything that launches Playwright.
  *
  * Why this exists. Each headless Chromium here costs ~300-800 MB and pins a
- * core; the golden run drives 12 scenarios through one browser, which is fine
- * on its own. What is NOT fine is two or three of those running at once --
+ * core; one test run driving many scenarios through one browser is fine on
+ * its own. What is NOT fine is two or three of those running at once --
  * measured on this machine: 12 chrome-headless-shell processes, 91% CPU, and
  * the mouse freezing for seconds at a time. That happened because runs were
  * started in the background and a second one was launched before the first

@@ -3,9 +3,9 @@
 /*
  * Phase 7 probe -- the responsive layout.
  *
- * The goldens cannot see ANY of this. They drive a scripted stroke on a
- * window-sized canvas with no container, which is precisely the path Phase 7
- * left untouched on purpose. Every claim the phase makes is invisible to them:
+ * A scripted stroke on a window-sized canvas with no container -- precisely
+ * the path Phase 7 left untouched on purpose -- cannot see any of this. Every
+ * claim the phase makes is invisible to that kind of check:
  *
  *   1. the canvas is sized from #canvas-cell (not the window) and keeps the
  *      whole window, because the panel FLOATS rather than taking a column

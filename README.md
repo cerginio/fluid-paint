@@ -30,5 +30,4 @@ If GNU Make is unavailable, use `npm ci`, `npx playwright install chromium`,
 - [Deployment command reference](DEPLOY.md)
 - [FluidEngine API: Zero to Hero](docs/FLUID-ENGINE-API-ZERO-TO-HERO.md)
 - [Device verification](docs/DEVICE-VERIFICATION.md)
-- [Golden-image testing](docs/GOLDEN-IMAGES.md)
 - [Tilecraft embedded-vendor manifest](docs/TILECRAFT-FLUID-VENDOR.md)

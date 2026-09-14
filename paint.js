@@ -8,8 +8,8 @@ class Paint {
      * @param {Object} [options]
      * @param {HTMLElement} [options.container]  the element whose CSS box sizes
      *   the canvas (Phase 7). Omitting it keeps the pre-Phase-7 behaviour of
-     *   sizing to the window, which is what the golden harness and any host
-     *   that has not adopted the layout rely on.
+     *   sizing to the window, which any host that has not adopted the layout
+     *   relies on.
      */
     constructor(canvas, wgl, options) {
         this.canvas = canvas;
@@ -150,8 +150,8 @@ class Paint {
         // texture from Math.random(), so with the deterministic RNG installed
         // its bristles depend on how many draws came first. This one used to
         // happen before `new Brush(...)`; the engine now owns the Brush, so the
-        // draw has to move up here to keep the sequence -- otherwise every
-        // golden hash shifts for no reason anyone could see in the diff.
+        // draw has to move up here to keep the sequence -- otherwise the
+        // brush color shifts for no reason anyone could see in the diff.
         this.brushColorHSVA = [Math.random(), 1, 1, 0.8];
         this.adhocPaintColor = null;
 

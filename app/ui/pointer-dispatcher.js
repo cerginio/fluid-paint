@@ -299,9 +299,9 @@ class PointerDispatcher {
         // LOCAL PATCH (fluid-paint, Phase 6) -- see docs/UI-COMPONENTS.md.
         //
         // Upstream tests only whether getCoalescedEvents EXISTS, not whether it
-        // returned anything. A synthetic PointerEvent (dispatchEvent, as the
-        // golden harness and any automated test uses) has the method but returns
-        // an EMPTY list, so `samples` was [], the loop below never ran, and no
+        // returned anything. A synthetic PointerEvent (dispatchEvent, as any
+        // automated test uses) has the method but returns an EMPTY list, so
+        // `samples` was [], the loop below never ran, and no
         // pan/pan2/pinch was ever emitted -- panstart and panend still fired,
         // which is what makes it look like input works.
         //

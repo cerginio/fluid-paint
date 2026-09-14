@@ -56,8 +56,8 @@ transformable frame.
 These are load-bearing, and each was learned from a real bug in an earlier phase:
 
 1. **Settle after a press.** `initializeBrush()` places the bristles; they must
-   fall before any crosses `Z_THRESHOLD` and deposits. The golden harness
-   settles 10 frames. Painting immediately after the press lays nothing at all,
+   fall before any crosses `Z_THRESHOLD` and deposits -- settling 10 frames is
+   enough. Painting immediately after the press lays nothing at all,
    silently.
 2. **Point spacing IS the stroke dynamics.** `Brush.update()` derives bristle
    speed from the delta it is handed, not from elapsed time. Feeding A then B

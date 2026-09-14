@@ -36,8 +36,8 @@ const samples = (typeof e.getCoalescedEvents === 'function')
     : [e];
 ```
 
-A **synthetic** `PointerEvent` — `dispatchEvent`, which is what the golden
-harness and any automated test uses — has the method but returns an **empty
+A **synthetic** `PointerEvent` — `dispatchEvent`, which is what any automated
+test uses — has the method but returns an **empty
 list**. `samples` was therefore `[]`, the loop never ran, and no
 `pan` / `pan2` / `pinch` was ever emitted. `panstart` and `panend` still fired,
 which is what makes the failure look like working input: a stroke begins, ends,
@@ -101,11 +101,11 @@ lower half, with a sub-half-viewport scroll cap. The optional File/Player
 extension chooses a free adjacent side and falls back to an in-panel overlay on
 narrow phones.
 
-### What the goldens cannot see
+### What a scripted stroke cannot see
 
-Gesture behaviour, pen pressure and hover are all invisible to golden images —
-they never call `save()`, never enter the resize preview, and drive only a
-single-pointer mouse stroke. Phase 6 was verified with a throwaway probe
+Gesture behaviour, pen pressure and hover are all invisible to a scripted,
+single-pointer mouse stroke — it never calls `save()` and never enters the
+resize preview. Phase 6 was verified with a throwaway probe
 (`debug/phase6-probe2.js`, deleted after use per the `debug/` convention) that
 drove pen pressure, two-finger pan, pinch and hover directly, with these
 expected values:

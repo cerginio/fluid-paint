@@ -5,10 +5,9 @@
  *
  * The phase's claim is that `examples/minimal/` is a SECOND HOST for
  * FluidEngine: a bare canvas, three controls, none of the app's chrome, and a
- * working painting. The goldens cannot check any of that -- they drive
- * index.html, and a second host that never loaded would leave all 12 hashes
- * byte-identical. The only thing that fails if the boundary is fake is this
- * page, and nothing tests this page.
+ * working painting. Nothing that only drives index.html can check that -- a
+ * second host that never loaded would go unnoticed. The only thing that
+ * fails if the boundary is fake is this page, and nothing tests this page.
  *
  * So the probe drives it. What it checks, and why each one is a real risk:
  *

@@ -245,9 +245,9 @@ disc RGB and pigment triple.
 
 ### Regression and test sensitivity
 
-Run the revised colour probe against source and production build. Run existing
-source/dist paint goldens without recording new baselines; the paint path is
-preserved. Run shader lint if shader-related harness code is introduced.
+Run the revised colour probe against source and production build; the paint
+path is preserved. Run shader lint if shader-related harness code is
+introduced.
 
 Temporarily reintroduce each failure and verify the appropriate test fails:
 
@@ -258,14 +258,14 @@ Temporarily reintroduce each failure and verify the appropriate test fails:
 - Missing Digital channel swap: Digital numeric/GPU tests.
 
 Remove all sabotage changes before delivery. Inspect the three reported cases
-visually and record the tested browser/rendering configuration. Report probe,
-build, and golden results separately; no single pass count establishes parity.
+visually and record the tested browser/rendering configuration. Report probe
+and build results separately; no single pass count establishes parity.
 
 ## Completion criteria
 
 Every displayed selected colour comes from the same pigment triple that the
 brush deposits. The full disc and slider interiors use that contract. The
 reported centre, zero-value, and half-value-red cases agree across picker,
-handles, preview, and engine base colour in both modes. Existing paint goldens
-remain unchanged, and documentation no longer describes the divergent formula
+handles, preview, and engine base colour in both modes. Existing paint output
+remains unchanged, and documentation no longer describes the divergent formula
 as correct.

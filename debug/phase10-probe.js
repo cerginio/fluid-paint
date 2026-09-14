@@ -30,7 +30,7 @@
  *   4. the compact bar's hue stripe agrees with the wheel.
  *   5. the Natural/Digital toggle repaints BOTH, including the ring.
  *   6. the paint path is untouched: hue still reaches the RYB channel it always
- *      did. The goldens cover this too, but this fails faster and says why.
+ *      did.
  *
  * Per the debug/ convention this is a throwaway: delete after use, write it
  * back if the colour space is reworked again.
@@ -46,11 +46,11 @@ const { acquireBrowserLock } = require('./browser-lock');
 
 acquireBrowserLock('phase10 probe');
 
-/* GOLDEN_ROOT=dist runs this against the built bundle, the same switch the
- * golden suite uses. Worth doing for this phase specifically: the fix depends
- * on ryb.js being concatenated BEFORE iro.js, and minification strips the
- * comments and mangles the names that a source-level grep would look for -- so
- * running the real page is the only honest check of the bundle's order. */
+/* GOLDEN_ROOT=dist runs this against the built bundle. Worth doing for this
+ * phase specifically: the fix depends on ryb.js being concatenated BEFORE
+ * iro.js, and minification strips the comments and mangles the names that a
+ * source-level grep would look for -- so running the real page is the only
+ * honest check of the bundle's order. */
 const ROOT = path.resolve(__dirname, '..', process.env.GOLDEN_ROOT || '');
 const MIME = {
   '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css',
@@ -470,9 +470,8 @@ const dist = (a, b) =>
     clip: { x: Math.round(composited.x) + 24, y: Math.round(composited.y) - 1, width: 3, height: 3 },
   });
 
-  /* PNG decode without a dependency: the golden harness already pulls pixels
-   * through the page, so do the same here -- hand the bytes back to the browser
-   * and let it decode them. */
+  /* PNG decode without a dependency: hand the bytes back to the browser and
+   * let it decode them. */
   const centrePixel = await page.evaluate(async (b64) => {
     const img = new Image();
     img.src = 'data:image/png;base64,' + b64;
@@ -580,8 +579,7 @@ const dist = (a, b) =>
 
   /*
    * The whole risk of this phase is a display change leaking into the paint
-   * path. The goldens are the real guard, but they take minutes; this says the
-   * same thing in seconds and names the channel when it fails.
+   * path. This says so in seconds and names the channel when it fails.
    */
   const painted = await page.evaluate(async () => {
     const p = window.__painter;

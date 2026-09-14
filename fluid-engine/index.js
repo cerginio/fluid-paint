@@ -33,8 +33,8 @@ const BYTES_PER_RGBA_TEXEL = 16;
 /*
  * Phase 9a stroke dynamics. These were duplicated in every host that painted;
  * the named API owns them now. They are VERSIONED constants -- changing one
- * changes the look of every stroke and every golden, so do not tune them to
- * make a single test pass. The low-level primitives are unaffected.
+ * changes the look of every stroke, so do not tune them to make a single
+ * test pass. The low-level primitives are unaffected.
  */
 const STROKE_HEIGHT_SCALE = 2.0;      // brush height over the canvas
 const STROKE_MIN_PRESSURE = 0.15;     // a light touch still paints
@@ -148,8 +148,7 @@ class FluidEngine {
    *   trilinear interpolation reads this corner, so every pure hue and every
    *   two-pigment mix (orange, green, purple) is bit-identical either way.
    *   Deltas appear only where all three pigments are present -- 6/255 at a
-   *   middling three-way mix, 51/255 at the corner itself. The paint goldens
-   *   are unchanged under either value.
+   *   middling three-way mix, 51/255 at the corner itself.
    *
    *   Fixed at construction; see PaintingRenderer for why it cannot flip
    *   mid-session.
@@ -159,7 +158,7 @@ class FluidEngine {
 
     /* Phase 8a. Captured once so a host that swaps Math.random after
      * construction cannot make one engine nondeterministic halfway through.
-     * The ?seed= golden harness installs its Math.random BEFORE the engine is
+     * A host using ?seed= installs its Math.random BEFORE the engine is
      * built, so it keeps working untouched. */
     this.random = typeof random === 'function' ? random : Math.random;
 

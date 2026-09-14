@@ -44,8 +44,7 @@
  *
  * This is a RENDERING aid for the UI only. Nothing here is on the paint path --
  * `paint.js` still calls `hsvToRyb()` from `common.js` and hands the RYB triple
- * to `splat()` untouched. The golden hashes prove that: if any of this leaked
- * inward they would move. This file only answers the question "what colour
+ * to `splat()` untouched. This file only answers the question "what colour
  * should this pixel of the WIDGET be", which the widget was previously
  * answering in the wrong colour space.
  *

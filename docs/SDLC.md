@@ -143,23 +143,6 @@ Use `make test` for both the fast and browser tiers. Use `make verify` as the
 pre-review and pre-release gate; it runs all of those tests and then creates a
 fresh production build.
 
-### Golden rendering checks
-
-- `make test-golden` compares source rendering with
-  `debug/golden-baseline.json`.
-- `make test-golden-dist` builds and compares the production artifact.
-- `make test-golden-record` intentionally replaces the baseline.
-
-Golden tests are not part of `make verify` today. The current baseline is known
-to report screen-hash drift after the pigment-black rendering change, while the
-paint hashes remain stable; this is documented in `package.json` and
-`docs/GOLDEN-IMAGES.md`. Treat results as review evidence, not a green release
-gate, until the baseline has been visually reviewed and approved.
-
-Never re-record merely to make a failure disappear. Inspect the rendered
-output, confirm the change is intended, record once, review the baseline diff,
-and explain the visual change in the commit or pull request.
-
 ### Manual and physical-device checks
 
 Headless Chromium is necessary but not sufficient for this WebGL application.
@@ -200,7 +183,7 @@ make ci
 ```
 
 `make ci` performs a locked install, installs Chromium, runs the complete
-non-golden suite, and builds `dist/`. Cache npm's download cache and Playwright
+test suite, and builds `dist/`. Cache npm's download cache and Playwright
 browsers if desired, but never cache `node_modules/` in place of `npm ci`.
 Archive `dist/` from the successful build if a later deployment stage must
 publish exactly the tested artifact.
@@ -287,7 +270,5 @@ reliable than restoring the previously published immutable deploy.
   verify the mirrored shader directories and `gulpfile.js` source lists.
 - **Port 3000 is occupied:** stop the conflicting process; the Gulp development
   server currently has a fixed port.
-- **Golden tests fail:** read `docs/GOLDEN-IMAGES.md` and the known-baseline note
-  above before deciding whether the change is a regression.
 - **Netlify cannot find the site:** run `netlify link`, or pass
   `NETLIFY_FLAGS="--site=<site-id>"`.

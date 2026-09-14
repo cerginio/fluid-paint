@@ -93,6 +93,4 @@ different outcomes for fluidity 0.6 and 0.9 using repeatable brush layouts.
 The GPU checks use SwiftShader and a 256x192 simulation for bounded test cost;
 they do not certify a 16.7 ms frame budget on a physical GPU at 2048x2048.
 
-Shader lint, color parity and the production build remain checks. Golden hashes
-from the old timing/deposition behavior are not expected to match. Do not
-re-record them automatically or report their drift as a passing golden run.
+Shader lint, color parity and the production build remain checks.

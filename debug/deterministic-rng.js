@@ -7,7 +7,7 @@
  * a fixed 1/60 (simulator.js:680), never a wall-clock delta, and the bristle
  * `randoms` texture is filled once in the Brush constructor rather than per
  * frame. So pinning Math.random is sufficient to make a scripted stroke produce
- * identical pixels every run -- which is what the golden-image harness needs.
+ * identical pixels every run.
  *
  * mulberry32: 32-bit state, uniform output, adequate for scattering bristles.
  * It is not a cryptographic generator and is not used as one.

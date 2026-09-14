@@ -112,8 +112,8 @@ function parseDebugFlags(search) {
  * It defaults ON because a picker with no black is the worse default; the
  * original stays reachable for anyone comparing against David Li's model.
  *
- * Turning it on did NOT move the paint goldens: all 12 hashes are byte
- * identical under either corner, because only the x*y*z term of the trilinear
+ * Turning it on did NOT change deposited paint output: it is byte-identical
+ * under either corner, because only the x*y*z term of the trilinear
  * interpolation reads it. Pure hues and two-pigment mixes (orange, green,
  * purple) are bit-identical, and even the wetBlend scenario -- three
  * overlapping strokes in red, yellow and blue -- never accumulates enough

@@ -156,8 +156,7 @@ Required API:
    button touches the bottom/right safe gap rather than reserving 256 px for an
    absent probe.
 9. A panel overlapping a debug control receives the pointer event.
-10. Existing color, timing, shader lint, build, and golden paint-data checks
-   remain valid; screen goldens may change only where debug chrome is present.
+10. Existing color, timing, shader lint, and build checks remain valid.
 11. Dragging the header across the viewport midpoint flips the body without
     changing the header's screen coordinate by more than one pixel.
 12. The extension can open, close, and switch File/Player tabs; its rectangle

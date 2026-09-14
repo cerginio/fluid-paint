@@ -21,8 +21,7 @@ const paths = {
   // Phase 7: the stylesheet is app/layout.css and it is copied WITH its
   // directory (see styles(), which passes `base`), because index.html links it
   // as app/layout.css. Copying it flat to dist/layout.css would 404 in the
-  // built output while working perfectly from source -- a break only the dist
-  // golden run would catch.
+  // built output while working perfectly from source.
   css: ['app/layout.css'],
   // Order matters because the project uses globals (no module system).
   // Adjust if you add/remove files.
@@ -38,9 +37,6 @@ const paths = {
     'debug/gpu-profiles.js',
     'debug/texture-selftest.js',
     'debug/device-diag.js',
-    // Golden-image harness. Inert unless ?golden= is present; included so the
-    // production bundle can be verified the same way the sources are.
-    'debug/golden-harness.js',
     'common.js',
     'debug.js',
     'fluid-engine/gl/wrappedgl.js',

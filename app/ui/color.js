@@ -54,8 +54,7 @@
  * RGB assumption. The geometry, hit-testing, handles and events remain iro's.
  *
  * Note what did NOT change: the H/S/V/A boundary above is untouched, and the
- * hue the user picks is still the same number. Only its swatch moved. The
- * golden hashes are the proof -- they are unchanged by this phase, because
+ * hue the user picks is still the same number. Only its swatch moved --
  * nothing here is on the paint path.
  *
  * ---------------------------------------------------------------------------

@@ -62,12 +62,12 @@ class Viewport {
     // Falling back to the parent looks harmless and is not: a canvas appended
     // straight to <body> would then measure body's box, and body's height is
     // content-driven, so it is sized BY the canvas it is supposed to be sizing.
-    // Measured, that costs the dpr2 goldens -- all six drifted while all six
-    // dpr1 rows passed, because at ratio 1 the two happened to agree.
+    // That feedback loop only shows up at devicePixelRatio 2 -- at ratio 1 the
+    // two sizings happen to agree.
     //
     // So a container is opt-in. Without one the viewport keeps its pre-Phase-7
-    // window sizing exactly, which is also what the golden harness and any
-    // embedding host that never adopts the layout rely on.
+    // window sizing exactly, which any embedding host that never adopts the
+    // layout relies on.
     this.container = opts.container || null;
 
     this.pixelRatio = 1;
@@ -199,10 +199,10 @@ class Viewport {
     // that keeps holding if a later layout gives the cell an auto track.
     //
     // Without a container the old exemption is kept rather than tidied away.
-    // That is not tidiness either: writing the style at ratio 1 changed the
-    // dpr2 golden hashes when this was first attempted, because the canvas was
-    // then measuring <body>, whose height is content-driven. Leaving the
-    // no-container path untouched is what keeps 12/12 byte-identical.
+    // That is not tidiness either: writing the style at ratio 1 broke output
+    // when this was first attempted, because the canvas was then measuring
+    // <body>, whose height is content-driven. Leaving the no-container path
+    // untouched is what keeps rendering identical.
     if (this.container !== null || pixelRatio !== 1) {
       this.canvas.style.width = cssWidth + 'px';
       this.canvas.style.height = cssHeight + 'px';
