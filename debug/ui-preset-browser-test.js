@@ -82,6 +82,40 @@ const server = http.createServer((request, response) => {
       'brush-options exposes Paint Fluidity in the panel');
     assert.equal(await page.locator('#bristles-slider').isVisible(), true,
       'brush-options exposes Bristle Count in the panel');
+    assert.equal(await page.locator('#bristle-shapes').isVisible(), true,
+      'brush-options exposes Bristle Shape in the panel');
+    assert.deepEqual(
+      await page.locator('#bristle-shapes div').allTextContents(),
+      ['Round', 'Tri', 'Quad', 'Pent', 'Hex']);
+    assert.equal(
+      await page.locator('#bristle-shapes .button-selected').textContent(), 'Round',
+      'the round default is selected on load');
+    assert.equal(await page.evaluate(() => window.__painter.brushShape), null,
+      'and Round means no footprint at all, not a 0-sided one');
+
+    // The control must actually reach the stroke: select Hex, then confirm the
+    // footprint the engine is handed. A control that only moved its highlight
+    // would pass every visibility check above.
+    const strokeShape = await page.evaluate(async () => {
+      const buttons = [...document.querySelectorAll('#bristle-shapes div')];
+      buttons.find((button) => button.textContent === 'Hex')
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      const painter = window.__painter;
+      const seen = [];
+      const original = painter.engine.beginStroke.bind(painter.engine);
+      painter.engine.beginStroke = (options) => { seen.push(options.brushShape); return original(options); };
+      painter.update = () => {};
+      if (painter.engine.strokeActive) painter.engine.endStroke();
+      painter.brushX = painter.paintingRectangle.left + 100;
+      painter.brushY = painter.paintingRectangle.bottom + 100;
+      painter._beginPaintStroke(1, 'mouse');
+      painter.engine.endStroke();
+      painter.engine.beginStroke = original;
+      return { state: painter.brushShape, passedToEngine: seen };
+    });
+    assert.deepEqual(strokeShape.state, { sides: 6 });
+    assert.deepEqual(strokeShape.passedToEngine, [{ sides: 6 }],
+      'the selected footprint reaches beginStroke()');
 
     await page.goto(`${base}&uiMode=preset&uiPreset=draw-min`);
     await page.waitForFunction(() => window.__painter && window.__fluidUiPresetApi);

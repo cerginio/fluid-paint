@@ -979,7 +979,17 @@ html, body {
 #panel-body .buttons div:first-child { border-left-width: 1px; }
 #panel-body .buttons div:last-child { border-right: 1px solid white; }
 #panel-body #qualities div,
-#panel-body #models div { flex: 1; width: auto; }
+#panel-body #models div,
+#panel-body #bristle-shapes div { flex: 1; width: auto; }
+/* Five segments in a narrow panel: let the labels shrink rather than overflow
+   the column. The names are already abbreviated (Tri/Quad/Pent/Hex). */
+#panel-body #bristle-shapes div {
+  min-width: 0;
+  padding-inline: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 #panel-body .panel-column-color { padding-top: var(--panel-color-padding-top); }
 #panel-body #color-picker-slot { width: 100%; margin: 0; }
 #panel-body .panel-actions .button {

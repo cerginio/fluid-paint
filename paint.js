@@ -200,6 +200,10 @@ class Paint {
         this.brushX = 0;
         this.brushY = 0;
         this.brushScale = 50;
+        /* Bristle footprint for manual painting. null is the round default --
+         * the engine treats a missing brushShape and an explicit null the same
+         * way, so a host that never touches this paints exactly as before. */
+        this.brushShape = BRISTLE_SHAPES[INITIAL_BRISTLE_SHAPE].shape;
         this.manualPaintingEnabled = true;
         this.manualStrokeActive = false;
         this._manualPaintingDisablePending = false;
@@ -271,6 +275,21 @@ class Paint {
             },
             { label: 'Brush Size', step: 1, formatValue: (size) => `${Math.round(size)} px` }
         );
+
+        /* The footprint is fixed for the whole press -- the engine applies it
+         * before the bristles are drawn, and deforming a settled brush would
+         * fight its own distance constraints. Changing it therefore affects the
+         * NEXT stroke; no snapshot is taken, because nothing on the canvas
+         * changes until the user paints again. */
+        const bristleShapesElement = document.getElementById('bristle-shapes');
+        this.bristleShapeButtons = bristleShapesElement
+            ? new Buttons(
+                bristleShapesElement,
+                BRISTLE_SHAPES.map((entry) => entry.name),
+                INITIAL_BRISTLE_SHAPE,
+                (index) => { this.brushShape = BRISTLE_SHAPES[index].shape; }
+            )
+            : null;
 
         this.qualityButtons = new Buttons(
             document.getElementById('qualities'),
@@ -1435,6 +1454,7 @@ class Paint {
             paintingRectangle: this.paintingRectangle,
             color: this._strokeColor(),
             resolutionScale: this.getEffectiveResolutionScale(),
+            brushShape: this.brushShape,
         });
         this.manualStrokeActive = true;
         this.brushInitialized = true;

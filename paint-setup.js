@@ -128,6 +128,28 @@ const MAX_BRUSH_SCALE = 75;
 // than the general-purpose Fluid UI. Keep the built-in sliders at their
 // original range while allowing the embed API to reach 50% farther.
 const MAX_EXTERNAL_BRUSH_SCALE = MAX_BRUSH_SCALE * 1.5;
+/*
+ * Bristle footprints offered in the UI, in panel order.
+ *
+ * `shape: null` is the round default and must stay first -- it is the brush
+ * every existing painting was made with, and the shader's round path is
+ * bit-identical to the pre-shape engine.
+ *
+ * Sides stop at 6 rather than the engine's 8: splatRadius rounds the corners,
+ * so a 7- or 8-gon is not visually distinguishable from a circle (measured
+ * n-th harmonic 0.018 for an octagon against a 0.005 round baseline -- see
+ * docs/FLUID-ENGINE-API-ZERO-TO-HERO.md). Offering choices a user cannot see
+ * would make the control feel broken.
+ */
+const BRISTLE_SHAPES = [
+  { name: 'Round', shape: null },
+  { name: 'Tri', shape: { sides: 3 } },
+  { name: 'Quad', shape: { sides: 4 } },
+  { name: 'Pent', shape: { sides: 5 } },
+  { name: 'Hex', shape: { sides: 6 } },
+];
+const INITIAL_BRISTLE_SHAPE = 0; // Round
+
 const BRUSH_HEIGHT = 2.0; //how high the brush is over the canvas - this is scaled with the brushScale
 const Z_THRESHOLD = 0.13333; //this is scaled with the brushScale
 
