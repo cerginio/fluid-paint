@@ -36,13 +36,13 @@
       Those are the two controls a painter changes mid-stroke. Everything else
       lives in #panel-body, which the grip toggles.
     -->
-    <div id="ui" data-collapsed="true">
+    <div id="ui" data-collapsed="true" hidden>
         <div id="panel-bar">
-            <div id="bar-size-slider" class="slider"></div>
+            <div id="bar-size-slider" class="slider" data-fluid-ui-feature="brush-size"></div>
             <div id="panel-grip" title="Drag to move, tap to collapse">
                 <span></span><span></span><span></span>
             </div>
-            <div id="bar-hue-stripe"><div class="handle"></div></div>
+            <div id="bar-hue-stripe" data-fluid-ui-feature="color-picker"><div class="handle"></div></div>
             <button id="panel-extension-toggle" type="button"
                     aria-expanded="false" aria-controls="panel-extension"
                     title="Show additional tools">+</button>
@@ -50,28 +50,28 @@
 
         <div id="panel-body">
             <div class="panel-column panel-column-controls">
-                <div class="control-label">Paint Fluidity</div>
-                <div id="fluidity-slider" class="slider"></div>
-                <div class="control-label">Bristle Count</div>
-                <div id="bristles-slider" class="slider"></div>
-                <div class="control-label">Brush Size</div>
-                <div id="size-slider" class="slider"></div>
-                <div class="panel-actions panel-history-actions">
+                <div class="control-label" data-fluid-ui-feature="brush-options">Paint Fluidity</div>
+                <div id="fluidity-slider" class="slider" data-fluid-ui-feature="brush-options"></div>
+                <div class="control-label" data-fluid-ui-feature="brush-options">Bristle Count</div>
+                <div id="bristles-slider" class="slider" data-fluid-ui-feature="brush-options"></div>
+                <div class="control-label" data-fluid-ui-feature="brush-size">Brush Size</div>
+                <div id="size-slider" class="slider" data-fluid-ui-feature="brush-size"></div>
+                <div class="panel-actions panel-history-actions" data-fluid-ui-feature="state-bake">
                     <div id="undo-button" class="button">Undo</div>
                     <div id="redo-button" class="button">Redo</div>
                 </div>
                 <div class="panel-bottom-controls">
-                    <div class="panel-actions panel-document-actions">
+                    <div class="panel-actions panel-document-actions" data-fluid-ui-feature="state-bake">
                         <div id="clear-button" class="button">Clear</div>
-                        <a id="save-button" class="button">Save</a>
+                        <button id="save-button" class="button" type="button">Save As…</button>
                     </div>
-                    <div class="control-label">Quality</div>
-                    <div class="buttons" id="qualities"></div>
-                    <div class="buttons" id="models"></div>
+                    <div class="control-label" data-fluid-ui-feature="brush-options">Quality</div>
+                    <div class="buttons" id="qualities" data-fluid-ui-feature="brush-options"></div>
+                    <div class="buttons" id="models" data-fluid-ui-feature="colors-options"></div>
                 </div>
             </div>
 
-            <div class="panel-column panel-column-color">
+            <div class="panel-column panel-column-color" data-fluid-ui-feature="color-picker">
                 <!-- The iro.js wheel mounts HERE (Phase 8). It is DOM content,
                      so the two-column layout can size it directly. -->
                 <div id="color-picker-slot">
@@ -266,10 +266,10 @@
 
       Starting state comes from ?debug= (debug/debug-flags.js), not from markup.
     -->
-    <div id="debug-toggle-tr" class="debug-toggle-corner"></div>
-    <div id="debug-toggle-br" class="debug-toggle-corner"></div>
+    <div id="debug-toggle-tr" class="debug-toggle-corner" data-fluid-ui-full-only></div>
+    <div id="debug-toggle-br" class="debug-toggle-corner" data-fluid-ui-full-only></div>
 
-    <div id="footer">
+    <div id="footer" data-fluid-ui-full-only>
         <a href="http://david.li">david.li</a> | <a href="http://github.com/dli/paint">Origin code</a>
     </div>
 
@@ -325,10 +325,12 @@
     <script src="app/ui/debug-toggles.js"></script>
     <script src="brushviewer.js"></script>
     <script src="app/ui/pointer-dispatcher.js"></script>
+    <script src="app/ui/preset-api.js"></script>
     <script src="app/ui/panel.js"></script>
     <script src="app/ui/story-tools.js"></script>
     <script src="paint-setup.js"></script>
     <script src="paint.js"></script>
+    <script src="app/fluid-control-api.js"></script>
     <script src="app/fluid-embed-bootstrap.js"></script>
 
     <script>
@@ -354,6 +356,15 @@
             // ?audit=1           log every FLOAT+LINEAR texture creation
             const params = new URLSearchParams(location.search);
             const gpuProfile = params.get('gpu');
+            let fluidUiConfig = null;
+            let fluidUiBootstrapError = null;
+            try {
+                fluidUiConfig = parseFluidUiConfig(location.search);
+                window.__fluidUiAllowsDebug = resolveFluidUiConfig(fluidUiConfig).config.mode === 'full';
+            } catch (error) {
+                fluidUiBootstrapError = error;
+                window.__fluidUiAllowsDebug = false;
+            }
 
             const wgl = WrappedGL.create(canvas, null, (rawGl) => {
                 if (gpuProfile) installGpuClamp(rawGl, gpuProfile);
@@ -372,6 +383,9 @@
             // what makes brush.js's `if (presenter)` skip the readback rather
             // than merely hide its output.
             const debugFlags = parseDebugFlags();
+            if (!window.__fluidUiAllowsDebug) {
+                Object.keys(debugFlags).forEach((key) => { debugFlags[key] = false; });
+            }
 
             /*
              * Build and tear down the texture probe.
@@ -425,6 +439,26 @@
 
                     //required features are supported
                     document.getElementById('placeholder').outerHTML = document.getElementById('main').innerHTML;
+
+                    try {
+                        if (fluidUiBootstrapError) throw fluidUiBootstrapError;
+                        window.__fluidUiPresetApi = createFluidUiPresetApi({
+                            initialConfig: fluidUiConfig,
+                            adapter: new FluidUiDomAdapter(document),
+                        });
+                    } catch (error) {
+                        const surface = document.createElement('div');
+                        surface.id = 'fluid-ui-config-error';
+                        surface.setAttribute('role', 'alert');
+                        surface.textContent = `Fluid UI configuration error (${error.code || 'INVALID_UI_CONFIG'}). `;
+                        const reload = document.createElement('a');
+                        reload.href = location.pathname;
+                        reload.textContent = 'Open the default interface';
+                        surface.appendChild(reload);
+                        document.body.appendChild(surface);
+                        console.error('Fluid UI bootstrap:', error);
+                        return;
+                    }
 
                     // Move the canvas into its grid cell now that the layout
                     // exists, and drop the absolute positioning the bootstrap

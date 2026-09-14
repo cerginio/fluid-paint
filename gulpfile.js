@@ -79,10 +79,12 @@ const paths = {
     // Reports Y-down CSS-relative coords, so paint.js adapts them via viewport.
     'app/ui/pointer-dispatcher.js',
     // The floating tool panel (Phase 7). After the dispatcher, before paint.js.
+    'app/ui/preset-api.js',
     'app/ui/panel.js',
     'app/ui/story-tools.js',
     'paint-setup.js',
     'paint.js',
+    'app/fluid-control-api.js',
     'app/fluid-embed-bootstrap.js'
 
   ],

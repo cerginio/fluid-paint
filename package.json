@@ -33,7 +33,10 @@
     "test:tilecraft:gpu": "node debug/tilecraft-story-gpu-test.js",
     "test:story-ui": "node debug/story-player-ui-test.js",
     "test:live-gpu": "node debug/live-gpu-test.js",
-    "test:bake": "node debug/bake-gpu-test.js"
+    "test:bake": "node debug/bake-gpu-test.js",
+    "test:ui-preset": "node debug/ui-preset-api-test.js",
+    "test:ui-preset:browser": "node debug/ui-preset-browser-test.js",
+    "test:fluid-control": "node debug/fluid-control-api-test.js"
   },
   "overrides": {
     "picomatch": "2.3.2"
