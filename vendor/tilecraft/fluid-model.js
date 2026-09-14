@@ -1,7 +1,25 @@
 (function (root) {
     "use strict";
 
-    const SUPPORTED_FLUID_LAYER_SHAPES = new Set(["polyline", "polygon"]);
+    /*
+     * A layer shape carries two independent facts, and playback needs them
+     * separately:
+     *
+     *   TOPOLOGY  -- connected path, or independent spots?
+     *   FOOTPRINT -- what shape is each individual mark? (the renderer's
+     *                concern; see tilecraft-stroke-player.js)
+     *
+     * `square` is a PATH whose marks are square. Its tiles carry `g` groups and
+     * `b` breaks exactly like polyline, and their spacing matches a polyline
+     * layer at the same gridSize -- so it replays as strokes, not as one tap
+     * per tile.
+     *
+     * `rectangle` is a tolerated alias for `square`: no observed Tilecraft
+     * export writes it, so nothing may depend on it being present.
+     */
+    const FLUID_PATH_SHAPES = new Set(["polyline", "square", "rectangle"]);
+    const FLUID_SPOT_SHAPES = new Set(["polygon", "circle"]);
+    const SUPPORTED_FLUID_LAYER_SHAPES = new Set([...FLUID_PATH_SHAPES, ...FLUID_SPOT_SHAPES]);
     const TILE_FIELDS = ["x", "y", "c", "f", "g", "b", "gd", "gz", "s", "v"];
     const LAYER_FIELDS = ["id", "tag", "visible", "tileShape", "gridSize", "polygonSize", "scale", "opacity", "mod"];
 
@@ -213,6 +231,12 @@
     root.transformFluidStoryModel = transformFluidStoryModel;
     root.fluidFitBox = fluidFitBox;
     root.validateFluidModelViewport = validateFluidModelViewport;
+    // Exported so the host loader and the stroke player test the same shapes as
+    // the compiler. A second hand-written literal is how `circle` came to be
+    // accepted by one gate and rejected by another.
+    root.FLUID_PATH_SHAPES = FLUID_PATH_SHAPES;
+    root.FLUID_SPOT_SHAPES = FLUID_SPOT_SHAPES;
+    root.SUPPORTED_FLUID_LAYER_SHAPES = SUPPORTED_FLUID_LAYER_SHAPES;
     if (typeof module !== "undefined" && module.exports) {
         module.exports = {
             buildFluidStoryModel,
@@ -220,6 +244,9 @@
             transformFluidStoryModel,
             fluidFitBox,
             validateFluidModelViewport,
+            FLUID_PATH_SHAPES,
+            FLUID_SPOT_SHAPES,
+            SUPPORTED_FLUID_LAYER_SHAPES,
         };
     }
 })(typeof window !== "undefined" ? window : globalThis);

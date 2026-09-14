@@ -11,6 +11,39 @@ const TILECRAFT_BRUSH_SIZE_CORRECTION_RATE = 0.5;
 const WIDTH_SPLIT_RATIO = 2;
 const PLAYBACK_DURATION_EXPONENT = Math.log(10) / Math.log(800);
 
+/*
+ * A Tilecraft layer shape carries two independent facts, and conflating them
+ * is why `square` first looked like a spot shape:
+ *
+ *   TOPOLOGY -- are the tiles a connected path, or independent spots?
+ *   FOOTPRINT -- what shape does each individual mark have?
+ *
+ * `square` is a PATH whose marks are square: its tiles carry `g` groups and `b`
+ * breaks, and their spacing matches a polyline layer at the same gridSize
+ * (median 6.8 vs 7.1 in the observed exports). Replaying it as spots would fire
+ * one tap per tile -- 46,899 taps for ~2,200 real strokes in the file that
+ * exposed this.
+ */
+const TILECRAFT_PATH_SHAPES = new Set(['polyline', 'square', 'rectangle']);
+const TILECRAFT_SPOT_SHAPES = new Set(['polygon', 'circle']);
+
+/*
+ * Bristle footprints, in the units FluidEngine's Brush accepts:
+ * `sides` < 3 means the round default, and `aspect` is width/height.
+ *
+ * `polygon` stays round because a Tilecraft polygon layer does not record a
+ * side count -- `polygonSize` is a radius, not an order. No shape records per-
+ * tile proportions, so a quad is regular; a non-square rectangle would need a
+ * source field that no observed export has, and is not invented here.
+ */
+const TILECRAFT_BRUSH_SHAPES = {
+  polyline: null,
+  polygon: null,
+  circle: null,
+  square: { sides: 4, aspect: 1 },
+  rectangle: { sides: 4, aspect: 1 },
+};
+
 function targetPlaySeconds(operationCount) {
   if (!Number.isFinite(operationCount) || operationCount <= 0) return 0;
   return Math.min(50, Math.max(5 / 3,
@@ -29,6 +62,22 @@ class TilecraftStrokePlayer {
 
   static operationVisualWeight(operation, previous) {
     return operationVisualWeight(operation, previous);
+  }
+
+  /** Does this Tilecraft layer shape paint as independent spots? */
+  static isSpotShape(tileShape) { return TILECRAFT_SPOT_SHAPES.has(tileShape); }
+
+  /** Does this Tilecraft layer shape paint as a connected path? */
+  static isPathShape(tileShape) { return TILECRAFT_PATH_SHAPES.has(tileShape); }
+
+  /**
+   * The bristle footprint a layer shape paints with, or null for the round
+   * default. Returned fresh so a frozen plan operation cannot be aliased into
+   * the shared table.
+   */
+  static brushShape(tileShape) {
+    const shape = TILECRAFT_BRUSH_SHAPES[tileShape];
+    return shape ? { ...shape } : null;
   }
   /**
    * Validate a transferred Tilecraft model before a scene is allowed to
@@ -162,7 +211,8 @@ class TilecraftStrokePlayer {
       .map((layer, layerIndex) => ({ layer, layerIndex }))
       .filter(({ layer }) => layer && layer.visible);
 
-    for (const { layer, layerIndex } of visible.filter(({ layer }) => layer.tileShape === 'polyline')) {
+    for (const { layer, layerIndex } of visible.filter(
+      ({ layer }) => TilecraftStrokePlayer.isPathShape(layer.tileShape))) {
       context.stats.layers++;
       let segmentOrdinal = 0;
       for (const segment of this._polylineSegments(layer, context.stats, context)) {
@@ -185,6 +235,9 @@ class TilecraftStrokePlayer {
         if (!mapped.length) { segmentOrdinal++; continue; }
 
         const color = this._color(segment.groupColor, layer, context);
+        // A path can carry a footprint too: a `square` layer is a stroke drawn
+        // with square marks, so the shape comes from the layer, not the kind.
+        const pathBrushShape = TilecraftStrokePlayer.brushShape(layer.tileShape);
         mapped.forEach((entry, pointIndex) => {
           operations.push({
             kind: 'polyline-point',
@@ -200,6 +253,7 @@ class TilecraftStrokePlayer {
             point: entry.point,
             pressure: this._pressure(entry.tile, maximumRelativeSize, context),
             brushSize,
+            brushShape: pathBrushShape,
             color,
             paintingRectangle: context.paintingRectangle,
             resolutionScale: context.resolutionScale,
@@ -220,7 +274,8 @@ class TilecraftStrokePlayer {
       }
     }
 
-    for (const { layer, layerIndex } of visible.filter(({ layer }) => layer.tileShape === 'polygon')) {
+    for (const { layer, layerIndex } of visible.filter(
+      ({ layer }) => TilecraftStrokePlayer.isSpotShape(layer.tileShape))) {
       context.stats.layers++;
       for (let sourceTileIndex = 0; sourceTileIndex < (layer.tiles || []).length; sourceTileIndex++) {
         const tile = layer.tiles[sourceTileIndex];
@@ -240,6 +295,7 @@ class TilecraftStrokePlayer {
           point,
           pressure: this._pressure(tile, tile.s === undefined ? 1 : tile.s, context),
           brushSize: this._tileSize(tile, layer, context),
+          brushShape: TilecraftStrokePlayer.brushShape(layer.tileShape),
           color: this._color(tile.c, layer, context),
           paintingRectangle: context.paintingRectangle,
           resolutionScale: context.resolutionScale,
@@ -528,6 +584,9 @@ class TilecraftStrokePlayer {
       paintingRectangle: operation.paintingRectangle,
       color: operation.color,
       resolutionScale: operation.resolutionScale,
+      // Omitted entirely when round, so a host engine without shaped-bristle
+      // support sees the same beginStroke options it always has.
+      ...(operation.brushShape ? { brushShape: operation.brushShape } : {}),
     });
   }
 
@@ -617,7 +676,8 @@ class TilecraftStrokePlayer {
     const units = [];
     const visible = model.layers.filter((layer) => layer && layer.visible);
 
-    for (const layer of visible.filter((candidate) => candidate.tileShape === 'polyline')) {
+    for (const layer of visible.filter(
+      (candidate) => TilecraftStrokePlayer.isPathShape(candidate.tileShape))) {
       context.stats.layers++;
       for (const segment of this._polylineSegments(layer, context.stats, context)) {
         units.push({
@@ -628,7 +688,7 @@ class TilecraftStrokePlayer {
         });
       }
     }
-    for (const layer of visible.filter((candidate) => candidate.tileShape === 'polygon')) {
+    for (const layer of visible.filter((candidate) => TilecraftStrokePlayer.isSpotShape(candidate.tileShape))) {
       context.stats.layers++;
       for (const tile of layer.tiles || []) {
         if (!this._isDrawableTile(tile)) { context.stats.skipped++; continue; }
@@ -835,6 +895,9 @@ class TilecraftStrokePlayer {
   }
 
   _begin(point, tile, brushSize, layer, context, maximumRelativeSize, timing, color = tile.c) {
+    // The footprint follows the layer's shape whether it paints as a path or as
+    // spots -- a `square` layer is a stroke drawn with square marks.
+    const brushShape = TilecraftStrokePlayer.brushShape(layer.tileShape);
     this.engine.beginStroke({
       timing,
       x: point.x, y: point.y,
@@ -843,6 +906,7 @@ class TilecraftStrokePlayer {
       paintingRectangle: context.paintingRectangle,
       color: this._color(color, layer, context),
       resolutionScale: context.resolutionScale,
+      ...(brushShape ? { brushShape } : {}),
     });
     context.stats.strokes++;
     context.stats.points++;

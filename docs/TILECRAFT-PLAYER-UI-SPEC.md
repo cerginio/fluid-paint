@@ -278,6 +278,30 @@ must be a named host policy constant, not embedded in validation code.
 
 ### 8.3 Validation
 
+#### Layer shapes: topology vs footprint
+
+A layer's `tileShape` carries two independent facts, and they must not be
+conflated:
+
+| `tileShape` | Topology | Bristle footprint |
+| --- | --- | --- |
+| `polyline` | path | round |
+| `square` | path | 4-gon |
+| `rectangle` | path | 4-gon (tolerated alias for `square`; unobserved) |
+| `polygon` | spots | round (no side count in the schema) |
+| `circle` | spots | round |
+
+**Topology** decides how tiles are replayed: a path layer's tiles carry `g`
+groups and `b` breaks and become connected strokes, while a spot layer's tiles
+each become one independent tap. **Footprint** only decides the shape of each
+individual mark.
+
+`square` is the case that makes this matter. Its name describes the mark, not
+the topology — it is a path, and its point spacing matches a `polyline` layer at
+the same `gridSize`. Replaying it as spots turns roughly 2,200 strokes into
+46,899 taps. Both the preflight summary and the player must classify by
+topology, or their counts disagree.
+
 Validation has two levels.
 
 **Fatal — reject the file:**
@@ -285,13 +309,14 @@ Validation has two levels.
 - invalid JSON;
 - root is not an object;
 - missing or non-array `layers`;
-- no drawable `polyline` or `polygon` tiles;
+- no drawable `polyline`, `square`, `polygon` or `circle` tiles;
 - non-finite coordinates in every drawable item;
 - file exceeds configured byte/tile limits.
 
 **Warning — load but disclose:**
 
-- unsupported shapes such as `circle` are skipped by the current adapter;
+- shapes outside `polyline`, `square`, `polygon` and `circle` are skipped by the
+  current adapter;
 - invisible layers are ignored;
 - individual malformed tiles are skipped;
 - colours outside the subtractive pigment gamut are approximated;
@@ -1101,7 +1126,7 @@ interface StoryModelSummary {
   layersVisible: number;
   framesTotal: number;
   polylinePoints: number;
-  polygonSpots: number;
+  polygonSpots: number;          // every spot shape: polygon, circle, rectangle
   logicalStrokes: number;
   skippedItems: number;
   unsupportedLayers: number;

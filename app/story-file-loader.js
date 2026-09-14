@@ -3,6 +3,18 @@
 const STORY_FILE_MAX_BYTES = 25 * 1024 * 1024;
 const STORY_FILE_MAX_TILES = 500000;
 
+// Preflight must accept exactly what the compiler accepts and count what the
+// player will actually draw, so both shape sets come from Tilecraft's
+// fluid-model when it is loaded. The fallbacks keep this module usable
+// standalone (tests, workers) and must stay in step with
+// vendor/tilecraft/fluid-model.js.
+const STORY_FILE_PATH_SHAPES = (typeof globalThis !== 'undefined' && globalThis.FLUID_PATH_SHAPES) ||
+  new Set(['polyline', 'square', 'rectangle']);
+const STORY_FILE_SPOT_SHAPES = (typeof globalThis !== 'undefined' && globalThis.FLUID_SPOT_SHAPES) ||
+  new Set(['polygon', 'circle']);
+const STORY_FILE_SUPPORTED_SHAPES = (typeof globalThis !== 'undefined' && globalThis.SUPPORTED_FLUID_LAYER_SHAPES) ||
+  new Set([...STORY_FILE_PATH_SHAPES, ...STORY_FILE_SPOT_SHAPES]);
+
 class StoryFileLoader {
   static async load(file) {
     if (!file || typeof file.text !== 'function') {
@@ -45,7 +57,7 @@ class StoryFileLoader {
         throw new RangeError(`This story exceeds the ${STORY_FILE_MAX_TILES.toLocaleString()} tile limit.`);
       }
       if (!layer.visible) { invisibleLayers++; return; }
-      if (layer.tileShape !== 'polyline' && layer.tileShape !== 'polygon') {
+      if (!STORY_FILE_SUPPORTED_SHAPES.has(layer.tileShape)) {
         if (layer.tiles.length) unsupportedLayers++;
         return;
       }
@@ -55,11 +67,16 @@ class StoryFileLoader {
         if (!valid) { malformed++; return; }
         drawable++;
         points.push(tile);
-        if (layer.tileShape === 'polyline') {
+        // Count by TOPOLOGY, not by name: a `square` layer is a path, so its
+        // tiles are stroke points that share a group -- counting them as spots
+        // would report 46,899 "strokes" for a file holding ~2,200.
+        if (STORY_FILE_PATH_SHAPES.has(layer.tileShape)) {
           polylinePoints++;
           groups.add(`${layerIndex}:${tile.f === undefined ? 'unassigned' : tile.f}:` +
             `${tile.g === undefined ? `tile-${tileIndex}` : tile.g}`);
         } else {
+          // `polygonSpots` keeps its published name from the player spec; it
+          // counts every spot shape, circle included.
           polygonSpots++;
           groups.add(`${layerIndex}:${tile.f === undefined ? 'unassigned' : tile.f}:spot-${tileIndex}`);
         }

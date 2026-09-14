@@ -425,6 +425,68 @@ console.log('tilecraft stroke player: PASS (frame grouping with stable paint sta
   }), (error) => error.name === 'AbortError');
   assert.equal(abortCalls.at(-1), 'end', 'abort always closes the active engine stroke');
   console.log('tilecraft plan cancellation: PASS (AbortSignal closes stroke)');
+
+  // Phase A: circle and square layers are drawable, not skipped content.
+  const shapeBegins = [];
+  const shapeEngine = {
+    beginStroke(options) { shapeBegins.push(options.brushShape ?? null); },
+    strokeTo() {}, endStroke() {}, strokeActive: false,
+  };
+  const shapeOptions = { paintingRectangle: { left: 0, bottom: 0, width: 10, height: 10 } };
+
+  // circle is a SPOT shape: one operation per tile.
+  const spotPlan = new TilecraftStrokePlayer(shapeEngine).compile({ layers: [
+    { visible: true, tileShape: 'circle', gridSize: 10,
+      tiles: [{ x: 1, y: 1, c: '#ff0000', f: 1 }, { x: 2, y: 2, c: '#ff0000', f: 1 }] },
+  ] }, shapeOptions);
+  assert.equal(spotPlan.operations.length, 2, 'circle tiles are independent spots');
+  assert.deepEqual(spotPlan.operations.map((o) => o.kind), ['polygon-spot', 'polygon-spot']);
+  assert.deepEqual(spotPlan.operations.map((o) => o.brushShape), [null, null],
+    'circle keeps the round footprint');
+
+  /*
+   * square is a PATH shape, not a spot: its tiles carry `g` groups and `b`
+   * breaks exactly like polyline. Routing it as spots would fire one tap per
+   * tile -- 46,899 taps for ~2,200 strokes in the export that exposed this.
+   */
+  const squarePlan = new TilecraftStrokePlayer(shapeEngine).compile({ layers: [
+    { visible: true, tileShape: 'square', gridSize: 10, tiles: [
+      { x: 0, y: 0, c: '#00ff00', f: 1, g: 1 },
+      { x: 1, y: 0, c: '#00ff00', f: 1, g: 1 },
+      { x: 2, y: 0, c: '#00ff00', f: 1, g: 1 },
+    ] },
+  ] }, shapeOptions);
+  assert.deepEqual(squarePlan.operations.map((o) => o.kind),
+    ['polyline-point', 'polyline-point', 'polyline-point'],
+    'a square layer replays as one connected path, not three taps');
+  assert.equal(squarePlan.groupRanges.length, 1, 'its three points are one stroke');
+  assert.ok(squarePlan.operations[0].segmentStart, 'the path opens a segment');
+  assert.ok(squarePlan.operations[2].segmentEnd, 'and closes it');
+  assert.deepEqual(squarePlan.operations.map((o) => o.brushShape),
+    [{ sides: 4, aspect: 1 }, { sides: 4, aspect: 1 }, { sides: 4, aspect: 1 }],
+    'a path shape still carries its square footprint');
+
+  // replay() must route the same shapes as compile() -- they are separate paths.
+  shapeBegins.length = 0;
+  new TilecraftStrokePlayer(shapeEngine).replay({ layers: [
+    { visible: true, tileShape: 'square', gridSize: 10, tiles: [
+      { x: 0, y: 0, c: '#00ff00', f: 1, g: 1 }, { x: 1, y: 0, c: '#00ff00', f: 1, g: 1 }] },
+    { visible: true, tileShape: 'circle', gridSize: 10, tiles: [{ x: 5, y: 5, c: '#ff0000', f: 1 }] },
+  ] }, shapeOptions);
+  assert.deepEqual(shapeBegins, [{ sides: 4, aspect: 1 }, null],
+    'replay(): one begin for the square path, one round begin for the circle spot');
+
+  // A shape the schema does not define must still be skipped, not guessed at.
+  const unknownPlan = new TilecraftStrokePlayer(shapeEngine).compile(
+    { layers: [{ visible: true, tileShape: 'star', gridSize: 10,
+      tiles: [{ x: 1, y: 1, c: '#ff0000' }] }] }, shapeOptions);
+  assert.equal(unknownPlan.operations.length, 0, 'unknown shapes are still skipped');
+
+  // brushShape must be a fresh object per call: plan operations are frozen, and
+  // an aliased table entry would let one frozen op leak into another.
+  assert.notEqual(TilecraftStrokePlayer.brushShape('square'),
+    TilecraftStrokePlayer.brushShape('square'));
+  console.log('tilecraft spot shapes: PASS (circle spots, square paths, unknown shapes skipped)');
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;
