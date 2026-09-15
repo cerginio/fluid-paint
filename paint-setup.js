@@ -183,12 +183,49 @@ function _slashShapeIcon(rotation) {
 const BRISTLE_SHAPES = [
   { name: 'Round', icon: _bristleShapeIcon(0, 0), shape: null },
   { name: 'Tri', icon: _bristleShapeIcon(3, Math.PI / 6), shape: { sides: 3, rotation: Math.PI / 6 } },
-  { name: 'Quad', icon: _bristleShapeIcon(4, 0), shape: { sides: 4 } },
+  { name: 'Quad', icon: _bristleShapeIcon(4, 0), shape: { sides: 4, rotation: 0 } },
   { name: 'Pent', icon: _bristleShapeIcon(5, Math.PI / 2), shape: { sides: 5, rotation: Math.PI / 2 } },
   { name: 'Hex', icon: _bristleShapeIcon(6, Math.PI / 2), shape: { sides: 6, rotation: Math.PI / 2 } },
   { name: 'Slash', icon: _slashShapeIcon(Math.PI / 4), shape: { sides: 4, aspect: 5, rotation: Math.PI / 4 } },
 ];
 const INITIAL_BRISTLE_SHAPE = 0; // Round
+
+/*
+ * Brush Angle slider: a shape-aware t in [0, 1] rather than a raw radian
+ * value, because "what rotation means" depends entirely on which footprint
+ * is selected -- a raw-radian slider would have a different, form-specific
+ * range for every shape and would need re-labeling each time the shape
+ * changed.
+ *
+ * t=0 keeps the shape's own base orientation (the vertex-up/edge-up pose
+ * BRISTLE_SHAPES already picks). t=1 is the shape's own mirror-opposite pose,
+ * exactly one HALF of its rotational-symmetry period away -- a full period
+ * would repaint the identical footprint (0 and 1 would look the same), which
+ * defeats a slider whose whole point is that its two ends differ.
+ *
+ * The half-period is PI / order, where `order` is the symmetry order of the
+ * shape AS PAINTED:
+ *   - a regular n-gon (aspect 1) repeats every 2*PI/n, so order = sides
+ *   - a stretched 4-gon (aspect != 1, e.g. Slash) is a rectangle, which only
+ *     maps onto itself at 180 degrees, not 90 -- order = 2, regardless of
+ *     `sides`
+ * Round (sides < 3) has no meaningful rotation at all; the slider is
+ * disabled for it rather than silently doing nothing (see paint.js).
+ */
+function brushAngleHalfPeriod(shape) {
+  if (!shape || shape.sides < 3) return null;
+  const order = (shape.aspect !== undefined && shape.aspect !== 1 && shape.sides === 4)
+    ? 2
+    : shape.sides;
+  return Math.PI / order;
+}
+
+/** t in [0,1] -> the rotation (radians) to hand the engine for this shape. */
+function brushAngleToRotation(shape, t) {
+  const halfPeriod = brushAngleHalfPeriod(shape);
+  if (halfPeriod === null) return shape ? shape.rotation || 0 : 0;
+  return (shape.rotation || 0) + t * halfPeriod;
+}
 
 const BRUSH_HEIGHT = 2.0; //how high the brush is over the canvas - this is scaled with the brushScale
 const Z_THRESHOLD = 0.13333; //this is scaled with the brushScale

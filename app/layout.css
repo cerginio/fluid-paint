@@ -706,6 +706,15 @@ html, body {
   -ms-user-select: none;
 }
 
+/* A shape with no meaningful rotation (Round) leaves Brush Angle with nothing
+ * to control -- dim it and block interaction rather than let it silently do
+ * nothing. */
+.slider-disabled {
+  cursor: default;
+  pointer-events: none;
+  opacity: 0.35;
+}
+
 .slider-value-pop {
   position: absolute;
   z-index: 20;

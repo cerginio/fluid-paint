@@ -207,7 +207,11 @@ class Paint {
         /* Bristle footprint for manual painting. null is the round default --
          * the engine treats a missing brushShape and an explicit null the same
          * way, so a host that never touches this paints exactly as before. */
-        this.brushShape = BRISTLE_SHAPES[INITIAL_BRISTLE_SHAPE].shape;
+        this.brushShapeIndex = INITIAL_BRISTLE_SHAPE;
+        // t in [0,1]: 0 keeps BRISTLE_SHAPES' own base rotation, 1 is that
+        // shape's own edge-up/mirrored pose. See brushAngleToRotation().
+        this.brushAngle = 0;
+        this.brushShape = this._resolveBrushShape();
         this.manualPaintingEnabled = true;
         this.manualStrokeActive = false;
         this._manualPaintingDisablePending = false;
@@ -291,7 +295,11 @@ class Paint {
                 bristleShapesElement,
                 BRISTLE_SHAPES.map((entry) => entry.icon),
                 INITIAL_BRISTLE_SHAPE,
-                (index) => { this.brushShape = BRISTLE_SHAPES[index].shape; }
+                (index) => {
+                    this.brushShapeIndex = index;
+                    this.brushShape = this._resolveBrushShape();
+                    this._syncBrushAngleSlider();
+                }
             )
             : null;
         // Buttons renders each entry's markup only -- the name still has to
@@ -302,6 +310,21 @@ class Paint {
                 element.setAttribute('aria-label', BRISTLE_SHAPES[index].name);
             });
         }
+
+        /* Brush Angle (State tab): a shape-aware t in [0,1], not a raw radian
+         * value -- see brushAngleToRotation() in paint-setup.js for why. */
+        const brushAngleElement = document.getElementById('brush-angle-slider');
+        this.brushAngleSlider = brushAngleElement
+            ? new Slider(
+                brushAngleElement, this.brushAngle, 0, 1,
+                (value) => {
+                    this.brushAngle = value;
+                    this.brushShape = this._resolveBrushShape();
+                },
+                { step: 0.01, formatValue: (v) => Math.round(v * 100) + '%', label: 'Brush angle' }
+            )
+            : null;
+        this._syncBrushAngleSlider();
 
         this.qualityButtons = new Buttons(
             document.getElementById('qualities'),
@@ -1089,6 +1112,38 @@ class Paint {
 
             this.brushViewer.draw(this.brushX, this.brushY, this.engine.getBristleGeometry(), rgb);
         }
+    }
+
+    /**
+     * The footprint the engine should paint with right now: the selected
+     * BRISTLE_SHAPES entry, with brushAngle's t folded into its rotation.
+     * Round (shape: null) has no rotation to fold in and passes through
+     * unchanged.
+     */
+    _resolveBrushShape() {
+        const entry = BRISTLE_SHAPES[this.brushShapeIndex];
+        if (!entry.shape) return null;
+        return { ...entry.shape, rotation: brushAngleToRotation(entry.shape, this.brushAngle) };
+    }
+
+    /**
+     * Keep the Brush Angle slider itself in sync with a shape change: reset
+     * to its 0 end (the shape's own base pose) and disable it for Round,
+     * which has no rotation for the slider to mean anything about.
+     */
+    _syncBrushAngleSlider() {
+        if (!this.brushAngleSlider) return;
+        const entry = BRISTLE_SHAPES[this.brushShapeIndex];
+        const hasAngle = brushAngleHalfPeriod(entry.shape) !== null;
+        this.brushAngle = 0;
+        this.brushAngleSlider.setValue(0);
+        const element = this.brushAngleSlider.div;
+        element.classList.toggle('slider-disabled', !hasAngle);
+        element.setAttribute('aria-disabled', hasAngle ? 'false' : 'true');
+        // Pointer input is blocked by the CSS class above; tabIndex is the
+        // matching block for keyboard focus, since a disabled control should
+        // not be reachable by either input path.
+        element.tabIndex = hasAngle ? 0 : -1;
     }
 
     _storyOwnsBrush() {
