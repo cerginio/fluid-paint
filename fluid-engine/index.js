@@ -255,9 +255,19 @@ class FluidEngine {
    * layout variation. It does NOT settle them: settling needs repeated
    * positionBrush() calls, which callers of this low-level primitive must
    * advance themselves. beginStroke() is the public operation that owns both.
+   *
+   * brushShape is optional and mirrors beginStroke()'s handling: selecting the
+   * footprint before initialize() (which draws the bristles), and restoring
+   * the round default when omitted so a caller that never asks for a shape
+   * keeps behaving exactly as before this parameter existed.
    */
-  initializeBrush(x, y, height, scale) {
+  initializeBrush(x, y, height, scale, brushShape) {
     this._assertNoStroke('initializeBrush()');
+    if (typeof this.brush.setBristleShape === 'function') {
+      this.brush.setBristleShape(brushShape);
+    } else if (brushShape) {
+      throw this._strokeError('FluidEngine: this brush does not support brushShape.');
+    }
     this.brush.initialize(x, y, height, scale);
   }
 

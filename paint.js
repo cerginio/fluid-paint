@@ -35,12 +35,7 @@ class Paint {
             // See docs/MOBILE-GPU-BRISTLE-COLLAPSE-SPEC.md
         }
 
-        // Load both shader trees -- the engine's and the app chrome's -- and
-        // merge them into one flat sources object. The keys are unchanged from
-        // when there was a single tree; only the base paths know where the
-        // files actually live. See shaderTrees() in common.js -- it is a
-        // function, not a constant, because the engine now owns its own
-        // manifest and this file is loaded before the engine (Phase 9).
+        // shaderTrees() merges the engine's and app chrome's manifests; see common.js.
         loadShaderTrees(shaderTrees(), (shaderSources) => {
             this._start(shaderSources);
         });
@@ -210,7 +205,10 @@ class Paint {
         this.brushShapeIndex = INITIAL_BRISTLE_SHAPE;
         // t in [0,1]: 0 keeps BRISTLE_SHAPES' own base rotation, 1 is that
         // shape's own edge-up/mirrored pose. See brushAngleToRotation().
-        this.brushAngle = 0;
+        // Starts at the selected shape's own defaultAngle (0 for most; Slash
+        // uses 0.5 so its first paint already shows the rotated PI/2 pose
+        // instead of its unrotated base).
+        this.brushAngle = BRISTLE_SHAPES[this.brushShapeIndex].defaultAngle;
         this.brushShape = this._resolveBrushShape();
         this.manualPaintingEnabled = true;
         this.manualStrokeActive = false;
@@ -297,8 +295,9 @@ class Paint {
                 INITIAL_BRISTLE_SHAPE,
                 (index) => {
                     this.brushShapeIndex = index;
-                    this.brushShape = this._resolveBrushShape();
                     this._syncBrushAngleSlider();
+                    this.brushShape = this._resolveBrushShape();
+                    this._applyBrushShapeLive();
                 }
             )
             : null;
@@ -320,6 +319,7 @@ class Paint {
                 (value) => {
                     this.brushAngle = value;
                     this.brushShape = this._resolveBrushShape();
+                    this._applyBrushShapeLive();
                 },
                 { step: 0.01, formatValue: (v) => Math.round(v * 100) + '%', label: 'Brush angle' }
             )
@@ -1127,16 +1127,43 @@ class Paint {
     }
 
     /**
+     * Push a shape/angle change into the live brush immediately, the same way
+     * the bristle-count slider already updates the engine as it drags. Without
+     * this, this.brushShape is correct in JS but the brush preview (BrushViewer,
+     * on by default) keeps showing the PREVIOUS press's geometry until the next
+     * stroke actually re-initializes it -- the footprint only redraws bristles
+     * on beginStroke()/initializeBrush().
+     *
+     * Skipped while a stroke owns the brush: re-seeding mid-press would deform
+     * an already-settled brush against its own distance constraints (see
+     * Brush.setBristleShape's doc comment). The next beginStroke() picks up
+     * this.brushShape regardless, so painting is never stale even when this is
+     * skipped.
+     */
+    _applyBrushShapeLive() {
+        if (this.engine.strokeActive || !this.brushInitialized) return;
+        this.engine.initializeBrush(
+            this.brushX,
+            this.brushY,
+            this._brushHeight(1, 'mouse'),
+            this.brushScale,
+            this.brushShape
+        );
+        this.needsRedraw = true;
+    }
+
+    /**
      * Keep the Brush Angle slider itself in sync with a shape change: reset
-     * to its 0 end (the shape's own base pose) and disable it for Round,
-     * which has no rotation for the slider to mean anything about.
+     * to the newly selected shape's own defaultAngle (0 for most; 0.5 for
+     * Slash) and disable it for Round, which has no rotation for the slider
+     * to mean anything about.
      */
     _syncBrushAngleSlider() {
         if (!this.brushAngleSlider) return;
         const entry = BRISTLE_SHAPES[this.brushShapeIndex];
         const hasAngle = brushAngleHalfPeriod(entry.shape) !== null;
-        this.brushAngle = 0;
-        this.brushAngleSlider.setValue(0);
+        this.brushAngle = entry.defaultAngle;
+        this.brushAngleSlider.setValue(entry.defaultAngle);
         const element = this.brushAngleSlider.div;
         element.classList.toggle('slider-disabled', !hasAngle);
         element.setAttribute('aria-disabled', hasAngle ? 'false' : 'true');
@@ -1627,7 +1654,8 @@ class Paint {
                 this.brushX,
                 this.brushY,
                 this._brushHeight(1, event.pointerType),
-                this.brushScale
+                this.brushScale,
+                this.brushShape
             );
             this.brushInitialized = true;
         }

@@ -33,6 +33,7 @@ const paths = {
     'fluid-engine/gl/glsl3.js',
     'debug/debug-flags.js',
     'debug/painting-rect-overlay.js',
+    'debug/brush-center-marker.js',
     'app/focus-overlay.js',
     'debug/gpu-profiles.js',
     'debug/texture-selftest.js',

@@ -180,13 +180,20 @@ function _slashShapeIcon(rotation) {
     + '</g></svg>';
 }
 
+/*
+ * defaultAngle is the Brush Angle slider's t in [0,1] to show THE FIRST TIME
+ * a shape is selected -- see brushAngleToRotation() below for what t means.
+ * Every shape defaults to 0 (its own base pose) except Slash, whose base
+ * rotation (PI) is edge-up; its midpoint (t=0.5, halfPeriod PI/2) lands on
+ * PI/2, the diagonal pose the icon actually shows.
+ */
 const BRISTLE_SHAPES = [
-  { name: 'Round', icon: _bristleShapeIcon(0, 0), shape: null },
-  { name: 'Tri', icon: _bristleShapeIcon(3, Math.PI / 6), shape: { sides: 3, rotation: Math.PI / 6 } },
-  { name: 'Quad', icon: _bristleShapeIcon(4, 0), shape: { sides: 4, rotation: 0 } },
-  { name: 'Pent', icon: _bristleShapeIcon(5, Math.PI / 2), shape: { sides: 5, rotation: Math.PI / 2 } },
-  { name: 'Hex', icon: _bristleShapeIcon(6, Math.PI / 2), shape: { sides: 6, rotation: Math.PI / 2 } },
-  { name: 'Slash', icon: _slashShapeIcon(Math.PI / 4), shape: { sides: 4, aspect: 5, rotation: Math.PI / 4 } },
+  { name: 'Round', icon: _bristleShapeIcon(0, 0), shape: null, defaultAngle: 0 },
+  { name: 'Tri', icon: _bristleShapeIcon(3, Math.PI / 6), shape: { sides: 3, rotation: Math.PI / 6 }, defaultAngle: 0 },
+  { name: 'Quad', icon: _bristleShapeIcon(4, 0), shape: { sides: 4, rotation: 0 }, defaultAngle: 0 },
+  { name: 'Pent', icon: _bristleShapeIcon(5, Math.PI / 2), shape: { sides: 5, rotation: Math.PI / 2 }, defaultAngle: 0 },
+  { name: 'Hex', icon: _bristleShapeIcon(6, Math.PI / 2), shape: { sides: 6, rotation: Math.PI / 2 }, defaultAngle: 0 },
+  { name: 'Slash', icon: _slashShapeIcon(Math.PI / 4), shape: { sides: 4, aspect: 5, rotation: Math.PI }, defaultAngle: 0.5 },
 ];
 const INITIAL_BRISTLE_SHAPE = 0; // Round
 
