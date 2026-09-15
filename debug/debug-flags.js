@@ -45,9 +45,10 @@
  * what makes starting it off reasonable where it would not have been before.
  */
 const DEBUG_FLAG_DEFAULTS = {
-  paintingRect: true,    // the painting-rectangle outline overlay
-  brushViewer: true,     // the live bristle preview panel
-  textureProbe: false,   // the 2D readback view of a brush texture (debug.js)
+  paintingRect: true,      // the painting-rectangle outline overlay
+  brushViewer: true,       // the live bristle preview panel
+  brushCenterMarker: true, // the high-contrast dot at the brush's center
+  textureProbe: false,     // the 2D readback view of a brush texture (debug.js)
 };
 
 function parseDebugFlags(search) {

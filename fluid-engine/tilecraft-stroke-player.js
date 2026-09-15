@@ -40,8 +40,8 @@ const TILECRAFT_BRUSH_SHAPES = {
   polyline: null,
   polygon: null,
   circle: null,
-  square: { sides: 4, aspect: 1 },
-  rectangle: { sides: 4, aspect: 1 },
+  square: { sides: 4, aspect: 1, rotation: Math.PI / 4 },
+  rectangle: { sides: 4, aspect: 1, rotation: Math.PI / 4 },
 };
 
 function targetPlaySeconds(operationCount) {

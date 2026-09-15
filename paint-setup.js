@@ -143,10 +143,10 @@ const MAX_EXTERNAL_BRUSH_SCALE = MAX_BRUSH_SCALE * 1.5;
  */
 const BRISTLE_SHAPES = [
   { name: 'Round', shape: null },
-  { name: 'Tri', shape: { sides: 3 } },
+  { name: 'Tri', shape: { sides: 3, rotation: Math.PI / 6 } },
   { name: 'Quad', shape: { sides: 4 } },
-  { name: 'Pent', shape: { sides: 5 } },
-  { name: 'Hex', shape: { sides: 6 } },
+  { name: 'Pent', shape: { sides: 5, rotation: Math.PI / 2 } },
+  { name: 'Hex', shape: { sides: 6, rotation: Math.PI / 2 } },
 ];
 const INITIAL_BRISTLE_SHAPE = 0; // Round
 

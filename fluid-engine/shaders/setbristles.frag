@@ -79,8 +79,15 @@ void main () {
          *
          * The clamp is applied AFTER the jitter above, so this press's
          * variation survives intact rather than being quantized by the shape. */
-        float oriented = theta + u_bristleRotation;
-        float shaped = r * polygonRadius(oriented, u_bristleSides);
+        /* Rotation must only bias the polygon lookup, not theta itself: theta
+         * is the position angle that places this bristle around the disc, and
+         * bristleIndex sweeps it densely over the full sunflower sequence --
+         * shifting theta by a constant before using it as the position angle
+         * just relabels which bristle lands at which angle, so the painted
+         * shape (the set of positions) comes out identical for every
+         * rotation. Only polygonRadius's fold is periodic in a way that a
+         * shift actually moves, so the rotation goes in there alone. */
+        float shaped = r * polygonRadius(theta + u_bristleRotation, u_bristleSides);
 
         /* An n-gon inscribed in the unit disc covers less area than the disc,
          * so the same brushSize would paint a visibly thinner stroke -- a
@@ -91,7 +98,7 @@ void main () {
         float areaFraction = (u_bristleSides / (2.0 * PI)) * sin(wedge);
         shaped /= sqrt(areaFraction);
 
-        crossSection = vec2(shaped * cos(oriented), shaped * sin(oriented));
+        crossSection = vec2(shaped * cos(theta), shaped * sin(theta));
         // Aspect stretches x against y; 1.0 leaves a regular polygon alone.
         crossSection.x *= u_bristleAspect;
         crossSection /= sqrt(u_bristleAspect); // keep area independent of aspect

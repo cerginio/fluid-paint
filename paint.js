@@ -109,6 +109,10 @@ class Paint {
             ? new PaintingRectOverlay(wgl, shaderSources, this.quadVertexBuffer)
             : null;
 
+        this.brushCenterMarker = this.debug.brushCenterMarker
+            ? new BrushCenterMarker(wgl, shaderSources, this.quadVertexBuffer)
+            : null;
+
         // The single owner of canvas sizing, devicePixelRatio, the Y-flip and
         // all three coordinate spaces. See viewport.js.
         //
@@ -968,6 +972,25 @@ class Paint {
                 wgl.UNSIGNED_SHORT,
                 0
             );
+
+            if (this.brushCenterMarker !== null) {
+                const centerScreen = this.viewport.worldToScreen(this.mouseX, this.mouseY);
+                const hsva = this.brushColorHSVA;
+                const pigmentColor = this.adhocPaintColor === 'black' ? [0, 0, 0]
+                    : this.adhocPaintColor === 'white' ? [1, 1, 1]
+                        : hsvToPigmentRgb(
+                            hsva[0], hsva[1], hsva[2],
+                            this.colorModel === FluidEngine.COLOR_MODEL.RGB
+                        );
+                this.brushCenterMarker.draw(
+                    centerScreen.x,
+                    centerScreen.y,
+                    this.canvas.width,
+                    this.canvas.height,
+                    this.canvasTexture,
+                    pigmentColor
+                );
+            }
         }
 
         // cursor logic
@@ -980,7 +1003,7 @@ class Paint {
         } else if (this.interactionState === InteractionMode.NONE) {
             const desiredMode = this.desiredInteractionMode(this.mouseX, this.mouseY);
             if (desiredMode === InteractionMode.PAINTING) {
-                desiredCursor = 'none';
+                desiredCursor = 'crosshair';
             } else if (desiredMode === InteractionMode.RESIZING) {
                 desiredCursor = cursorForResizingSide(this.getResizingSide(this.mouseX, this.mouseY));
             } else if (desiredMode === InteractionMode.PANNING) {
@@ -990,17 +1013,13 @@ class Paint {
             }
         } else {
             if (this.interactionState === InteractionMode.PAINTING) {
-                desiredCursor = 'none';
+                desiredCursor = 'crosshair';
             } else if (this.interactionState === InteractionMode.RESIZING) {
                 desiredCursor = cursorForResizingSide(this.resizingSide);
             } else if (this.interactionState === InteractionMode.PANNING) {
                 desiredCursor = 'pointer';
             }
         }
-        if (!PaintState.showPanel) {
-            desiredCursor = 'default';
-        }
-
         if (this.canvas.style.cursor !== desiredCursor) {
             this.canvas.style.cursor = desiredCursor;
         }
