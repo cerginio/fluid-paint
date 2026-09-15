@@ -463,7 +463,8 @@ console.log('tilecraft stroke player: PASS (frame grouping with stable paint sta
   assert.ok(squarePlan.operations[0].segmentStart, 'the path opens a segment');
   assert.ok(squarePlan.operations[2].segmentEnd, 'and closes it');
   assert.deepEqual(squarePlan.operations.map((o) => o.brushShape),
-    [{ sides: 4, aspect: 1 }, { sides: 4, aspect: 1 }, { sides: 4, aspect: 1 }],
+    [{ sides: 4, aspect: 1, rotation: Math.PI / 4 }, { sides: 4, aspect: 1, rotation: Math.PI / 4 },
+      { sides: 4, aspect: 1, rotation: Math.PI / 4 }],
     'a path shape still carries its square footprint');
 
   // replay() must route the same shapes as compile() -- they are separate paths.
@@ -473,7 +474,7 @@ console.log('tilecraft stroke player: PASS (frame grouping with stable paint sta
       { x: 0, y: 0, c: '#00ff00', f: 1, g: 1 }, { x: 1, y: 0, c: '#00ff00', f: 1, g: 1 }] },
     { visible: true, tileShape: 'circle', gridSize: 10, tiles: [{ x: 5, y: 5, c: '#ff0000', f: 1 }] },
   ] }, shapeOptions);
-  assert.deepEqual(shapeBegins, [{ sides: 4, aspect: 1 }, null],
+  assert.deepEqual(shapeBegins, [{ sides: 4, aspect: 1, rotation: Math.PI / 4 }, null],
     'replay(): one begin for the square path, one round begin for the circle spot');
 
   // A shape the schema does not define must still be skipped, not guessed at.

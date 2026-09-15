@@ -289,11 +289,19 @@ class Paint {
         this.bristleShapeButtons = bristleShapesElement
             ? new Buttons(
                 bristleShapesElement,
-                BRISTLE_SHAPES.map((entry) => entry.name),
+                BRISTLE_SHAPES.map((entry) => entry.icon),
                 INITIAL_BRISTLE_SHAPE,
                 (index) => { this.brushShape = BRISTLE_SHAPES[index].shape; }
             )
             : null;
+        // Buttons renders each entry's markup only -- the name still has to
+        // reach assistive tech and hover users now that the label is an icon.
+        if (this.bristleShapeButtons) {
+            this.bristleShapeButtons.elements.forEach((element, index) => {
+                element.title = BRISTLE_SHAPES[index].name;
+                element.setAttribute('aria-label', BRISTLE_SHAPES[index].name);
+            });
+        }
 
         this.qualityButtons = new Buttons(
             document.getElementById('qualities'),

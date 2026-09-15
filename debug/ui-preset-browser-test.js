@@ -85,10 +85,10 @@ const server = http.createServer((request, response) => {
     assert.equal(await page.locator('#bristle-shapes').isVisible(), true,
       'brush-options exposes Bristle Shape in the panel');
     assert.deepEqual(
-      await page.locator('#bristle-shapes div').allTextContents(),
-      ['Round', 'Tri', 'Quad', 'Pent', 'Hex']);
+      await page.locator('#bristle-shapes div').evaluateAll((els) => els.map((el) => el.title)),
+      ['Round', 'Tri', 'Quad', 'Pent', 'Hex', 'Slash']);
     assert.equal(
-      await page.locator('#bristle-shapes .button-selected').textContent(), 'Round',
+      await page.locator('#bristle-shapes .button-selected').evaluate((el) => el.title), 'Round',
       'the round default is selected on load');
     assert.equal(await page.evaluate(() => window.__painter.brushShape), null,
       'and Round means no footprint at all, not a 0-sided one');
@@ -98,7 +98,7 @@ const server = http.createServer((request, response) => {
     // would pass every visibility check above.
     const strokeShape = await page.evaluate(async () => {
       const buttons = [...document.querySelectorAll('#bristle-shapes div')];
-      buttons.find((button) => button.textContent === 'Hex')
+      buttons.find((button) => button.title === 'Hex')
         .dispatchEvent(new MouseEvent('click', { bubbles: true }));
       const painter = window.__painter;
       const seen = [];
@@ -113,8 +113,8 @@ const server = http.createServer((request, response) => {
       painter.engine.beginStroke = original;
       return { state: painter.brushShape, passedToEngine: seen };
     });
-    assert.deepEqual(strokeShape.state, { sides: 6 });
-    assert.deepEqual(strokeShape.passedToEngine, [{ sides: 6 }],
+    assert.deepEqual(strokeShape.state, { sides: 6, rotation: Math.PI / 2 });
+    assert.deepEqual(strokeShape.passedToEngine, [{ sides: 6, rotation: Math.PI / 2 }],
       'the selected footprint reaches beginStroke()');
 
     await page.goto(`${base}&uiMode=preset&uiPreset=draw-min`);

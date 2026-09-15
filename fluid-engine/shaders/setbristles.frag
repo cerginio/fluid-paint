@@ -79,15 +79,14 @@ void main () {
          *
          * The clamp is applied AFTER the jitter above, so this press's
          * variation survives intact rather than being quantized by the shape. */
-        /* Rotation must only bias the polygon lookup, not theta itself: theta
-         * is the position angle that places this bristle around the disc, and
-         * bristleIndex sweeps it densely over the full sunflower sequence --
-         * shifting theta by a constant before using it as the position angle
-         * just relabels which bristle lands at which angle, so the painted
-         * shape (the set of positions) comes out identical for every
-         * rotation. Only polygonRadius's fold is periodic in a way that a
-         * shift actually moves, so the rotation goes in there alone. */
-        float shaped = r * polygonRadius(theta + u_bristleRotation, u_bristleSides);
+        /* The polygon is built UNROTATED here (theta alone, no
+         * u_bristleRotation): folding rotation into this lookup, as an
+         * earlier version did, only relabels which bristle sits at which
+         * angle -- the painted shape (the set of positions) comes out
+         * identical for every rotation, because theta already sweeps a dense
+         * angle field via bristleIndex. Real rotation happens below, as an
+         * actual 2D turn of the finished (and aspect-stretched) shape. */
+        float shaped = r * polygonRadius(theta, u_bristleSides);
 
         /* An n-gon inscribed in the unit disc covers less area than the disc,
          * so the same brushSize would paint a visibly thinner stroke -- a
@@ -99,9 +98,22 @@ void main () {
         shaped /= sqrt(areaFraction);
 
         crossSection = vec2(shaped * cos(theta), shaped * sin(theta));
-        // Aspect stretches x against y; 1.0 leaves a regular polygon alone.
+        // Aspect stretches x against y in the UNROTATED frame; 1.0 leaves a
+        // regular polygon alone. Doing this before the rotation below is what
+        // makes aspect and rotation compose correctly -- an aspect-stretched
+        // shape rotated 45 degrees reads as a tilted bar, not an axis-aligned
+        // rectangle a stretch-after-rotation would collapse back to.
         crossSection.x *= u_bristleAspect;
         crossSection /= sqrt(u_bristleAspect); // keep area independent of aspect
+
+        // Rotate the finished cross-section by u_bristleRotation, a genuine
+        // 2D turn (not the angle-relabeling theta shift above).
+        float cosR = cos(u_bristleRotation);
+        float sinR = sin(u_bristleRotation);
+        crossSection = vec2(
+            crossSection.x * cosR - crossSection.y * sinR,
+            crossSection.x * sinR + crossSection.y * cosR
+        );
     }
 
     vec3 brushSpaceBristlePosition = vec3(crossSection, -vertexIndex * spacing);

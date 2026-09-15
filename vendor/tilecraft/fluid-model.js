@@ -18,7 +18,7 @@
      * export writes it, so nothing may depend on it being present.
      */
     const FLUID_PATH_SHAPES = new Set(["polyline", "square", "rectangle"]);
-    const FLUID_SPOT_SHAPES = new Set(["polygon", "circle"]);
+    const FLUID_SPOT_SHAPES = new Set(["polygon", "circle", "slash"]);
     const SUPPORTED_FLUID_LAYER_SHAPES = new Set([...FLUID_PATH_SHAPES, ...FLUID_SPOT_SHAPES]);
     const TILE_FIELDS = ["x", "y", "c", "f", "g", "b", "gd", "gz", "s", "v"];
     const LAYER_FIELDS = ["id", "tag", "visible", "tileShape", "gridSize", "polygonSize", "scale", "opacity", "mod"];

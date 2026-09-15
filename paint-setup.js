@@ -141,12 +141,52 @@ const MAX_EXTERNAL_BRUSH_SCALE = MAX_BRUSH_SCALE * 1.5;
  * docs/FLUID-ENGINE-API-ZERO-TO-HERO.md). Offering choices a user cannot see
  * would make the control feel broken.
  */
+// Icon geometry mirrors setbristles.frag's polygonRadius exactly: a vertex
+// sits at world angle (i*2*PI/sides - rotation), in the shader's math
+// convention (0 = +x/"3 o'clock", angle grows counter-clockwise, +y is up).
+// SVG's y grows DOWN, so the y term is negated to place the same vertex on
+// the same side of the icon as it paints on screen -- anywhere this drifted
+// from the shader's own formula, the icon would show a shape the brush does
+// not actually paint (this bit a first version: an odd side count's rotation
+// does not always land a vertex on 12 o'clock, and the icon has to show that
+// honestly rather than force it there).
+function _bristleShapeIconPoints(sides, rotation, cx, cy, r) {
+  const points = [];
+  for (let i = 0; i < sides; i++) {
+    const angle = (i * 2 * Math.PI) / sides - rotation;
+    points.push(`${(cx + r * Math.cos(angle)).toFixed(1)},${(cy - r * Math.sin(angle)).toFixed(1)}`);
+  }
+  return points.join(' ');
+}
+
+function _bristleShapeIcon(sides, rotation) {
+  if (sides < 3) {
+    // Round.
+    return '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">'
+      + '<circle cx="12" cy="12" r="8" fill="currentColor"/></svg>';
+  }
+  const points = _bristleShapeIconPoints(sides, rotation, 12, 12, 9);
+  return '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">'
+    + `<polygon points="${points}" fill="currentColor"/></svg>`;
+}
+
+// A thin diagonal bar, the same footprint tilecraft-stroke-player.js gives
+// 'slash': a 4-gon squashed to an aspect strip and rotated so it reads as a
+// stroke, not a diamond.
+function _slashShapeIcon(rotation) {
+  return '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">'
+    + `<g transform="rotate(${(-rotation * 180 / Math.PI).toFixed(1)} 12 12)">`
+    + '<rect x="4" y="10" width="16" height="4" rx="1" fill="currentColor"/>'
+    + '</g></svg>';
+}
+
 const BRISTLE_SHAPES = [
-  { name: 'Round', shape: null },
-  { name: 'Tri', shape: { sides: 3, rotation: Math.PI / 6 } },
-  { name: 'Quad', shape: { sides: 4 } },
-  { name: 'Pent', shape: { sides: 5, rotation: Math.PI / 2 } },
-  { name: 'Hex', shape: { sides: 6, rotation: Math.PI / 2 } },
+  { name: 'Round', icon: _bristleShapeIcon(0, 0), shape: null },
+  { name: 'Tri', icon: _bristleShapeIcon(3, Math.PI / 6), shape: { sides: 3, rotation: Math.PI / 6 } },
+  { name: 'Quad', icon: _bristleShapeIcon(4, 0), shape: { sides: 4 } },
+  { name: 'Pent', icon: _bristleShapeIcon(5, Math.PI / 2), shape: { sides: 5, rotation: Math.PI / 2 } },
+  { name: 'Hex', icon: _bristleShapeIcon(6, Math.PI / 2), shape: { sides: 6, rotation: Math.PI / 2 } },
+  { name: 'Slash', icon: _slashShapeIcon(Math.PI / 4), shape: { sides: 4, aspect: 5, rotation: Math.PI / 4 } },
 ];
 const INITIAL_BRISTLE_SHAPE = 0; // Round
 

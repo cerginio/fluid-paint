@@ -25,7 +25,7 @@ const PLAYBACK_DURATION_EXPONENT = Math.log(10) / Math.log(800);
  * exposed this.
  */
 const TILECRAFT_PATH_SHAPES = new Set(['polyline', 'square', 'rectangle']);
-const TILECRAFT_SPOT_SHAPES = new Set(['polygon', 'circle']);
+const TILECRAFT_SPOT_SHAPES = new Set(['polygon', 'circle', 'slash']);
 
 /*
  * Bristle footprints, in the units FluidEngine's Brush accepts:
@@ -35,6 +35,10 @@ const TILECRAFT_SPOT_SHAPES = new Set(['polygon', 'circle']);
  * side count -- `polygonSize` is a radius, not an order. No shape records per-
  * tile proportions, so a quad is regular; a non-square rectangle would need a
  * source field that no observed export has, and is not invented here.
+ *
+ * `slash` is the source renderer's thin diagonal bar (render.js
+ * drawSlashRect): a 4-gon squashed to a 5:1 strip and rotated 45 degrees so
+ * it reads as a stroke rather than a diamond.
  */
 const TILECRAFT_BRUSH_SHAPES = {
   polyline: null,
@@ -42,6 +46,7 @@ const TILECRAFT_BRUSH_SHAPES = {
   circle: null,
   square: { sides: 4, aspect: 1, rotation: Math.PI / 4 },
   rectangle: { sides: 4, aspect: 1, rotation: Math.PI / 4 },
+  slash: { sides: 4, aspect: 5, rotation: Math.PI / 4 },
 };
 
 function targetPlaySeconds(operationCount) {
@@ -74,10 +79,21 @@ class TilecraftStrokePlayer {
    * The bristle footprint a layer shape paints with, or null for the round
    * default. Returned fresh so a frozen plan operation cannot be aliased into
    * the shared table.
+   *
+   * `layer.mod === 1` mirrors the footprint vertically (source render.js's
+   * `backSlash` flip on `drawSlashRect`: 0 draws "/", 1 draws "\\" -- the same
+   * rectangle reflected across the vertical axis, not rotated a further 180
+   * degrees). Negating `rotation` is exactly that reflection in
+   * setbristles.frag's convention, where a positive rotation turns the
+   * footprint counter-clockwise from its unrotated vertex-at-3-o'clock pose.
    */
-  static brushShape(tileShape) {
+  static brushShape(tileShape, layer) {
     const shape = TILECRAFT_BRUSH_SHAPES[tileShape];
-    return shape ? { ...shape } : null;
+    if (!shape) return null;
+    const mirrored = layer && layer.mod === 1 && shape.rotation !== undefined
+      ? { ...shape, rotation: -shape.rotation }
+      : { ...shape };
+    return mirrored;
   }
   /**
    * Validate a transferred Tilecraft model before a scene is allowed to
@@ -237,7 +253,7 @@ class TilecraftStrokePlayer {
         const color = this._color(segment.groupColor, layer, context);
         // A path can carry a footprint too: a `square` layer is a stroke drawn
         // with square marks, so the shape comes from the layer, not the kind.
-        const pathBrushShape = TilecraftStrokePlayer.brushShape(layer.tileShape);
+        const pathBrushShape = TilecraftStrokePlayer.brushShape(layer.tileShape, layer);
         mapped.forEach((entry, pointIndex) => {
           operations.push({
             kind: 'polyline-point',
@@ -295,7 +311,7 @@ class TilecraftStrokePlayer {
           point,
           pressure: this._pressure(tile, tile.s === undefined ? 1 : tile.s, context),
           brushSize: this._tileSize(tile, layer, context),
-          brushShape: TilecraftStrokePlayer.brushShape(layer.tileShape),
+          brushShape: TilecraftStrokePlayer.brushShape(layer.tileShape, layer),
           color: this._color(tile.c, layer, context),
           paintingRectangle: context.paintingRectangle,
           resolutionScale: context.resolutionScale,
@@ -897,7 +913,7 @@ class TilecraftStrokePlayer {
   _begin(point, tile, brushSize, layer, context, maximumRelativeSize, timing, color = tile.c) {
     // The footprint follows the layer's shape whether it paints as a path or as
     // spots -- a `square` layer is a stroke drawn with square marks.
-    const brushShape = TilecraftStrokePlayer.brushShape(layer.tileShape);
+    const brushShape = TilecraftStrokePlayer.brushShape(layer.tileShape, layer);
     this.engine.beginStroke({
       timing,
       x: point.x, y: point.y,
