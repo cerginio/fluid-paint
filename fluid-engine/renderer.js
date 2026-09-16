@@ -39,33 +39,23 @@ const BACKGROUND_GRAY = 0.7;
 // host can pass the same number to the simulator.
 const RESIZING_FEATHER_SIZE = 8;
 
-// Which colour model the painting is composited in. RYB is David Li's
-// subtractive pigment cube and the default; RGB is the additive comparison, and
-// the only one worth naming here because RYB is what every branch falls back
-// to. See docs -- the RYB path is protected and must not be "fixed" into RGB.
+// Which colour model the painting is composited in. RYB (David Li's
+// subtractive pigment cube) is the default and protected -- must not be
+// "fixed" into RGB, the additive comparison every branch falls back from.
 //
-// This value MUST equal FluidEngine.COLOR_MODEL.RGB, which is the name hosts
-// use (fluid-engine/index.js). It is duplicated rather than referenced only
-// because this project has no module system and renderer.js is loaded before
-// index.js, so the class does not exist yet at this line. The assertion at the
-// bottom of index.js checks the two agree at startup -- Phase 9 added the enum
-// after finding that a host had no public name for it at all, and a silent
-// disagreement here would composite the wrong colour model with no error.
+// This value MUST equal FluidEngine.COLOR_MODEL.RGB (fluid-engine/index.js).
+// Duplicated, not referenced, because renderer.js loads before index.js (no
+// module system) so the class doesn't exist yet at this line; the assertion
+// at the bottom of index.js checks the two agree at startup.
 const ColorModelRGB = 1;
 
 /* The cube's all-three-pigments corner, and the flag that deepens it.
  *
- * PIGMENT_CORNER_DAVID_LI is his original: a near-black brown that is the
- * darkest colour that cube can reach. There is no black anywhere in it, so a
- * picker built on it cannot offer one.
+ * PIGMENT_CORNER_DAVID_LI is his original: a near-black brown, the darkest
+ * that cube can reach -- there is no black anywhere in it.
  *
- * PIGMENT_CORNER_BLACK deepens that one corner to real black, and is the
- * DEFAULT -- a picker that cannot offer black is the worse default. Pass
- * blackPigment: false for David Li's original.
- *
- * (Named for what they ARE, not which is default: an earlier pair called
- * PIGMENT_BLACK_DEFAULT/_TRUE became actively misleading the moment the
- * default moved.)
+ * PIGMENT_CORNER_BLACK deepens that corner to real black and is the DEFAULT;
+ * pass blackPigment: false for David Li's original.
  *
  * Only the x*y*z term of the interpolation touches this corner, so every pure
  * hue and every two-pigment mix is bit-identical under either value; only

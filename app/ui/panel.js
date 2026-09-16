@@ -1,26 +1,13 @@
 'use strict';
 
 /*
- * The floating tool panel (Phase 7).
+ * The floating tool panel: draggable by the grip, collapses to a compact bar
+ * (brush size + hue stripe) that stays fully usable, so it costs a phone
+ * screen far less area than a docked column.
  *
- * Owns three behaviours that the old canvas-drawn panel could not have had,
- * because it was pixels in the drawing surface rather than an element:
- *
- *   - dragging, by the grip, anywhere in the window
- *   - collapsing to a compact bar that is still fully usable
- *   - the two controls on that bar: brush size and a hue stripe
- *
- * Why a floating panel rather than a docked column. The Phase 6 device retest
- * scored phones 3.7/5 against the tablet's 5/5, and screen area was the theme.
- * A docked 300px column takes a third of a phone's width away from the
- * painting permanently; a floating panel that collapses to a 40px bar gives it
- * back, and the user chooses where the bar sits rather than the layout choosing
- * for them.
- *
- * This module deliberately knows nothing about the engine. It reports what the
- * user did through callbacks, and paint.js decides what that means -- so the
- * panel can be replaced (Phase 8 swaps the picker for iro.js) without touching
- * simulation code.
+ * Deliberately knows nothing about the engine -- reports what the user did
+ * through callbacks, and paint.js decides what that means, so the panel's
+ * internals can change without touching simulation code.
  */
 
 class ToolPanel {

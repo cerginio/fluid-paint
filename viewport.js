@@ -1,8 +1,7 @@
 /*
  * Viewport — the single owner of every coordinate transform.
  *
- * Three coordinate spaces coexist in this app, and before this module none of
- * them was named in the code (FLUID-ENGINE-EXTRACTION-PLAN.md §2):
+ * Four coordinate spaces coexist in this app:
  *
  *   1. CSS pixels      what the DOM and pointer events speak. Y grows DOWN.
  *   2. Screen pixels   the canvas backing store, = CSS pixels * devicePixelRatio.
@@ -11,21 +10,10 @@
  *   3. Painting pixels `paintingRectangle`, the painting's rect in screen pixels.
  *   4. Simulation texels  painting pixels * resolutionScale.
  *
- * Everything that converts between them goes through here. The point is not
- * tidiness: it is that with one owner, the rest of the code cannot express a
- * coordinate bug, because it never sees two spaces at once.
- *
- * On the Y-flip. Pointer events arrive with Y growing downward; the renderer
- * and every hit test want Y growing upward. That flip was open-coded in four
- * places, and any new input path had to remember to repeat it -- forgetting is
- * silent, which is the worst kind of bug to leave lying around. Now it happens
- * exactly once, in cssToScreen().
- *
- * On devicePixelRatio. It was previously never read, anywhere. The backing
- * store was pinned to CSS pixels, so on a DPR-3 phone the painting was drawn at
- * a third of the device's real resolution -- soft -- and pointer coordinates
- * were only approximately right. Reading it is what makes the painting sharp,
- * and it is why this module exists rather than a handful of helper functions.
+ * Everything that converts between them goes through here, so the rest of the
+ * code cannot express a coordinate bug -- it never sees two spaces at once.
+ * The Y-flip in particular happens exactly once, in cssToScreen(): forgetting
+ * it at a new input path would be a silent bug, so nothing gets the chance.
  */
 
 class Viewport {
@@ -49,25 +37,17 @@ class Viewport {
       ? opts.useResponsivePixelRatioCap
       : true;
 
-    // The element whose CSS box decides the canvas size (Phase 7). Before this
-    // the size came from window.innerWidth/innerHeight directly, which pinned
-    // the canvas to the whole window and is exactly why the chrome could not be
-    // laid out around it -- any DOM that took space would be drawn OVER the
-    // canvas rather than beside it, because the canvas did not know the DOM
-    // existed. Sizing from a container inverts that: CSS decides the box, the
-    // canvas fills whatever it is given.
+    // The element whose CSS box decides the canvas size. CSS decides the box,
+    // the canvas fills whatever it's given.
     //
-    // Defaults to NULL, not to canvas.parentElement, and that is deliberate.
-    //
-    // Falling back to the parent looks harmless and is not: a canvas appended
-    // straight to <body> would then measure body's box, and body's height is
-    // content-driven, so it is sized BY the canvas it is supposed to be sizing.
-    // That feedback loop only shows up at devicePixelRatio 2 -- at ratio 1 the
-    // two sizings happen to agree.
-    //
-    // So a container is opt-in. Without one the viewport keeps its pre-Phase-7
-    // window sizing exactly, which any embedding host that never adopts the
-    // layout relies on.
+    // Defaults to NULL, not canvas.parentElement -- deliberately. Falling back
+    // to the parent looks harmless but isn't: a canvas appended straight to
+    // <body> would measure body's box, and body's height is content-driven, so
+    // it would be sized BY the canvas it's supposed to be sizing. That
+    // feedback loop only shows up at devicePixelRatio 2, where the two sizings
+    // stop agreeing. A container is opt-in; without one the viewport falls
+    // back to window sizing, which an embedding host that never adopts a
+    // container relies on.
     this.container = opts.container || null;
 
     this.pixelRatio = 1;
@@ -187,22 +167,18 @@ class Viewport {
     this.canvas.width = width;
     this.canvas.height = height;
 
-    // With a container the CSS size is asserted at EVERY ratio; without one the
-    // pre-Phase-7 rule stands, and it is written only when the ratio is not 1.
+    // With a container the CSS size is asserted at EVERY ratio; without one
+    // it's written only when the ratio is not 1.
     //
-    // Under a container the element must carry an explicit CSS size, because
-    // otherwise its layout size is its backing store -- and a canvas that takes
-    // its backing store from a box that is itself sized by the canvas is a
-    // feedback loop. app/layout.css avoids that loop a second way (the grid is
-    // window-bounded, so the cell is never content-sized), and measurement says
-    // that bound is what currently carries the load; this write is the guard
-    // that keeps holding if a later layout gives the cell an auto track.
+    // Under a container the element must carry an explicit CSS size: without
+    // it, layout size comes from the backing store, and a canvas whose backing
+    // store comes from a box sized by the canvas is a feedback loop.
+    // app/layout.css avoids that loop another way too (window-bounded grid, so
+    // the cell is never content-sized) -- this write is the guard that still
+    // holds if a later layout gives the cell an auto track.
     //
-    // Without a container the old exemption is kept rather than tidied away.
-    // That is not tidiness either: writing the style at ratio 1 broke output
-    // when this was first attempted, because the canvas was then measuring
-    // <body>, whose height is content-driven. Leaving the no-container path
-    // untouched is what keeps rendering identical.
+    // Without a container, writing the style at ratio 1 breaks output: the
+    // canvas then measures <body>, whose height is content-driven.
     if (this.container !== null || pixelRatio !== 1) {
       this.canvas.style.width = cssWidth + 'px';
       this.canvas.style.height = cssHeight + 'px';

@@ -570,11 +570,8 @@ class Simulator {
    *
    * `brushRectangle` is the painting's extent **in the same space as the
    * brush's own coordinates** (brush.positionX/Y and the position textures).
-   * The engine does not know or care what that space is -- it only needs the
-   * rectangle in order to map brush coordinates into the simulation and into
-   * clip space. Today the app keeps its brush in screen pixels and passes its
-   * screen-space painting rectangle, but nothing here depends on that: an
-   * engine that knew this was "the screen" would not be UI-independent.
+   * The engine does not know or care what that space is -- an engine that
+   * assumed "the screen" would not be UI-independent.
    *
    * @param {Brush} brush
    * @param {number} zThreshold

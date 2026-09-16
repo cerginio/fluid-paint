@@ -1,21 +1,16 @@
 'use strict';
 
 /*
- * GLSL ES 1.00 -> 3.00 transpiler.
+ * GLSL ES 1.00 -> 3.00 transpiler. Shaders are written once in ES 1.00 and
+ * translated at program-creation time (WrappedGL.createProgram(), the single
+ * choke point) rather than forked into a parallel WebGL 2 set to keep in sync.
  *
- * The project's 24 shaders are written in GLSL ES 1.00. Rather than fork them
- * into a parallel WebGL 2 set (24 more files to keep in sync), they are
- * translated at program-creation time. Every shader source funnels through
- * WrappedGL.createProgram(), so this is the single choke point.
+ * Why WebGL 2 at all: it makes texelFetch() available, which takes no sampler
+ * filter, so a filter/format mismatch on a PBD state-texture read can't
+ * silently zero the fetch. See docs/MOBILE-GPU-BRISTLE-COLLAPSE-SPEC.md §5.
  *
- * Why WebGL 2 at all -- see docs/MOBILE-GPU-BRISTLE-COLLAPSE-SPEC.md §5:
- * every state-texture read in the PBD solver is an integer texel lookup
- * wearing float-coordinate clothing. In GLSL ES 3.00 those become texelFetch(),
- * which takes NO sampler filter, so a filter/format mismatch cannot silently
- * zero the fetch. The bug class becomes unwritable.
- *
- * The translation is deliberately conservative: it is a token-level rewrite of
- * the constructs this codebase actually uses, not a general GLSL parser.
+ * The translation is a token-level rewrite of the constructs this codebase
+ * actually uses, not a general GLSL parser.
  */
 
 const GLSL3 = (function () {

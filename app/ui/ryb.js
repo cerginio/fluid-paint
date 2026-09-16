@@ -3,88 +3,25 @@
 /*
  * ryb.js -- the pigment colour space, in JavaScript, for the UI.
  *
- * ---------------------------------------------------------------------------
- * WHY THIS FILE EXISTS
- * ---------------------------------------------------------------------------
- *
- * The simulation is subtractive. A hue chosen by the user takes this path:
- *
- *     HSV --hsvToRyb()--> RYB --rybToRgb()--> what you see on the canvas
- *          (common.js)          (painting.frag)
- *
- * `hsvToRyb()` is the ordinary sexagesimal HSV->RGB formula whose three outputs
- * are then *reinterpreted* as Red/Yellow/Blue pigment loads. That is David Li's
- * trick and it is deliberate. The consequence is the part that bites: the pair
- * is NOT a round trip. Hue is not preserved from end to end.
- *
- *     picked 240deg (blue)   -> RYB (0,0,1) -> paints #ffff00, pure YELLOW
- *     picked  60deg (yellow) -> RYB (1,1,0) -> paints #800080, purple
- *     picked 120deg (green)  -> RYB (0,1,0) -> paints #2a5f99, slate blue
- *
- * Only red is a fixed point; the wheel sits about 120deg away from the pigment
- * for everything else. An RGB-native picker therefore does not merely look
- * slightly off -- it names the wrong colour. Phase 8 mounted iro.js, which is
- * RGB-native, and that is the mismatch this file closes.
- *
- * The old GL picker had this right. `app/shaders/picker.frag:52` reads:
- *
- *     vec3 hsvToRgb (vec3 hsv) { return rybToRgb(hsv2ryb(hsv)); }
- *
- * -- every swatch it drew went through the SAME two steps the paint takes, so
- * the ring showed pigment rather than light. That file is kept as the reference
- * for this one. The eight cube corners and the trilinear weights below are
- * transcribed from `picker.frag:17-43`, which are in turn identical to the
- * engine's `fluid-engine/shaders/painting.frag:34-48`. All three must agree;
- * see `assertMatchesShader()` at the bottom, which checks the corners against
- * the shader source rather than trusting that they still do.
- *
- * ---------------------------------------------------------------------------
- * WHAT THIS IS NOT
- * ---------------------------------------------------------------------------
- *
- * This is a RENDERING aid for the UI only. Nothing here is on the paint path --
- * `paint.js` still calls `hsvToRyb()` from `common.js` and hands the RYB triple
- * to `splat()` untouched. This file only answers the question "what colour
- * should this pixel of the WIDGET be", which the widget was previously
- * answering in the wrong colour space.
- *
- * It also does not change which hue the user picks. Hue stays the app's 0..1
- * `brushColorHSVA[0]`; only its on-screen swatch changes.
- *
- * ---------------------------------------------------------------------------
- * THE PARITY CONTRACT
- * ---------------------------------------------------------------------------
- *
- * Being a rendering aid does NOT license a second mapping. Every UI surface --
- * disc, handles, sliders, compact strip, brush preview -- must show the colour
- * the brush will actually deposit, which means exactly:
- *
- *     const pigment    = hsvToRyb(h, s, v);
- *     const displayRgb = rybToRgbDisplay(pigment, additive);
- *
- * `hsvToPigmentRgb()` below is precisely that composition. An earlier version
- * was not, and the widget consequently agreed with the paint only on the rim.
- * See that function's comment for the measured divergence, and
- * docs/COLOR-PICKER-PAINT-PARITY-SPEC.md for the full contract.
+ * The simulation is subtractive (David Li's RYB pigment cube): a picked hue's
+ * RGB->RYB->RGB round trip is NOT identity, so an RGB-native widget (iro.js)
+ * names the wrong colour unless corrected here. Full contract, the measured
+ * divergence and why: docs/COLOR-PICKER-PAINT-PARITY-SPEC.md.
  * debug/color-parity-test.js is the durable guard; run it after touching this.
  *
- * ---------------------------------------------------------------------------
- * A NOTE ON THE AXIS NAMES
- * ---------------------------------------------------------------------------
+ * This is a RENDERING aid only -- `paint.js` still calls `hsvToRyb()` from
+ * common.js and hands the RYB triple to `splat()` untouched. Every UI surface
+ * (disc, handles, sliders, strip, brush preview) must go through
+ * `hsvToPigmentRgb()` below rather than inventing its own mapping.
  *
- * The cube's axes are numerically RED, BLUE, YELLOW -- in that channel order.
- * `(1,0,0)` is red, `(0,1,0)` is slate blue, `(0,0,1)` is yellow. The acronym
- * "RYB" does not read literally off the channel indices. Do not swap channels
- * to make it; the shader does not, and the two must agree.
+ * AXIS NAMES: the cube's channels are RED, BLUE, YELLOW in that order --
+ * `(0,1,0)` is slate blue, not green. Do not swap channels to match the
+ * acronym; the shader does not, and the corners below must stay byte-identical
+ * to `fluid-engine/shaders/painting.frag:34-48` (see `assertMatchesShader()`).
  *
- * `(0,0,0)` is white colour DATA, not absence of paint: a splat with nonzero
- * alpha and zero pigment deposits white paint. Colour and amount are separate.
- *
- * David Li's cube has no pure-black corner -- `(1,1,1)` is `(0.2, 0.094, 0)`,
- * its darkest reachable point, and the lighting term only brightens. So the
- * stock picker has no black to offer at all. The `?black=1` feature flag
- * deepens that one corner to `(0,0,0)`; see `setPigmentBlack()` below. It must
- * be set to match the value the ENGINE was constructed with.
+ * `(0,0,0)` is white colour DATA, not absence of paint -- alpha carries amount.
+ * The cube has no pure-black corner; `?black=1` deepens `(1,1,1)` to `(0,0,0)`
+ * via `setPigmentBlack()` and must match the value the ENGINE was built with.
  */
 
 /** The eight corners of David Li's RYB pigment cube.
@@ -178,59 +115,19 @@ function rybToRgbDisplay(ryb, additive) {
 }
 
 /**
- * The whole chain, HSV -> the colour the widget should show.
+ * The whole chain, HSV -> the colour the widget should show: exactly the two
+ * steps the paint takes (`hsvToRyb` then `rybToRgbDisplay`), nothing else. Do
+ * not multiply by value, add white, or invert afterward -- that makes the
+ * widget describe a colour the brush will not deposit.
  *
- * This is EXACTLY the two steps the paint takes, and nothing else:
- *
- *     hsvToRyb(h, s, v)    -- common.js, the same call paint.js makes
- *     rybToRgbDisplay(...) -- the JS twin of the shader's rybToRgb
- *
- * Do not multiply the result by value, add white, or invert it afterward. Any
- * such step makes the widget describe a colour the brush will not deposit.
- *
- * ---------------------------------------------------------------------------
- * WHAT THIS REPLACED, AND WHY THE OLD REASONING WAS WRONG
- * ---------------------------------------------------------------------------
- *
- * An earlier version used a separate `hueToPigmentLoad(h, s)` ramp and then
- * multiplied the converted RGB by value, on the reasoning that display has "a
- * different job" from paint: rendering the whole s/v space, blank-paper and
- * black ends included. That reasoning conflated two questions -- what the
- * selection model OUGHT to be, and what it IS -- and answered the first while
- * the paint went on answering the second.
- *
- * The result agreed with the brush only on the rim at s=1,v=1, where the two
- * mappings coincide. Everywhere else it lied, and rim checks could not see it.
- * Measured at hue 0 (see debug/color-parity-test.js):
- *
- *     selection      old widget        actual paint
- *     s=0,   v=1     (255,255,255)     ( 51, 24,  0)   dark brown, not white
- *     s=1,   v=0     (  0,  0,  0)     (255,255,255)   white, not black
- *     s=1,   v=0.5   (128,  0,  0)     (255,128,128)   pink, not dark red
- *     s=0.5, v=1     (255,128,128)     (172, 38, 32)   dark red, not pink
- *
- * The third row is the reported "pink paint, dark-red bristles"; the first two
- * are the apparent black/white inversion.
- *
- * ---------------------------------------------------------------------------
- * THE CONSEQUENCES ARE INTENDED
- * ---------------------------------------------------------------------------
- *
- * `hsvToRyb()` is an additive formula whose outputs are reinterpreted as ink,
- * so desaturating raises ALL THREE loads toward 1 -- "pile on every pigment" --
- * which lands on the cube's v111 near-black brown. So, honestly:
- *
- *   - the disc's CENTRE at v=1 is dark brown, not white
- *   - the zero end of the value coordinate is WHITE, not black
- *
- * These are properties of the existing selection mapping, not display errors.
- * The compatibility policy preserves existing HSVA selections and the pigment
- * they deposit, so they stay. Do NOT restore a white centre or a black zero end
- * by painting an unrelated RGB overlay over the disc -- that reintroduces the
- * exact divergence this function exists to close. A conventional white-centre
- * picker is a separate selection-model redesign, not a rendering fix.
- *
- * See docs/COLOR-PICKER-PAINT-PARITY-SPEC.md.
+ * Because `hsvToRyb()` is additive outputs reinterpreted as ink, desaturating
+ * piles on all three pigments and lands near the cube's dark-brown corner: the
+ * disc's centre (v=1) is dark brown, not white, and value=0 is white, not
+ * black. These are properties of the selection mapping, not display bugs --
+ * do NOT paint a white-centre/black-zero overlay back on top to "fix" them;
+ * that reintroduces the exact divergence this function closes. A conventional
+ * white-centre picker is a separate selection-model redesign, not a rendering
+ * fix. See docs/COLOR-PICKER-PAINT-PARITY-SPEC.md.
  *
  * @param {number} h  hue, 0..1
  * @param {number} s  saturation, 0..1
@@ -258,20 +155,16 @@ function cssPigment(h, s, v, additive) {
 }
 
 /**
- * Guard against the copies of the cube drifting apart.
+ * Guards against the corners above (duplicated from GLSL this file cannot
+ * import) silently drifting from the shader -- parses the numbers back out of
+ * the shader source and compares. The probe calls it with the loaded shader
+ * text.
  *
- * The corners above are duplicated from GLSL this file cannot import. A copy
- * that silently stops matching is exactly the failure that makes the widget lie
- * again, so this parses the numbers back out of the shader source and compares.
- * The probe calls it with the loaded shader text.
- *
- * The eighth corner is a special case. Since the black-pigment flag it is a
- * `u_pigmentBlack` UNIFORM in painting.frag rather than a literal, so there is
- * no number in the shader body to compare against. Its authoritative values
- * live in `fluid-engine/renderer.js` instead, and the caller passes that file's
- * text as `rendererSource` so the last corner can be checked too. Omitting it
- * checks the first seven and reports the eighth as unverified rather than
- * silently passing on it.
+ * The eighth corner (black pigment) is a `u_pigmentBlack` UNIFORM in
+ * painting.frag, not a literal, so it has no number in the shader body to
+ * compare -- its authoritative value lives in `fluid-engine/renderer.js`
+ * instead, passed as `rendererSource`. Omitting it checks the first seven and
+ * reports the eighth as unverified rather than silently passing on it.
  *
  * @param {string} shaderSource  the text of painting.frag or picker.frag
  * @param {string} [rendererSource]  the text of fluid-engine/renderer.js

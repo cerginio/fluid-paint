@@ -54,6 +54,15 @@ The third row explains the pink paint versus dark-red bristles in the report.
 The first two explain the apparent black/white inversion. Passing rim checks
 does not establish parity over the disc.
 
+The same divergence shows across the hue wheel at s=1, v=1 (fully saturated
+rim), where `hsvToRyb()`'s HSV->RGB output is reinterpreted as RYB pigment
+rather than converted back: picking 240° (blue) selects pigment RYB (0,0,1),
+which paints pure yellow (`#ffff00`); 60° (yellow) selects (1,1,0), which
+paints purple (`#800080`); 120° (green) selects (0,1,0), which paints slate
+blue (`#2a5f99`). Red (0°) is the only fixed point; the wheel's hue name and
+the pigment it deposits are roughly 120° apart everywhere else. An RGB-native
+picker does not merely render slightly off — it names the wrong colour.
+
 These are base colours, before lighting, paint thickness, background mixing,
 and fluid transport. The picker is not expected to predict every lit pixel of
 an evolving stroke.

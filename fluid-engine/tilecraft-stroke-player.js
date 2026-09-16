@@ -783,19 +783,14 @@ class TilecraftStrokePlayer {
    * Split one path where its per-tile `s` changes enough that a single brush
    * width can no longer stand for the whole run.
    *
-   * A FluidEngine stroke has ONE immutable brushSize: it fixes spacing,
-   * zThreshold and splatRadius at beginStroke, so width cannot be varied
-   * per sample.  The player therefore drew every point at the segment's
-   * widest tile (Math.max of the sizes).  Tilecraft tapers strokes with `s`
-   * -- render.js:445 scales each point on its own -- so a tapered run was
-   * painted entirely at its thick end: a 128px frame of pic-3 has 163 of 164
-   * paths with over 2x internal spread, the worst drawing an s=0.0068 tile at
-   * its group's s=5.59.  That is the blob, and it grows with fit scale.
-   *
-   * Splitting into runs of similar width restores the taper while keeping
-   * each stroke's width immutable.  Consecutive runs repeat the boundary tile
-   * so the pieces overlap and read as one continuous stroke rather than
-   * separate dashes.
+   * A FluidEngine stroke has ONE immutable brushSize (spacing, zThreshold and
+   * splatRadius are fixed at beginStroke), so drawing every point at the
+   * segment's widest tile paints a tapered Tilecraft stroke (render.js:445
+   * scales each point) entirely at its thick end -- e.g. a 128px frame of
+   * pic-3 has 163/164 paths with over 2x internal spread. Splitting into runs
+   * of similar width restores the taper while keeping each stroke's width
+   * immutable; consecutive runs repeat the boundary tile so pieces overlap and
+   * read as one continuous stroke rather than separate dashes.
    */
   *_splitByWidth(tiles, closes, groupScale, groupColor) {
     if (tiles.length < 2) {

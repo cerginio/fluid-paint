@@ -64,22 +64,10 @@ class Paint {
             { a_position: 0 }
         );
 
-        // panelProgram and blurProgram are GONE (Phase 7).
-        //
-        // They drew the panel background and the frosted blur behind it INTO
-        // the canvas, which is why the chrome could not be laid out: it was
-        // pixels in the drawing surface, not boxes in the document. The panel
-        // is now a real element and the blur is a CSS backdrop-filter, so both
-        // programs, the makeBlurShader() generator, and the two full-canvas
-        // RGBA scratch textures they ping-ponged through (tempCanvasTexture and
-        // blurredCanvasTexture) are deleted rather than merely unused.
-        //
-        // shadowProgram STAYS, and that is not an oversight: it also draws the
-        // PAINTING's drop shadow (see update()), which is part of presenting
-        // the painting on its background, not part of the panel chrome. The
-        // plan's "delete shadowProgram" was written before that second caller
-        // was noticed; deleting it would have removed the painting's shadow
-        // along with the panel's.
+        // The panel is a real DOM element and its blur a CSS backdrop-filter,
+        // so there's no panel/blur GL program here. shadowProgram stays: it
+        // also draws the PAINTING's own drop shadow (see update()), not just
+        // panel chrome.
         this.shadowProgram = wgl.createProgram(
             shaderSources['shaders/fullscreen.vert'],
             shaderSources['shaders/shadow.frag'],
@@ -422,21 +410,12 @@ class Paint {
             : null;
 
         /*
-         * On-screen switches for the debug facilities.
-         *
-         * Each `set` CONSTRUCTS or DESTROYS, matching what `?debug=` does at
-         * load: debug-flags.js promises that an off facility allocates nothing
-         * and adds no per-frame work, and a toggle that merely hid its output
-         * would quietly break that promise while looking identical. The
-         * per-frame code below is unchanged -- it still tests `!== null`.
-         *
-         * `get` reads the live field rather than a flag copy, so a button can
-         * never claim a facility is on when construction failed.
-         *
-         * The containers live outside #ui (see index.html) so a collapsed or
-         * dragged panel does not take the switches with it. Absent containers
-         * mean no toggles -- the no-support page has none, and a second host
-         * brings its own markup.
+         * On-screen switches for the debug facilities. Each `set` CONSTRUCTS or
+         * DESTROYS to match what `?debug=` does at load -- an off facility must
+         * allocate nothing, not just hide its output. `get` reads the live
+         * field rather than a flag copy, so a button can't claim a facility is
+         * on when construction failed. Containers live outside #ui so a
+         * collapsed/dragged panel doesn't take the switches with it.
          */
         const toggleTR = document.getElementById('debug-toggle-tr');
         const toggleBR = document.getElementById('debug-toggle-br');
@@ -1084,24 +1063,10 @@ class Paint {
         // This was the LAST chrome drawn into the canvas. What remains below is
         // the painting's own shadow and the debug overlays.
         if (this.brushViewer !== null) {
-            /*
-             * PIGMENT, not hsvToRgb (Phase 10).
-             *
-             * This preview shows the bristles that are about to deposit paint,
-             * so it has to be the colour that paint will BE. hsvToPigmentRgb()
-             * IS those two steps -- hsvToRyb() then the cube -- so the preview,
-             * the picker and the splat all derive from one contract. (An
-             * earlier version of this comment claimed the same thing while the
-             * function behind it did something else; see
-             * docs/COLOR-PICKER-PAINT-PARITY-SPEC.md.)
-             *
-             * `fixHueForPreview()` used to sit here doing `1.0 - h`. That was a
-             * hand-tuned compensation for this exact mismatch: hsvToRgb is
-             * additive and the paint is subtractive, and inverting the hue got
-             * one part of the wheel looking roughly right at the cost of the
-             * rest. With the real conversion it is unnecessary, and applying
-             * both would put the preview back out by the amount it corrects.
-             */
+            // PIGMENT, not hsvToRgb: this preview must show the colour paint
+            // will BE, so it goes through hsvToPigmentRgb() -- the same
+            // contract the picker and the splat use. See
+            // docs/COLOR-PICKER-PAINT-PARITY-SPEC.md.
             const hsva = this.brushColorHSVA;
             const rgb = this.adhocPaintColor === 'black' ? [0, 0, 0]
                 : this.adhocPaintColor === 'white' ? [1, 1, 1]
@@ -1672,17 +1637,12 @@ class Paint {
      * Take the brush position from the dispatcher's LIVE pointer state, before
      * this frame's simulation step.
      *
-     * The dispatcher defers pan to its own requestAnimationFrame. The render
-     * loop's RAF is registered first (in _start), and RAF callbacks run in
-     * registration order, so without this the brush would always be one frame
-     * behind the pointer: every frame simulated the previous position and the
-     * deferred pan only caught up afterwards. Brush.update() derives bristle
-     * speed from the delta it is given, so a stale position does not merely lag
-     * visually -- it changes how much paint is deposited.
-     *
-     * Reading the live position here restores the synchronous behaviour the
-     * pre-Phase-6 pointermove handler had, while leaving gesture recognition
-     * (which genuinely wants accumulated per-frame deltas) on the dispatcher.
+     * The dispatcher defers pan to its own RAF, registered after the render
+     * loop's -- so without this the brush would always simulate one frame
+     * behind the pointer. That's not just visual lag: Brush.update() derives
+     * bristle speed from the position delta, so a stale position changes how
+     * much paint is deposited. Gesture recognition, which wants accumulated
+     * per-frame deltas, stays on the dispatcher.
      */
     _syncBrushToPointer() {
         if (this.interactionState !== InteractionMode.PAINTING) return;

@@ -1,43 +1,23 @@
 'use strict';
 
 /*
- * DebugToggles -- on-screen switches for the debug facilities.
+ * DebugToggles -- on-screen switches for the debug facilities
+ * (debug/debug-flags.js), so they can be flipped without reloading with a
+ * `?debug=` query string.
  *
- * Until now the three debug features (debug/debug-flags.js) could only be
- * changed by reloading with a `?debug=` query string. That is fine on a desktop
- * and useless on the device where the instrumentation matters most: a phone,
- * where retyping a URL to see the bristle preview means losing the painting.
+ * The contract these must not break: a flag that's OFF means the feature is
+ * STRUCTURALLY ABSENT (no GL programs, no textures, no per-frame branches --
+ * see debug-flags.js). Hiding output instead of destroying it would still pay
+ * the cost (brush.js's readback is the expensive part, not the drawing), so
+ * each toggle CONSTRUCTS on enable and DESTROYS on disable through
+ * host-supplied callbacks; the host's `!== null` checks stay unchanged. The
+ * flags remain the source of truth for STARTING state (`?debug=-x` at load);
+ * these toggles only change it afterwards.
  *
- * ---------------------------------------------------------------------------
- * THE CONTRACT THESE MUST NOT BREAK
- * ---------------------------------------------------------------------------
- *
- * debug-flags.js is explicit that a flag which is OFF means the feature is
- * STRUCTURALLY ABSENT -- no GL programs compiled, no textures allocated, no
- * per-frame branches in the hot loop. That is why the flags are read once at
- * construction and branched on there, never inside update().
- *
- * A toggle that merely hid the output would quietly convert that into "the
- * feature always runs, and we throw the pixels away" -- the readback in
- * brush.js is the expensive part, not the drawing, so hiding it would cost the
- * same as leaving it on. So each toggle here CONSTRUCTS on enable and DESTROYS
- * on disable, through callbacks the host supplies, and the host's per-frame
- * code keeps its existing `!== null` checks unchanged.
- *
- * The flags remain the source of truth for the STARTING state: `?debug=-x` is
- * still what decides whether a facility is on when the page loads. These
- * toggles change it afterwards.
- *
- * ---------------------------------------------------------------------------
- * What a toggle is
- * ---------------------------------------------------------------------------
- *
- * A `{ id, label, get, set }` quad. `get()` reports whether the facility is
- * currently live (the host reads its own field, so the button cannot drift out
- * of sync with reality); `set(on)` constructs or destroys it. The button's
- * appearance is derived from `get()` after every change rather than tracked
- * separately -- if `set()` fails, the button snaps back to the truth rather
- * than showing a lie.
+ * A toggle is a `{ id, label, get, set }` quad. `get()` reads the host's own
+ * field (so a button can't drift from reality); `set(on)` constructs or
+ * destroys. Button appearance is re-derived from `get()` after every change,
+ * so a failed `set()` snaps back to the truth instead of showing a lie.
  */
 
 class DebugToggles {

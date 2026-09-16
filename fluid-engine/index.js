@@ -1,15 +1,9 @@
 // FluidEngine -- the public surface of the engine.
 //
-// Phase 5. Before this, a host reached into Simulator, Brush and
-// PaintingRenderer directly: it read `simulator.resolutionWidth`, wrote
-// `simulator.fluidity`, bound `brush.brushIndexBuffer` into its own draw calls,
-// and had to know that snapshot textures must match `simulator.paintTextureType`
-// or undo would break. Every one of those is a detail a second host would have
-// to rediscover, and any of them changing would break it silently.
-//
-// This is the whole surface. If a host needs something not here, the API is
-// wrong and should grow deliberately -- not be worked around by reaching past
-// it, which is what `engine.simulator` would invite. There is no such property.
+// This is the whole surface. A host must never reach into Simulator, Brush or
+// PaintingRenderer directly -- there is no `engine.simulator` property. If a
+// host needs something not here, the API is wrong and should grow
+// deliberately, not be worked around by reaching past it.
 //
 // What the engine does NOT own, on purpose:
 //

@@ -650,24 +650,15 @@ class Brush {
     // debugTexture(this.projectedPositionsTexture, 1);
 
     function debugTexture(velocitiesTexture, mode = 1) {
-      // `typeof presenter` rather than `presenter`, and the difference is not
-      // stylistic -- it is the engine's last app-owned global, found by Phase 9.
-      //
-      // `presenter` is declared by index.html (`let presenter;`) and only ever
-      // assigned when the textureProbe debug flag is on. Inside THAT page a bare
-      // `if (presenter)` is a safe undefined test, so this read looked harmless
-      // for four phases. In a second host the identifier is never declared at
-      // all, and reading an undeclared name is a ReferenceError -- thrown here,
-      // inside update(), which runs every frame of every stroke.
-      //
-      // The failure is the worst shape available: the throw unwinds update()
-      // BEFORE splat() is reached, so the host paints nothing while the canvas,
-      // the controls and every capability probe look perfectly healthy. That is
-      // how examples/minimal presented -- 0 splat calls, no visible cause.
-      //
-      // `typeof` is defined for undeclared identifiers, so this asks "is there a
-      // presenter" without requiring a host to declare one. Do not "simplify" it
-      // back: the engine must not require a global its host never heard of.
+      // `typeof presenter` rather than `presenter`: `presenter` is index.html's
+      // own global (`let presenter;`), not the engine's. A host that never
+      // declares it hits a ReferenceError here, inside update() -- every frame
+      // of every stroke -- which unwinds BEFORE splat() runs, so the host
+      // paints nothing while everything else looks healthy. `typeof` is
+      // defined for undeclared identifiers, so this asks "is there a
+      // presenter" without requiring the host to declare one. Do not
+      // "simplify" it back: the engine must not require a global its host
+      // never heard of.
       if (typeof presenter !== 'undefined' && presenter) {
         presenter.presentTextureToCanvas2D({
           srcTexture: velocitiesTexture,

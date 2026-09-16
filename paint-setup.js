@@ -23,31 +23,20 @@ const PaintState = {
     useResponsivePixelRatioCap: true,
 
     // Hard ceiling on GPU memory for the resolution-dependent render targets.
+    // maxPaintingWidth clamps each DIMENSION against MAX_TEXTURE_SIZE, but
+    // nothing clamps total memory, which scales with AREA -- ratio 2 costs 4x,
+    // not 2x. Exceeding VRAM answers GL_OUT_OF_MEMORY with a dropped context
+    // (a black canvas, not a slow one), which is why this is a hard limit
+    // rather than something to profile later. See
+    // FluidEngine.estimateRenderTargetBytes() for the byte arithmetic (7
+    // simulator buffers + HISTORY_SIZE undo snapshots, 16 bytes/texel).
     //
-    // maxPaintingWidth already clamps each DIMENSION against MAX_TEXTURE_SIZE,
-    // but nothing clamped total memory -- and everything here scales with the
-    // painting's AREA, so a ratio of 2 costs four times as much, not twice.
+    // When the budget binds, simulation scale degrades (below quality Low if
+    // it has to) -- painting size and undo depth stay what the user asked for;
+    // simulation fidelity is the one of the three that degrades gracefully.
     //
-    // At this resolution the app holds 7 simulator buffers plus HISTORY_SIZE
-    // undo snapshots -- 22 float RGBA textures in all, at 16 bytes a texel.
-    // The engine owns that arithmetic now; see
-    // FluidEngine.estimateRenderTargetBytes(). A 1280x800 window at ratio 2 gives a 2520x1560
-    // painting, which is 3.93 Mtexels, so even at quality Low that is ~1.3 GB.
-    // The driver answers GL_OUT_OF_MEMORY and drops the context -- a black
-    // canvas, not a slow one -- which is why this is a hard limit rather than
-    // something to profile later.
-    //
-    // When the budget binds, the simulation scale degrades (below quality Low
-    // if it has to). The painting keeps the size the user asked for and the
-    // undo history keeps its depth; what gives is simulation fidelity, which
-    // is the one of the three that degrades gracefully.
-    //
-    // 1 GB is chosen so that the pre-DPR behaviour is untouched -- a 1280x800
-    // window at quality High needs 712 MB and stays exactly as it was -- while
-    // a ratio-2 window degrades instead of losing the context. Note this limit
-    // was always reachable without DPR: a 2560x1440 window at quality High
-    // asks for 2.6 GB today. DPR did not create the defect, it made it
-    // reachable on an ordinary window.
+    // 1 GB keeps a 1280x800 window at quality High (712 MB) untouched while a
+    // ratio-2 window degrades instead of losing the context.
     maxRenderTargetBytes: 1024 * 1024 * 1024,
 };
 

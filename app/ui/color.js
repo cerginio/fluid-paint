@@ -1,82 +1,24 @@
 'use strict';
 
 /*
- * ColorControl -- the paint colour editor, Phase 8.
+ * ColorControl -- the paint colour editor. Mounts an iro.js wheel + sliders
+ * into `#color-picker-slot`.
  *
- * Replaces `colorpicker.js`, which drew a hue ring, a saturation/value square
- * and an alpha slider with two GL programs (`picker.vert`/`picker.frag`) into
- * the main canvas, and hit-tested them with hand-written circle and box maths.
- * That is now an iro.js wheel plus two iro.js sliders, mounted as real DOM into
- * `#color-picker-slot` -- the box Phase 7 reserved for exactly this.
+ * THE ONE RULE: iro.js speaks RGB/HSV, the simulation speaks David Li's
+ * subtractive RYB pigment cube -- see docs/COLOR-PICKER-PAINT-PARITY-SPEC.md.
+ * This control only ever reads/writes H,S,V,A in 0..1 (`brushColorHSVA`);
+ * never `color.rgb`, which is the WIDGET's colour, not the pigment. The
+ * widget's own swatches are repainted through pigment adapters so what the
+ * wheel shows matches what the brush deposits -- see docs/COLOR-PICKER-PAINT-PARITY-SPEC.md
+ * for why a naive RGB-rendered wheel does not.
  *
- * ---------------------------------------------------------------------------
- * THE ONE RULE: iro.js speaks RGB/HSV. The simulation speaks RYB.
- * ---------------------------------------------------------------------------
+ * iro.js is MPL-2.0 -- per docs/UI-COMPONENTS.md it is never edited in place;
+ * every surface here is restyled from outside through its rendered DOM
+ * (`.IroWheelHue`, `.IroSliderGradient`, `.IroHandle`).
  *
- * §3b of the extraction plan: the paint model is David Li's SUBTRACTIVE RYB
- * pigment cube, not RGB. Yellow over blue is green there and grey in RGB. The
- * conversion happens at `hsvToRyb()`, in the host, on the way to `splat()` --
- * and this file's whole job is to make sure an RGB picker's assumptions stop
- * here rather than leaking inward.
- *
- * Concretely, that means this control **only ever reads and writes H, S, V and
- * A as numbers in 0..1**, which is the app's existing `brushColorHSVA` contract.
- * It never hands an RGB triple to anything downstream, and it never asks iro.js
- * what colour the paint "is" -- iro's own `color.rgb` is the colour of the
- * WIDGET, not the pigment that hue becomes. Those two are different by design
- * and conflating them is the exact mistake §3b warns about.
- *
- * ---------------------------------------------------------------------------
- * PHASE 10: the widget now shows PIGMENT, not light
- * ---------------------------------------------------------------------------
- *
- * Phase 8 left the above rule intact on the data path but drew the widget in
- * iro's own RGB, on the reasoning that "a user picking blue should see blue".
- * That reasoning was wrong, and measurably so: `hsvToRyb()` is not a round trip
- * with `rybToRgb()`, so the hue the wheel NAMES is not the hue the canvas
- * PAINTS. Measured across the wheel (see app/ui/ryb.js for the table):
- *
- *     wheel says blue   (240deg) -> canvas paints pure YELLOW
- *     wheel says yellow ( 60deg) -> canvas paints purple
- *     wheel says green  (120deg) -> canvas paints slate blue
- *
- * Red is the only fixed point; everything else is off by roughly 120deg. So the
- * picker was not showing "an RGB interpretation of the hue" -- it was showing a
- * different colour from the one about to come out of the brush. That is the
- * additive/subtractive mismatch, and it is what `_repaint()` below fixes.
- *
- * The fix is the one the OLD picker already had. `app/shaders/picker.frag:52`:
- *
- *     vec3 hsvToRgb (vec3 hsv) { return rybToRgb(hsv2ryb(hsv)); }
- *
- * -- every swatch went through the same two steps as the paint. `_repaint()`
- * does exactly that in CSS, for the four surfaces iro.js paints from its own
- * RGB assumption. The geometry, hit-testing, handles and events remain iro's.
- *
- * Note what did NOT change: the H/S/V/A boundary above is untouched, and the
- * hue the user picks is still the same number. Only its swatch moved --
- * nothing here is on the paint path.
- *
- * ---------------------------------------------------------------------------
- * WHY NOT PATCH lib/iro.js
- * ---------------------------------------------------------------------------
- *
- * iro.js is MPL-2.0 and docs/UI-COMPONENTS.md sets the rule: do not edit it in
- * place, wrap it, keep the copyleft boundary where it is. Every surface below is
- * therefore restyled from OUTSIDE, through the DOM iro rendered. The class names
- * used (`.IroWheelHue`, `.IroSliderGradient`, `.IroHandle`) are iro's public
- * rendered output, and the Phase 8 probe already asserts them.
- *
- * ---------------------------------------------------------------------------
- * What this does NOT own
- * ---------------------------------------------------------------------------
- *
- * The HSVA array itself. It is `Paint.brushColorHSVA`, reached through an
- * accessor and **mutated in place**, exactly as `ColorPicker` did -- several
- * other readers hold a reference to that array (the splat colour, the brush
- * preview, the panel's hue stripe), and replacing it would silently orphan them.
- * The accessor rather than the object is the Phase 5 shape: this file can reach
- * one named thing, not any field of its owner.
+ * Does NOT own the HSVA array itself: it's `Paint.brushColorHSVA`, mutated in
+ * place because other readers (splat colour, brush preview, panel hue stripe)
+ * hold their own reference to it.
  */
 
 // Wheel diameter and slider height in CSS pixels. iro.js takes a single `width`
@@ -326,40 +268,17 @@ class ColorControl {
   }
 
   /*
-   * ------------------------------------------------------------------------
-   * Widget -> pigment
-   * ------------------------------------------------------------------------
-   *
-   * There is deliberately no repaint code here any more.
-   *
-   * The first version of this phase overwrote iro's rendered DOM from outside
-   * -- the ring's conic-gradient, both slider gradients, the handle fills -- to
-   * avoid editing a vendored file. That worked, but it meant re-deriving in CSS
-   * what iro already computes internally, and racing its re-renders to do it.
-   *
-   * The colour space now lives where it belongs: `IroColor.pigmentRgb()` in
-   * lib/iro.js is the display adapter, and every surface that must show
-   * pigment -- the disc raster, both slider gradients, the handle fills --
-   * calls it EXPLICITLY. lib/iro.js is this project's own long-standing fork,
-   * not a pristine upstream drop, so fixing it at the source is the honest
-   * place for it.
-   *
-   * Note `color.rgb` is NOT pigment: it is stock iro's additive HSV->RGB, and
-   * deliberately so. An earlier version converted it implicitly, which left
-   * `hexString`/`hslString` quietly returning a different colour space than
-   * their names promise and gave `rgbToHsv` no matching inverse. Read pigment
-   * through the adapter; never through the RGB accessors.
-   *
-   * What this file still owns is WHICH model is drawn -- see `setAdditive()`.
+   * Widget -> pigment: every surface that must show pigment (disc raster,
+   * slider gradients, handle fills) calls `IroColor.pigmentRgb()` in
+   * lib/iro.js explicitly. `color.rgb` is stock iro's additive HSV->RGB, not
+   * pigment -- never read it for display. This file still owns WHICH model is
+   * drawn; see `setAdditive()`.
    */
 
   /*
    * Widget -> app. Mutates the live array in place; see the class comment on
-   * why it is never replaced.
-   *
-   * Only H, S, V and A cross this line. `color.rgb` is deliberately not read:
-   * it is the widget's RGB rendering of the hue, not the pigment, and letting it
-   * inward is precisely the §3b leak this control exists to prevent.
+   * why it is never replaced. Only H, S, V, A cross this line -- `color.rgb`
+   * is the widget's rendering of the hue, not the pigment.
    */
   _readFromWidget(color, alphaOnly = false) {
     const hsva = this.getHSVA();

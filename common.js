@@ -79,10 +79,9 @@ function mix(a, b, t) {
   return (1.0 - t) * a + t * b;
 }
 
-// Snapshot moved into the engine as PaintSnapshot in Phase 5: the host holds
-// the handles and decides how many, but only the engine can allocate one, since
-// the texture must match the paint texture type the capability probe chose.
-// See fluid-engine/index.js.
+// Snapshots are allocated by the engine (PaintSnapshot, fluid-engine/index.js)
+// since the texture must match the paint texture type the capability probe
+// chose; the host only holds the handles and decides how many.
 
 function cursorForResizingSide(side) {
   if (side === ResizingSide.LEFT || side === ResizingSide.RIGHT) {
@@ -100,27 +99,22 @@ function cursorForResizingSide(side) {
   }
 }
 
-// Two shader trees, each with its own base path. The names below stay the keys
-// that every shaderSources[...] lookup uses, so a tree can be relocated by
-// editing a base path and nothing else.
+// Two shader trees, each with its own base path -- a tree can be relocated by
+// editing its base path alone, since the names below stay the keys every
+// shaderSources[...] lookup uses.
 //
-// The split is the Phase 4 engine/app boundary made visible: ENGINE_SHADERS are
-// what the simulation and the painting render need, APP_SHADERS are the UI
-// chrome that a different host would not want. fullscreen.vert is deliberately
-// on the engine side and used by both -- the app hosts the engine, so depending
-// on an engine asset is the right direction for that arrow.
+// ENGINE_SHADERS are what the simulation and painting render need; APP_SHADERS
+// are UI chrome a different host would not want. fullscreen.vert is
+// deliberately on the engine side and used by both -- the app hosts the
+// engine, so depending on an engine asset is the right direction for that arrow.
 const ENGINE_SHADER_BASE_PATH = 'fluid-engine/';
 
 const APP_SHADER_BASE_PATH = 'app/';
 
 const APP_SHADERS = [
-  // 'shaders/panel.frag' was here until Phase 7; the panel is DOM now.
-  // 'shaders/picker.vert' / 'shaders/picker.frag' went the same way in Phase 8:
-  // the colour wheel is iro.js DOM, so the hue ring, the saturation/value square
-  // and the alpha slider are no longer drawn in GL. Two of the four remaining
-  // app shaders are the painting's own shadow and rect outline, which are
-  // presentation of the PAINTING rather than chrome -- so this list is not on
-  // its way to empty.
+  // Two of these four are the painting's own shadow and rect outline, which
+  // are presentation of the PAINTING, not chrome -- this list is not headed
+  // to empty just because the picker/panel shaders are long gone.
   'shaders/shadow.frag',
   'shaders/rectborder.frag',
   'shaders/brushcenter.frag',
@@ -129,22 +123,15 @@ const APP_SHADERS = [
 /*
  * The two trees to load, paired each with its own base path.
  *
- * A FUNCTION rather than the array constant it was until Phase 9, and the
- * reason is load order, not taste. The engine's manifest now lives in the
- * engine as `FluidEngine.SHADER_FILES` -- building a second host showed that
- * hosting the engine otherwise means copying an inventory of engine internals
- * into every host, which goes stale the moment a pass is added. But this file
- * is loaded BEFORE fluid-engine/index.js (there is no module system; see
- * index.html and gulpfile.js), so `FluidEngine` does not exist at the top level
- * here. Reading it inside a function defers the lookup to call time, by which
- * point every script has run.
- *
- * Do not "simplify" this back to a top-level const. It would be `undefined` at
- * evaluation, and the failure -- a tree whose file list is undefined -- surfaces
+ * Do NOT simplify this to a top-level const. `FluidEngine.SHADER_FILES` lives
+ * in the engine, but this file loads BEFORE fluid-engine/index.js (no module
+ * system; see index.html and gulpfile.js), so `FluidEngine` does not exist yet
+ * at top-level evaluation. A function defers the lookup to call time, after
+ * every script has run; a const would be `undefined`, and the failure surfaces
  * as shaders compiled from nothing, deep inside a constructor.
  *
- * Only the BASE PATHS are the app's, because only a host knows where it serves
- * the files from. That is the split: the engine says which, the host says where.
+ * Only the BASE PATHS are the app's: the engine says which files, the host
+ * says where they're served from.
  */
 function shaderTrees() {
   return [
