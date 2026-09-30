@@ -1,7 +1,7 @@
 # Handoff: Fluid Paint — публічні демо з R2
 
-Стан на 2026-09-30, гілка `feat/brush_shapes`. Фаза 1 зі
-[спеки](../../FLUID-R2-DEMO-SPEC.md) завершена й прийнята QA власником.
+Стан на 2026-09-30, гілка `feat/brush_shapes`. Фази 1 і 2 зі
+[спеки](../../FLUID-R2-DEMO-SPEC.md) завершені й прийняті QA власником.
 
 | Що | Де | Репозиторій |
 | --- | --- | --- |
@@ -16,25 +16,33 @@ Vendored `message-api.js`, `fluid-model.js` і `fluid-gamifier-bridge.js` маю
 роботи потреба змінити будь-який із них виникне, обидві копії та процедуру
 звірити за `ua-dream/docs/spec/fluid-paint/fluid-paint-vendor-manifest.md`.
 
-> **Далі:** фаза 2 — Demo UI, preset gating та запуск через наявний Player.
+> **Далі:** фаза 3 — публікація канонічних fixture в R2, CORS і live перевірка Fluid Paint.
 
 ## Що зроблено і працює
 
 | Файл | Стан |
 | --- | --- |
 | `app/story-file-loader.js` | Локальний і R2 JSON проходять спільний `parse()` / `summarize()`; межі 25 MiB і 500 000 тайлів; bounds рахуються без spread для великих моделей. |
-| `app/story-demo-catalog.js` | Валідатор index, фіксована база URL, перевірений slug, обмежене потокове читання index (128 KiB) і моделі (25 MiB). Наразі окремий модуль; підключення до bundle — фаза 2. |
+| `app/story-demo-catalog.js` | Валідатор index, фіксована база URL, перевірений slug, обмежене потокове читання index (128 KiB) і моделі (25 MiB); підключений до standalone і bundle. Браузерний `fetch` викликається зі збереженим контекстом. |
 | `debug/story-demo-catalog-test.js`, `debug/story-demo-fixture-probe.js` | Тести контракту й проба трьох канонічних fixture без другої копії в цьому репозиторії. |
 | `debug/story-demo-catalog-probe.html`, `Makefile` | Браузерна проба з контрольованим `fetch`; `make demo-qa-server` запускає локальний `http-server`. |
-| `app/ui/story-tools.js` | File уже завантажує модель у `StoryPlaybackController` і перемикає на Player. |
-| `app/ui/preset-api.js` | Є `mode=full`, `features`, `preset`, `empty`; feature `demo-r2` ще немає. |
-| `index.html` | Поточний порядок вкладок: File, Player, State; Demo ще немає. |
+| `app/ui/story-tools.js`, `app/story-playback-controller.js` | Demo робить Refresh, вибір і Run через спільний preflight та Player. Невдалий fetch/parse не змінює модель чи canvas; активне відтворення не підміняється. Помилка старту до малювання відновлює snapshot і лишає модель для повтору Play. |
+| `app/ui/preset-api.js` | `demo-r2` є в `full`; у `features`/`preset` вмикається явно й потребує `player`. `empty` і старі пресети не запитують R2. |
+| `index.html`, `app/layout.css`, `app/ui/panel.js`, `gulpfile.js` | Вкладки `Demo | File | Player | State`, статуси й доступний slug у Player; mobile sheet лишається в межах viewport після зміни висоти. Порядок скриптів оновлено. |
+| `debug/story-demo-ui-probe.html`, `debug/story-demo-ui-test.js` | Локальна контрольована проба трьох назв, помилок index/model і playback; без R2 чи Tilecraft Editor. |
 
 ## Головні виміряні факти
 
 - Guard фази 1: `npm run test:story-demo` — 6/6, `npm run test:story-ui`
   — PASS, `npm run build` — PASS. Browser probe: 2/2 сценарії; власник
   підтвердив QA pass 2026-09-30.
+- Guard фази 2: `npm run test:story-demo` — 6/6;
+  `npm run test:story-ui`, `npm run test:ui-preset`,
+  `npm run test:tilecraft`, `npm run build` — PASS.
+  Браузерні `npm run test:story-demo:ui` і
+  `npm run test:ui-preset:browser` — PASS; власник підтвердив QA pass
+  2026-09-30. Контрольована UI-проба має 3 записи й 8 кадрів у моделі;
+  це не live перевірка R2.
 - Потокова проба канонічних fixture: 3 моделі, кожна має 8 кадрів і 46 861
   drawable items; фактичні розміри 4 095 097, 4 094 566 і 4 093 329 байтів.
 - У канонічному index зі спеки — 3 записи; slug `story-8-frames-hibrid`
@@ -53,21 +61,9 @@ Vendored `message-api.js`, `fluid-model.js` і `fluid-gamifier-bridge.js` маю
    2026-09-30. Guard, браузерна проба й QA пройдені; факти наведено вище,
    сценарії — у [QA.md](./QA.md#фаза-1--catalog-client-і-preflight).
 
-2. **Фаза 2 — Demo UI і наявний Player (Fluid Paint).** За
-   [спекою §4–5](../../FLUID-R2-DEMO-SPEC.md) додати вкладку Demo перед File,
-   статуси й доступність, Refresh, вибір, Run, захист від пізніх відповідей,
-   блокування підміни активного Player та автозапуск через той самий
-   `StoryPlaybackController`. Додати `demo-r2` з залежністю від `player` у
-   preset API, адаптивний layout і порядок скриптів. **Закриття:** локальний
-   browser probe з контрольованим catalog показує три назви; вибір не
-   завантажує модель; Run перемикає на Player і запускає painting; помилка
-   Run залишає попередню модель, canvas і Demo. `empty`/`draw-min` та
-   features без `demo-r2` не роблять R2-запитів. **Guard:**
-   `npm run test:story-ui`, `npm run test:ui-preset`,
-   `npm run test:tilecraft`, `npm run build`. **QA probe:** відкрити
-   standalone локально, натиснути Demo → Refresh index → Run; побачити
-   `Demo | File | Player | State`, потім активний Player, `Painting story…`
-   і progress. Перевірити Pause/Resume/Stop/Restore та вузький екран.
+~~2. **Фаза 2 — Demo UI і наявний Player (Fluid Paint).**~~ — ЗАКРИТО
+   2026-09-30. Guard, контрольована браузерна проба й QA власника пройдені;
+   сценарії — у [QA.md](./QA.md#фаза-2--demo-ui-і-player).
 
 3. **Фаза 3 — публікація й live перевірка (контракт `ua-dream`/R2,
    інтеграція Fluid Paint).** Це окремий reviewable крок на стороні
