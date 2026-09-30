@@ -334,6 +334,11 @@ class Paint {
             ['Natural', 'Digital'],
             0,
             (index) => {
+                if (this.storyPlaybackController?.plan &&
+                    !['empty', 'ready', 'file-error'].includes(this.storyPlaybackController.state)) {
+                    this.modelButtons.setIndex(this.colorModel === FluidEngine.COLOR_MODEL.RGB ? 1 : 0);
+                    return;
+                }
                 if (index === 0) {
                     this.colorModel = FluidEngine.COLOR_MODEL.RYB;
                 } else if (index === 1) {

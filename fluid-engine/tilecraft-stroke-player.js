@@ -31,10 +31,9 @@ const TILECRAFT_SPOT_SHAPES = new Set(['polygon', 'circle', 'slash']);
  * Bristle footprints, in the units FluidEngine's Brush accepts:
  * `sides` < 3 means the round default, and `aspect` is width/height.
  *
- * `polygon` stays round because a Tilecraft polygon layer does not record a
- * side count -- `polygonSize` is a radius, not an order. No shape records per-
- * tile proportions, so a quad is regular; a non-square rectangle would need a
- * source field that no observed export has, and is not invented here.
+ * Tilecraft's polygonSize is the number of vertices. The angle and optional
+ * per-tile sa are transformed from its downward-Y canvas into Fluid's upward-Y
+ * coordinates at the call site.
  *
  * `slash` is the source renderer's thin diagonal bar (render.js
  * drawSlashRect): a 4-gon squashed to a 5:1 strip and rotated 45 degrees so
@@ -87,7 +86,15 @@ class TilecraftStrokePlayer {
    * setbristles.frag's convention, where a positive rotation turns the
    * footprint counter-clockwise from its unrotated vertex-at-3-o'clock pose.
    */
-  static brushShape(tileShape, layer) {
+  static brushShape(tileShape, layer, tile = null, alternate = false) {
+    if (tileShape === 'polygon') {
+      const sides = layer?.polygonSize;
+      if (!Number.isInteger(sides) || sides < 3 || sides > 8) return null;
+      let angle = sides % 2 ? -Math.PI / 2 : sides > 4 ? -Math.PI / sides : 0;
+      if (layer.mod > 0 && !alternate) angle += sides % 2 ? Math.PI : Math.PI / sides;
+      if (Number.isFinite(tile?.sa)) angle += tile.sa;
+      return { sides, rotation: -angle };
+    }
     const shape = TILECRAFT_BRUSH_SHAPES[tileShape];
     if (!shape) return null;
     const mirrored = layer && layer.mod === 1 && shape.rotation !== undefined
@@ -207,6 +214,14 @@ class TilecraftStrokePlayer {
         this.engine.endStroke();
         stats.spots++;
         onPaint();
+        if (layer.tileShape === 'polygon' && layer.mod == 2 &&
+            TilecraftStrokePlayer.brushShape(layer.tileShape, layer, tile)) {
+          this._begin(point, tile, this._tileSize(tile, layer, context), layer, context,
+            tile.s === undefined ? 1 : tile.s, 'live', tile.c, true);
+          this.engine.endStroke();
+          stats.spots++;
+          onPaint();
+        }
         if (fastTick) await fastTick();
       }
     } finally {
@@ -250,7 +265,7 @@ class TilecraftStrokePlayer {
         });
         if (!mapped.length) { segmentOrdinal++; continue; }
 
-        const color = this._color(segment.groupColor, layer, context);
+        const color = this._color(segment.groupColor, layer, context, firstTile);
         // A path can carry a footprint too: a `square` layer is a stroke drawn
         // with square marks, so the shape comes from the layer, not the kind.
         const pathBrushShape = TilecraftStrokePlayer.brushShape(layer.tileShape, layer);
@@ -311,12 +326,19 @@ class TilecraftStrokePlayer {
           point,
           pressure: this._pressure(tile, tile.s === undefined ? 1 : tile.s, context),
           brushSize: this._tileSize(tile, layer, context),
-          brushShape: TilecraftStrokePlayer.brushShape(layer.tileShape, layer),
-          color: this._color(tile.c, layer, context),
+          brushShape: TilecraftStrokePlayer.brushShape(layer.tileShape, layer, tile),
+          color: this._color(tile.c, layer, context, tile),
           paintingRectangle: context.paintingRectangle,
           resolutionScale: context.resolutionScale,
           sourceTileIndex,
         });
+        if (layer.tileShape === 'polygon' && layer.mod == 2 &&
+            Number.isInteger(layer.polygonSize) && layer.polygonSize >= 3 && layer.polygonSize <= 8) {
+          operations.push({
+            ...operations[operations.length - 1],
+            brushShape: TilecraftStrokePlayer.brushShape(layer.tileShape, layer, tile, true),
+          });
+        }
       }
     }
 
@@ -665,6 +687,7 @@ class TilecraftStrokePlayer {
       mapPoint: options.mapPoint || ((tile) => ({ x: tile.x, y: tile.y })),
       resolutionScale: options.resolutionScale === undefined ? 1 : options.resolutionScale,
       alpha: options.alpha === undefined ? 0.04 : options.alpha,
+      colorModel: options.colorModel === 'digital' ? 'digital' : 'natural',
       pressureForSize: options.pressureForSize || ((size, maximum) => maximum > 0 ? size / maximum : 1),
       // Tilecraft's polyline-lcr renderer narrows strokes on canvases below
       // its 3000px reference size.  This must be the destination canvas size,
@@ -863,6 +886,13 @@ class TilecraftStrokePlayer {
       tile.s === undefined ? 1 : tile.s, 'live');
     this.engine.endStroke();
     context.stats.spots++;
+    if (layer.tileShape === 'polygon' && layer.mod == 2 &&
+        TilecraftStrokePlayer.brushShape(layer.tileShape, layer, tile)) {
+      this._begin(point, tile, this._tileSize(tile, layer, context), layer, context,
+        tile.s === undefined ? 1 : tile.s, 'live', tile.c, true);
+      this.engine.endStroke();
+      context.stats.spots++;
+    }
   }
 
   async _playPolylineSegment(segment, layer, context, waitFrame, onPaint, fastTick) {
@@ -905,17 +935,17 @@ class TilecraftStrokePlayer {
     }
   }
 
-  _begin(point, tile, brushSize, layer, context, maximumRelativeSize, timing, color = tile.c) {
+  _begin(point, tile, brushSize, layer, context, maximumRelativeSize, timing, color = tile.c, alternate = false) {
     // The footprint follows the layer's shape whether it paints as a path or as
     // spots -- a `square` layer is a stroke drawn with square marks.
-    const brushShape = TilecraftStrokePlayer.brushShape(layer.tileShape, layer);
+    const brushShape = TilecraftStrokePlayer.brushShape(layer.tileShape, layer, tile, alternate);
     this.engine.beginStroke({
       timing,
       x: point.x, y: point.y,
       pressure: this._pressure(tile, maximumRelativeSize, context),
       brushSize,
       paintingRectangle: context.paintingRectangle,
-      color: this._color(color, layer, context),
+      color: this._color(color, layer, context, tile),
       resolutionScale: context.resolutionScale,
       ...(brushShape ? { brushShape } : {}),
     });
@@ -926,6 +956,18 @@ class TilecraftStrokePlayer {
   _tileSize(tile, layer, context, groupScale = 1) {
     const grid = (layer.gridSize || 1) * (layer.scale === undefined ? 1 : layer.scale);
     const relative = tile.s === undefined ? 1 : tile.s;
+    if (layer.tileShape === 'polygon' && Number.isInteger(layer.polygonSize) &&
+        layer.polygonSize >= 3 && layer.polygonSize <= 8) {
+      const sides = layer.polygonSize;
+      const areaFraction = sides * Math.sin(2 * Math.PI / sides) / (2 * Math.PI);
+      // Tilecraft render.js uses a 0.5 * 1.33 * grid radius. Fluid's polygon
+      // shader expands by 1/sqrt(areaFraction), so cancel that expansion here.
+      return Math.max(1, grid * relative * groupScale * context.coordinateScale *
+        0.665 * Math.sqrt(areaFraction));
+    }
+    if (layer.tileShape === 'circle') {
+      return Math.max(1, grid * relative * groupScale * context.coordinateScale * 0.5);
+    }
     // This is polyline-lcr.js' `rawWidth`: group `gd` correction first,
     // then responsive canvas ratio.  coordinateScale puts that source-space
     // width into the same FluidEngine coordinates returned by mapPoint.
@@ -958,13 +1000,14 @@ class TilecraftStrokePlayer {
     return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 1));
   }
 
-  _color(hex, layer, context) {
-    const rgba = TilecraftStrokePlayer.hexToPigment(hex, context.blackPigment);
+  _color(hex, layer, context, tile = null) {
+    const rgba = TilecraftStrokePlayer.hexToPigment(hex, context.blackPigment, context.colorModel);
     const layerOpacity = layer.opacity === undefined ? 1 : layer.opacity / 255;
+    const tileOpacity = Number.isFinite(tile?.a) ? Math.max(0, Math.min(255, tile.a)) / 255 : 1;
     return {
       space: 'pigment',
       channels: rgba.slice(0, 3),
-      alpha: Math.max(0, Math.min(1, context.alpha * layerOpacity * rgba[3])),
+      alpha: Math.max(0, Math.min(1, context.alpha * layerOpacity * tileOpacity * rgba[3])),
     };
   }
 
@@ -980,12 +1023,14 @@ class TilecraftStrokePlayer {
   }
 
   /** #RRGGBB[A] -> the nearest display-matching RYB pigment load. */
-  static hexToPigment(hex, blackPigment = true) {
+  static hexToPigment(hex, blackPigment = true, colorModel = 'natural') {
     const match = /^#([\da-f]{6})([\da-f]{2})?$/i.exec(hex || '');
     if (!match) throw new TypeError(`Tilecraft colour must be #RRGGBB or #RRGGBBAA, got ${hex}.`);
     const rgb = [0, 2, 4].map((offset) => parseInt(match[1].slice(offset, offset + 2), 16) / 255);
     const alpha = match[2] === undefined ? 1 : parseInt(match[2], 16) / 255;
-    return [...TilecraftStrokePlayer.rgbToPigment(rgb, blackPigment), alpha];
+    return [...(colorModel === 'digital'
+      ? [1 - rgb[1], 1 - rgb[0], 1 - rgb[2]]
+      : TilecraftStrokePlayer.rgbToPigment(rgb, blackPigment)), alpha];
   }
 
   static _canvasSizeRatio(canvasSize) {

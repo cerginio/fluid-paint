@@ -204,6 +204,13 @@
                         <div id="story-player-progress-fill"></div>
                     </div>
                     <div id="story-player-coverage" class="story-progress-copy">0 / 0 operations</div>
+                    <label class="story-field" for="story-color-model">Import colors
+                        <select id="story-color-model">
+                            <option value="natural">Natural / RYB</option>
+                            <option value="digital">Digital / RGB</option>
+                        </select>
+                    </label>
+                    <small class="story-warning">Choose before Play. Natural approximates RGB colors outside its pigment gamut; changing the model also changes existing wet paint.</small>
 
                     <nav class="story-boundary-navigation" aria-label="Story position">
                         <output id="story-playhead-label">Frame — · Group —</output>

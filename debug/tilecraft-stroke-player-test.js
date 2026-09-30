@@ -60,6 +60,38 @@ assert.deepEqual(TilecraftStrokePlayer.hexToPigment('#ffffff'), [0, 0, 0, 1], 'w
 assert.deepEqual(TilecraftStrokePlayer.hexToPigment('#000000'), [1, 1, 1, 1], 'black uses all pigments');
 assert.deepEqual(TilecraftStrokePlayer.hexToPigment('#ff0000'), [1, 0, 0, 1], 'red is a cube corner');
 assert.throws(() => TilecraftStrokePlayer.hexToPigment('#bad'), /#RRGGBB/);
+assert.deepEqual(TilecraftStrokePlayer.hexToPigment('#ff0000', true, 'digital'), [1, 0, 1, 1]);
+assert.deepEqual(TilecraftStrokePlayer.hexToPigment('#00ff00', true, 'digital'), [0, 1, 1, 1]);
+assert.deepEqual(TilecraftStrokePlayer.hexToPigment('#0000ff80', true, 'digital'), [1, 1, 0, 128 / 255]);
+const triangle = { layers: [{ visible: true, tileShape: 'polygon', polygonSize: 3,
+  gridSize: 12, opacity: 128, tiles: [{ x: 10, y: 10, c: '#ff0000', a: 64, sa: Math.PI / 6 }] }] };
+const trianglePlayer = new TilecraftStrokePlayer(engine);
+const triangleOptions = { paintingRectangle: { left: 0, bottom: 0, width: 100, height: 100 },
+  colorModel: 'digital', alpha: 0.02 };
+const trianglePlan = trianglePlayer.compile(triangle, triangleOptions);
+assert.equal(trianglePlan.operations[0].brushShape.sides, 3);
+assert.ok(Math.abs(trianglePlan.operations[0].brushSize -
+  12 * 0.665 * Math.sqrt(3 * Math.sin(2 * Math.PI / 3) / (2 * Math.PI))) < 1e-12,
+  'polygon spot width follows the source radius and shader area normalization');
+assert.ok(Math.abs(trianglePlan.operations[0].brushShape.rotation - Math.PI / 2 + Math.PI / 6) < 1e-12);
+assert.deepEqual(trianglePlan.operations[0].color.channels, [1, 0, 1]);
+assert.ok(Math.abs(trianglePlan.operations[0].color.alpha - 0.02 * 128 / 255 * 64 / 255) < 1e-12);
+const triangleCalls = [];
+new TilecraftStrokePlayer({ beginStroke(options) { triangleCalls.push(options); },
+  strokeTo() {}, endStroke() {} }).replay(triangle, triangleOptions);
+assert.deepEqual(triangleCalls[0].brushShape, trianglePlan.operations[0].brushShape);
+assert.deepEqual(triangleCalls[0].color, trianglePlan.operations[0].color);
+for (const sides of [3, 4, 6, 8]) {
+  const shape = TilecraftStrokePlayer.brushShape('polygon', { polygonSize: sides });
+  assert.equal(shape.sides, sides);
+  assert.ok(Number.isFinite(shape.rotation));
+}
+const doubleTriangle = { layers: [{ ...triangle.layers[0], mod: 2 }] };
+const doublePlan = trianglePlayer.compile(doubleTriangle, triangleOptions);
+assert.equal(doublePlan.operations.length, 2, 'mod 2 retains both polygon orientations');
+assert.equal(doublePlan.operations[0].brushShape.sides, 3);
+assert.ok(Math.abs(doublePlan.operations[0].brushShape.rotation -
+  doublePlan.operations[1].brushShape.rotation) > 1);
 
 const scaledCalls = [];
 new TilecraftStrokePlayer({

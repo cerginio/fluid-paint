@@ -20,7 +20,7 @@
     const FLUID_PATH_SHAPES = new Set(["polyline", "square", "rectangle"]);
     const FLUID_SPOT_SHAPES = new Set(["polygon", "circle", "slash"]);
     const SUPPORTED_FLUID_LAYER_SHAPES = new Set([...FLUID_PATH_SHAPES, ...FLUID_SPOT_SHAPES]);
-    const TILE_FIELDS = ["x", "y", "c", "f", "g", "b", "gd", "gz", "s", "v"];
+    const TILE_FIELDS = ["x", "y", "c", "f", "g", "b", "gd", "gz", "s", "v", "a", "sa"];
     const LAYER_FIELDS = ["id", "tag", "visible", "tileShape", "gridSize", "polygonSize", "scale", "opacity", "mod"];
 
     function pickDefined(source, fields) {
@@ -99,7 +99,6 @@
         transformed.layers = transformed.layers.map((layer) => ({
             ...layer,
             gridSize: scalePositive(layer.gridSize),
-            ...(layer.polygonSize === undefined ? {} : { polygonSize: scalePositive(layer.polygonSize) }),
             tiles: (layer.tiles || []).map((tile) => ({
                 ...transformPoint(tile),
                 ...(tile.gd === undefined ? {} : { gd: scalePositive(tile.gd) }),
@@ -138,6 +137,16 @@
         }
     }
 
+    function assertPolygonSides(layer) {
+        if (layer.tileShape !== "polygon" || layer.polygonSize === undefined) return;
+        if (!Number.isInteger(layer.polygonSize) || layer.polygonSize < 3 || layer.polygonSize > 8) {
+            throw structuredFluidError("INVALID_POLYGON_SIDES", "Fluid polygonSize must be an integer from 3 to 8", {
+                layerId: layer.id ?? layer.tag,
+                polygonSize: layer.polygonSize
+            });
+        }
+    }
+
     function buildFluidStoryModel({
         storyModel,
         frameId = null,
@@ -169,17 +178,23 @@
                 });
                 return;
             }
+            assertPolygonSides(sourceLayer);
 
             const sourceTiles = (sourceLayer.tiles || []).filter((tile) => frameIds.has(tile.f));
             const outputTiles = [];
             for (const frame of selectedFrames) {
                 const frameTiles = sourceTiles.filter((tile) => tile.f == frame.id);
-                const normalizedTiles = typeof normalizeGeometry === "function"
-                    ? normalizeGeometry({ framePoints: frame.points, tiles: frameTiles, borderOffset: 0 }).tiles
-                    : frameTiles.map((tile) => ({ ...tile }));
+                const normalized = typeof normalizeGeometry === "function"
+                    ? normalizeGeometry({ framePoints: frame.points, tiles: frameTiles, borderOffset: 0 })
+                    : null;
+                const normalizedTiles = normalized ? normalized.tiles : frameTiles.map((tile) => ({ ...tile }));
                 for (const tile of normalizedTiles) {
                     assertFluidTile(tile, layerId);
-                    outputTiles.push(pickDefined(tile, TILE_FIELDS));
+                    const output = pickDefined(tile, TILE_FIELDS);
+                    if (sourceLayer.tileShape === "polygon" && Number.isFinite(normalized?.angle) && normalized.angle !== 0) {
+                        output.sa = (Number.isFinite(tile.sa) ? tile.sa : 0) - normalized.angle * Math.PI / 180;
+                    }
+                    outputTiles.push(output);
                 }
             }
 
@@ -221,6 +236,7 @@
             if (!SUPPORTED_FLUID_LAYER_SHAPES.has(layer.tileShape)) {
                 throw structuredFluidError("UNSUPPORTED_LAYER", `Unsupported layer shape: ${String(layer.tileShape)}`);
             }
+            assertPolygonSides(layer);
             for (const tile of layer.tiles || []) assertFluidTile(tile, layer.id ?? layer.tag);
         }
         return model;

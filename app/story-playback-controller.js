@@ -14,6 +14,7 @@ class StoryPlaybackController {
     this.speed = 1;
     this.thickness = 1;
     this.canvasPolicy = 'replace';
+    this.colorModel = 'natural';
     this.listeners = new Set();
     this.baseline = null;
     this.baselineValid = false;
@@ -204,6 +205,25 @@ class StoryPlaybackController {
     this._emit();
   }
 
+  setColorModel(model) {
+    if (model !== 'natural' && model !== 'digital') {
+      throw new TypeError('Story color model must be natural or digital.');
+    }
+    if (!['empty', 'ready', 'file-error'].includes(this.state)) return false;
+    this.colorModel = model;
+    this._emit();
+    return true;
+  }
+
+  _applyColorModel() {
+    const digital = this.colorModel === 'digital';
+    this.painter.colorModel = digital ? FluidEngine.COLOR_MODEL.RGB : FluidEngine.COLOR_MODEL.RYB;
+    this.painter.modelButtons?.setIndex(digital ? 1 : 0);
+    this.painter.colorControl?.setAdditive();
+    this.painter.toolPanel?.paintHueStripe(digital);
+    this.painter.needsRedraw = true;
+  }
+
   async play() {
     if (!this.model) return false;
     if (this.state === 'paused') return this.resume();
@@ -263,6 +283,7 @@ class StoryPlaybackController {
   async restart() {
     if (!this.model) return false;
     await this._cancelRun();
+    this._applyColorModel();
     if (this.baselineValid) this.painter.applySnapshot(this.baseline);
     else this._captureBaseline();
     if (this.canvasPolicy === 'replace') this.engine.clear();
@@ -358,6 +379,7 @@ class StoryPlaybackController {
   }
 
   _prepareFreshRun() {
+    this._applyColorModel();
     this._captureBaseline();
     if (this.canvasPolicy === 'replace') this.engine.clear();
     this.painter.needsRedraw = true;
@@ -400,6 +422,8 @@ class StoryPlaybackController {
         canvasSize: { width: target.width, height: target.height },
         coordinateScale: 1,
         blackPigment: this.painter.blackPigment,
+        colorModel: this.colorModel,
+        alpha: this.painter._strokeColor().alpha,
         mapPoint: (tile) => ({
           x: target.left + tile.x,
           y: target.bottom + fit.height - tile.y,
@@ -420,6 +444,8 @@ class StoryPlaybackController {
       canvasSize: { width: target.width, height: target.height },
       coordinateScale: scale,
       blackPigment: this.painter.blackPigment,
+      colorModel: this.colorModel,
+      alpha: this.painter._strokeColor().alpha,
       mapPoint: (tile) => ({
         x: offsetX + (tile.x - bounds.left) * scale,
         y: offsetY + (bounds.bottom - tile.y) * scale,
@@ -620,6 +646,7 @@ class StoryPlaybackController {
       backgroundError: this.backgroundError,
       backgroundLoading: this.backgroundLoading,
       canvasPolicy: this.canvasPolicy,
+      colorModel: this.colorModel,
       error: this.error,
       targetDuration: this.targetDuration,
       elapsed: this.elapsed,

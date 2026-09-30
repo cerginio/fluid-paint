@@ -91,6 +91,9 @@ class StoryToolsUI {
     this._on('story-speed', 'change', (event) => {
       this._safe(() => this.controller.setSpeed(Number(event.target.value)));
     });
+    this._on('story-color-model', 'change', (event) => {
+      this._safe(() => this.controller.setColorModel(event.target.value));
+    });
     this._on('story-thickness', 'input', (event) => {
       const value = Number(event.target.value);
       this._renderThicknessValue(value);
@@ -306,6 +309,11 @@ class StoryToolsUI {
     if (nextFrame) nextFrame.disabled = !navigable || !view.canNextFrame;
 
     const speed = document.getElementById('story-speed');
+    const colorModel = document.getElementById('story-color-model');
+    if (colorModel) {
+      colorModel.value = view.colorModel;
+      colorModel.disabled = !['empty', 'ready', 'file-error'].includes(view.state);
+    }
     if (speed && Number(speed.value) !== view.speed) speed.value = String(view.speed);
     const thickness = document.getElementById('story-thickness');
     if (thickness && Number(thickness.value) !== view.thickness) thickness.value = String(view.thickness);

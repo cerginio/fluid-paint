@@ -310,6 +310,10 @@ const server = http.createServer((request, response) => {
       'thickness range starts at 0.1');
     assert.equal(await page.locator('#story-thickness').inputValue(), '1',
       'thickness multiplier defaults to 1');
+    await page.locator('#story-color-model').selectOption('digital');
+    assert.equal(await page.evaluate(() => window.__painter.storyPlaybackController.colorModel), 'digital',
+      'Digital import mode can be chosen before playback');
+    await page.locator('#story-color-model').selectOption('natural');
     assert.deepEqual(await page.evaluate(() => ({
       min: window.__painter.fluiditySlider.minValue,
       max: window.__painter.fluiditySlider.maxValue,

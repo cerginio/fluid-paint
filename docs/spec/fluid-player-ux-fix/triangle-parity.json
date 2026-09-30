@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "frames": [{ "id": 1, "points": [{ "x": 0, "y": 0 }, { "x": 600, "y": 0 }, { "x": 600, "y": 400 }, { "x": 0, "y": 400 }] }],
+  "layers": [
+    {
+      "id": "triangles",
+      "visible": true,
+      "tileShape": "polygon",
+      "polygonSize": 3,
+      "gridSize": 80,
+      "opacity": 255,
+      "mod": 0,
+      "tiles": [
+        { "x": 60, "y": 100, "c": "#ff0000", "f": 1, "s": 1 },
+        { "x": 210, "y": 100, "c": "#00ff00", "f": 1, "s": 1, "a": 128, "sa": 0.5235987755982988 },
+        { "x": 360, "y": 100, "c": "#0000ff", "f": 1, "s": 1 },
+        { "x": 510, "y": 100, "c": "#ff0000", "f": 1, "s": 1 }
+      ]
+    },
+    {
+      "id": "double-triangle",
+      "visible": true,
+      "tileShape": "polygon",
+      "polygonSize": 3,
+      "gridSize": 70,
+      "opacity": 255,
+      "mod": 2,
+      "tiles": [{ "x": 285, "y": 300, "c": "#ff0000", "f": 1, "s": 1 }]
+    }
+  ]
+}
