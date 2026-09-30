@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Story Demo catalog probe</title>
+<h1>Story Demo catalog probe</h1>
+<button id="valid" type="button">Run valid catalog</button>
+<button id="oversize" type="button">Run oversized response</button>
+<pre id="result" role="status" aria-live="polite">Ready</pre>
+<script src="../app/story-file-loader.js"></script>
+<script src="../app/story-demo-catalog.js"></script>
+<script>
+  'use strict';
+  const result = document.getElementById('result');
+  const entry = { slug: 'story-8-frames-hibrid', title: 'Hybrid story', frameCount: 8,
+    sizeBytes: 200, credit: 'Tilecraft fixtures', publishedAt: '2026-09-30T00:00:00Z' };
+  const index = { schemaVersion: 1, stories: [entry] };
+  const model = { frames: Array.from({ length: 8 }, (_, i) => ({ id: i })),
+    layers: [{ visible: true, tileShape: 'polygon', tiles: [{ x: 1, y: 2, c: '#f00', v: 1 }] }] };
+  const json = (value) => new Response(JSON.stringify(value),
+    { headers: { 'Content-Type': 'application/json' } });
+
+  document.getElementById('valid').addEventListener('click', async () => {
+    result.textContent = 'Running…';
+    const requests = [];
+    const catalog = new StoryDemoCatalog(async (url) => {
+      requests.push(url);
+      return url.endsWith('index.json') ? json(index) : json(model);
+    });
+    try {
+      const listing = await catalog.refreshIndex();
+      const loaded = await catalog.fetchStory(listing.stories[0].slug);
+      result.textContent = `${listing.stories.length} demo; ${loaded.summary.framesTotal} frames; ` +
+        `${loaded.summary.drawableItems} drawable; ${requests.length} requests`;
+    } catch (error) { result.textContent = `Error: ${error.message}`; }
+  });
+
+  document.getElementById('oversize').addEventListener('click', async () => {
+    result.textContent = 'Running…';
+    const catalog = new StoryDemoCatalog(async () => new Response(new ReadableStream({
+      pull(controller) { controller.enqueue(new Uint8Array(80 * 1024)); },
+    }), { headers: { 'Content-Type': 'application/json' } }));
+    try {
+      await catalog.refreshIndex();
+      result.textContent = 'Unexpected success';
+    } catch (error) {
+      result.textContent = `Rejected oversized index: ${error.message}`;
+    }
+  });
+</script>
+</html>

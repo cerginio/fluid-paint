@@ -28,6 +28,7 @@
     "test:tilecraft": "node debug/tilecraft-stroke-player-test.js",
     "test:tilecraft:gpu": "node debug/tilecraft-story-gpu-test.js",
     "test:story-ui": "node debug/story-player-ui-test.js",
+    "test:story-demo": "node --test debug/story-demo-catalog-test.js",
     "test:live-gpu": "node debug/live-gpu-test.js",
     "test:bristle-shape": "node debug/bristle-shape-gpu-test.js",
     "test:bake": "node debug/bake-gpu-test.js",
@@ -49,6 +50,7 @@
     "gulp-plumber": "^1.2.1",
     "gulp-postcss": "^10.0.0",
     "gulp-replace": "^1.1.4",
-    "gulp-terser": "^2.1.0"
+    "gulp-terser": "^2.1.0",
+    "http-server": "^14.1.1"
   }
 }

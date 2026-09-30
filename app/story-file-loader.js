@@ -23,13 +23,20 @@ class StoryFileLoader {
     if (file.size > STORY_FILE_MAX_BYTES) {
       throw new RangeError('This file exceeds the 25 MB local limit.');
     }
+    return StoryFileLoader.parse(await file.text(), file.name, file.size);
+  }
+
+  static parse(text, fileName = 'story.json', byteSize = 0) {
+    if (byteSize > STORY_FILE_MAX_BYTES) {
+      throw new RangeError('This story exceeds the 25 MB limit.');
+    }
     let model;
     try {
-      model = JSON.parse(await file.text());
+      model = JSON.parse(text);
     } catch (_) {
       throw new SyntaxError('This file is not valid JSON.');
     }
-    return { model, summary: StoryFileLoader.summarize(model, file.name, file.size) };
+    return { model, summary: StoryFileLoader.summarize(model, fileName, byteSize) };
   }
 
   static summarize(model, fileName = 'story.json', byteSize = 0) {
@@ -47,7 +54,10 @@ class StoryFileLoader {
     let malformed = 0;
     let unsupportedLayers = 0;
     let invisibleLayers = 0;
-    const points = [];
+    let left = Infinity;
+    let right = -Infinity;
+    let top = Infinity;
+    let bottom = -Infinity;
     const groups = new Set();
 
     model.layers.forEach((layer, layerIndex) => {
@@ -66,7 +76,10 @@ class StoryFileLoader {
           typeof tile.c === 'string' && tile.v !== 0;
         if (!valid) { malformed++; return; }
         drawable++;
-        points.push(tile);
+        left = Math.min(left, tile.x);
+        right = Math.max(right, tile.x);
+        top = Math.min(top, tile.y);
+        bottom = Math.max(bottom, tile.y);
         // Count by TOPOLOGY, not by name: a `square` layer is a path, so its
         // tiles are stroke points that share a group -- counting them as spots
         // would report 46,899 "strokes" for a file holding ~2,200.
@@ -85,8 +98,6 @@ class StoryFileLoader {
 
     if (!drawable) throw new TypeError('No supported visible strokes were found.');
 
-    const xs = points.map((point) => point.x);
-    const ys = points.map((point) => point.y);
     const warnings = [];
     if (unsupportedLayers) warnings.push({
       code: 'unsupported-layers', count: unsupportedLayers,
@@ -114,10 +125,7 @@ class StoryFileLoader {
       logicalGroups: groups.size,
       skippedItems: malformed,
       unsupportedLayers,
-      bounds: {
-        left: Math.min(...xs), right: Math.max(...xs),
-        top: Math.min(...ys), bottom: Math.max(...ys),
-      },
+      bounds: { left, right, top, bottom },
       warnings,
     };
   }

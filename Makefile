@@ -2,10 +2,11 @@ NPM ?= npm
 NPX ?= npx
 NETLIFY ?= netlify
 NETLIFY_FLAGS ?=
+DEMO_QA_PORT ?= 3000
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup install browsers dev build clean lint test test-fast \
+.PHONY: help setup install browsers dev demo-qa-server build clean lint test test-fast \
 	test-browser verify ci deploy-preview deploy-prod
 
 help:
@@ -15,6 +16,7 @@ help:
 	@echo "  make install             Recreate node_modules/ from the lockfile"
 	@echo "  make browsers            Install the Playwright Chromium binary"
 	@echo "  make dev                 Build, serve, and watch at http://localhost:3000"
+	@echo "  make demo-qa-server      Serve source for the R2 Demo catalog QA probe"
 	@echo "  make build               Create the production site in dist/"
 	@echo "  make clean               Remove dist/"
 	@echo "  make lint                Check shader portability rules"
@@ -40,6 +42,9 @@ browsers:
 
 dev:
 	$(NPM) run dev
+
+demo-qa-server:
+	$(NPX) --no-install http-server . -p $(DEMO_QA_PORT) -a 127.0.0.1 -c-1
 
 build:
 	$(NPM) run build
