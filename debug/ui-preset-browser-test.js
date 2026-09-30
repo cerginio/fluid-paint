@@ -29,7 +29,7 @@ const server = http.createServer((request, response) => {
     await page.waitForFunction(() => window.__painter && window.__fluidUiPresetApi);
     assert.equal(await page.locator('#ui').isVisible(), true, 'full is the default');
     assert.deepEqual(await page.evaluate(() => window.__fluidUiPresetApi.getResolvedFeatures()), [
-      'color-picker', 'brush-size', 'colors-options', 'brush-options', 'player', 'file-bg', 'file-play', 'state-bake',
+      'color-picker', 'brush-size', 'colors-options', 'brush-options', 'player', 'demo-r2', 'file-bg', 'file-play', 'state-bake',
     ]);
     assert.equal(await page.evaluate(() => window.__painter.setPaintSize(999)), 112.5,
       'host API reaches 50% beyond the built-in 75px brush maximum');
@@ -69,6 +69,7 @@ const server = http.createServer((request, response) => {
     assert.equal(await page.locator('#bar-size-slider').isVisible(), true);
     assert.equal(await page.locator('#bar-hue-stripe').isVisible(), true);
     assert.equal(await page.locator('#panel-extension-toggle').isVisible(), false);
+    assert.equal(await page.locator('#story-demo-tab').isVisible(), false);
     assert.equal(await page.locator('#fluidity-slider').isVisible(), false);
 
     await page.goto(`${base}&uiMode=preset&uiPreset=draw-min&uiFeatures=brush-options,state-bake`);
@@ -125,9 +126,17 @@ const server = http.createServer((request, response) => {
     assert.equal(await page.locator('#bar-size-slider').isVisible(), false);
     await page.click('#panel-extension-toggle');
     assert.equal(await page.locator('#story-player-page').isVisible(), true);
+    assert.equal(await page.locator('#story-demo-tab').isVisible(), false);
+    await page.evaluate(() => window.__fluidUiPresetApi.configure({ mode: 'features', features: ['player', 'demo-r2'] }));
+    assert.equal(await page.locator('#story-demo-tab').isVisible(), true);
+    await page.evaluate(() => window.__fluidUiPresetApi.configure({ mode: 'features', features: ['player'] }));
+    assert.equal(await page.locator('#story-demo-tab').isVisible(), false);
     assert.equal(await page.locator('#panel-extension').evaluate((element) => element.inert), false);
     assert.equal(await page.evaluate(() => document.querySelector('#canvas-cell canvas') === window.__presetTestCanvas), true,
       'runtime layout changes preserve the rendering canvas');
+
+    await page.goto(`${base}&uiMode=features&uiFeatures=demo-r2`);
+    assert.match(await page.locator('#fluid-ui-config-error').textContent(), /UI_FEATURE_DEPENDENCY/);
 
     console.log('Fluid UI preset browser: PASS');
   } finally {

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fluid Paint Demo UI probe</title>
+<style>
+  html, body { margin: 0; height: 100%; font: 14px sans-serif; }
+  body { display: flex; flex-direction: column; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 8px; background: #242428; color: white; }
+  button { padding: 6px 10px; }
+  iframe { flex: 1; width: 100%; border: 0; }
+</style>
+<header>
+  <strong>Controlled Demo UI probe</strong>
+  <label><input id="fail-index" type="checkbox"> Fail index</label>
+  <label><input id="fail-model" type="checkbox"> Fail model</label>
+  <button id="reload" type="button">Reset app</button>
+  <span id="requests" role="status" aria-live="polite">0 index · 0 model requests</span>
+</header>
+<iframe id="app" title="Fluid Paint controlled Demo probe"></iframe>
+<script>
+  'use strict';
+  const root = new URL('../', location.href);
+  const slugs = ['polygon', 'polyline', 'hibrid'].map((shape) => `story-8-frames-${shape}`);
+  const index = { schemaVersion: 1, generatedAt: '2026-09-30T00:00:00Z', stories: slugs.map((slug) => ({
+    slug, title: `Story Rombs (${slug.split('-').at(-1)})`, frameCount: 8,
+    sizeBytes: 4095000, credit: 'Tilecraft fixtures', publishedAt: '2026-09-30T00:00:00Z',
+  })) };
+  const model = { frames: Array.from({ length: 8 }, (_, n) => ({ id: n + 1 })), layers: [
+    { visible: true, tileShape: 'polygon', polygonSize: 5, gridSize: 10, opacity: 100,
+      tiles: Array.from({ length: 80 }, (_, n) => ({ x: 20 + n % 10 * 10, y: 20 + Math.floor(n / 10) * 10,
+        c: '#ff0000', f: Math.floor(n / 10) + 1, g: n + 1, s: 2 })) },
+  ] };
+  const counts = { index: 0, model: 0 };
+  const originalFetch = window.fetch.bind(window);
+  window.demoProbeFetch = (url, options) => {
+    if (!url.startsWith('https://cdn.storytilecraft.cc/fluid-demo/')) return originalFetch(url, options);
+    const isIndex = url.endsWith('/index.json');
+    counts[isIndex ? 'index' : 'model']++;
+    document.getElementById('requests').textContent = `${counts.index} index · ${counts.model} model requests`;
+    const fail = document.getElementById(isIndex ? 'fail-index' : 'fail-model').checked;
+    return { status: fail ? 503 : 200, body: isIndex ? index : model };
+  };
+  async function reset() {
+    const source = await (await originalFetch(new URL('index.html?debug=none', root))).text();
+    const setup = `<base href="${root.href}"><script>window.fetch = (input, options) => {
+      const url = new URL(input, document.baseURI).href;
+      const result = parent.demoProbeFetch(url, options);
+      return url.startsWith('https://cdn.storytilecraft.cc/fluid-demo/')
+        ? Promise.resolve(new Response(JSON.stringify(result.body), {
+            status: result.status, headers: { 'Content-Type': 'application/json' },
+          })) : result;
+    };<\/script>`;
+    document.getElementById('app').srcdoc = source.replace('<head>', `<head>${setup}`);
+  }
+  document.getElementById('reload').addEventListener('click', reset);
+  reset();
+</script>
+</html>

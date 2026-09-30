@@ -402,13 +402,14 @@ html, body {
 
 .panel-extension-tabs {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0;
   flex: 1;
 }
 
 .panel-extension-tabs button,
 #panel-extension-close {
+  min-width: 0;
   min-height: var(--panel-header-control-size);
   border: 1px solid rgba(255, 255, 255, 0.3);
   color: white;
@@ -459,6 +460,13 @@ html, body {
 #bake-button { margin-top: 4px; }
 
 /* ---- Story file and playback tools ------------------------------------- */
+
+.story-demo-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.story-demo-heading strong { font-size: 14px; }
+.story-demo-select-label { display: block; margin: 14px 0 6px; }
+#story-demo-select { display: block; width: 100%; min-width: 0; color-scheme: dark; }
+.story-demo-meta { margin: 10px 0; color: rgba(255, 255, 255, .72); line-height: 1.45; overflow-wrap: anywhere; }
+#story-demo-status { min-height: 36px; margin-bottom: 12px; overflow-wrap: anywhere; }
 
 .story-dropzone {
   display: grid;
@@ -585,6 +593,7 @@ html, body {
 .story-empty { display: grid; justify-items: start; gap: 10px; padding: 10px 0; }
 .story-empty p { margin: 0; }
 .story-player-file { display: block; }
+.story-player-slug { display: block; color: rgba(255, 255, 255, .68); margin-top: 3px; overflow-wrap: anywhere; }
 
 .story-progress {
   height: 8px;

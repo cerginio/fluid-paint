@@ -18,12 +18,39 @@ class StoryToolsUI {
     this.playhead = document.getElementById('story-playhead-label');
     this.stopDecision = document.getElementById('story-stop-decision');
     this.gaps = document.getElementById('story-player-gaps');
+    this.demoSelect = document.getElementById('story-demo-select');
+    this.demoRefresh = document.getElementById('story-demo-refresh');
+    this.demoRun = document.getElementById('story-demo-run');
+    this.demoStatus = document.getElementById('story-demo-status');
+    this.demoMeta = document.getElementById('story-demo-meta');
+    this.demoCatalog = typeof StoryDemoCatalog === 'function' ? new StoryDemoCatalog() : null;
+    this.demoOpened = false;
+    this.demoRefreshing = false;
+    this.demoRunning = false;
+    this.demoRefreshSerial = 0;
+    this.demoRunSerial = 0;
+    this.demoLastUpdate = null;
+    this.demoMessage = '';
+    this.demoError = false;
     this._thicknessFrame = null;
     this._bind();
     this.unsubscribe = controller.subscribe((view) => this.render(view));
   }
 
   _bind() {
+    if (this.toolPanel?.extension) {
+      this.toolPanel.extension.addEventListener('story-extension-tab-selected', (event) => {
+        if (event.detail.tab !== 'demo' || !this._demoAvailable() || this.demoOpened) return;
+        this.demoOpened = true;
+        this._refreshDemo();
+      });
+    }
+    this._on('story-demo-refresh', 'click', () => this._refreshDemo());
+    this._on('story-demo-select', 'change', () => {
+      this.demoRunSerial++;
+      this._renderDemo();
+    });
+    this._on('story-demo-run', 'click', () => this._runDemo());
     const choose = () => this.fileInput && this.fileInput.click();
     if (this.dropzone) {
       this.dropzone.addEventListener('click', choose);
@@ -110,6 +137,96 @@ class StoryToolsUI {
   _togglePlayback() {
     if (this.controller.state === 'playing') this.controller.pause();
     else this._safe(() => this.controller.play());
+  }
+
+  _demoAvailable() {
+    return !!this.demoCatalog && !!this.demoSelect && !document.getElementById('story-demo-tab')?.hidden;
+  }
+
+  async _refreshDemo() {
+    if (!this._demoAvailable() || this.demoRefreshing || this.demoRunning) return;
+    this.demoRefreshing = true;
+    const serial = ++this.demoRefreshSerial;
+    this.demoMessage = 'Updating…';
+    this.demoError = false;
+    this._renderDemo();
+    try {
+      const index = await this.demoCatalog.refreshIndex();
+      if (serial !== this.demoRefreshSerial) return;
+      const selected = this.demoSelect.value;
+      this.demoSelect.replaceChildren(...index.stories.map((story) => new Option(story.title, story.slug)));
+      if (index.stories.some((story) => story.slug === selected)) this.demoSelect.value = selected;
+      this.demoLastUpdate = new Date();
+      this.demoMessage = index.stories.length
+        ? `${index.stories.length} demos · Last update: ${this.demoLastUpdate.toLocaleString()}`
+        : `No demos yet · Last update: ${this.demoLastUpdate.toLocaleString()}`;
+    } catch (error) {
+      if (serial !== this.demoRefreshSerial) return;
+      this.demoMessage = `Could not update demos: ${error.message} Select Refresh index to retry.`;
+      if (this.demoLastUpdate) this.demoMessage += ` Last update: ${this.demoLastUpdate.toLocaleString()}`;
+      this.demoError = true;
+    } finally {
+      if (serial === this.demoRefreshSerial) {
+        this.demoRefreshing = false;
+        this._renderDemo();
+      }
+    }
+  }
+
+  async _runDemo() {
+    if (!this._demoAvailable() || this.demoRunning || this.demoRefreshing || !this.demoSelect.value || !this.demoCatalog.index) return;
+    if (!['empty', 'ready', 'file-error'].includes(this.controller.state)) {
+      this.demoMessage = 'Finish or resolve the current playback in Player before running another demo.';
+      this.demoError = true;
+      this._renderDemo();
+      return;
+    }
+    const slug = this.demoSelect.value;
+    const previousModel = this.controller.model;
+    const serial = ++this.demoRunSerial;
+    this.demoRunning = true;
+    this.demoMessage = 'Loading and validating story…';
+    this.demoError = false;
+    this._renderDemo();
+    try {
+      const loaded = await this.demoCatalog.fetchStory(slug);
+      if (serial !== this.demoRunSerial || slug !== this.demoSelect.value) return;
+      if (this.controller.model !== previousModel ||
+          !['empty', 'ready', 'file-error'].includes(this.controller.state)) {
+        throw new Error('Finish or resolve the current playback in Player before running another demo.');
+      }
+      const entry = this.demoCatalog.index.stories.find((story) => story.slug === slug);
+      loaded.summary.fileName = entry?.title || `${slug}.json`;
+      loaded.summary.slug = slug;
+      await this.controller.loadModel(loaded.model, loaded.summary);
+      this.toolPanel?.selectExtensionTab('player', true);
+      this.controller.play().catch((error) => console.error('Demo playback:', error));
+      this.demoMessage = `Started ${loaded.summary.fileName}.`;
+    } catch (error) {
+      if (serial !== this.demoRunSerial) return;
+      this.demoMessage = `Could not run demo: ${error.message}`;
+      this.demoError = true;
+    } finally {
+      this.demoRunning = false;
+      this._renderDemo();
+    }
+  }
+
+  _renderDemo() {
+    if (!this.demoSelect) return;
+    const story = this.demoCatalog?.index?.stories.find((entry) => entry.slug === this.demoSelect.value);
+    this.demoSelect.disabled = this.demoRefreshing || this.demoRunning || !this.demoSelect.options.length;
+    if (this.demoRefresh) {
+      this.demoRefresh.disabled = this.demoRefreshing || this.demoRunning;
+      this.demoRefresh.textContent = this.demoRefreshing ? 'Updating…' : this.demoError && !this.demoCatalog?.index ? 'Retry' : 'Refresh index';
+    }
+    if (this.demoRun) this.demoRun.disabled = this.demoRunning || this.demoRefreshing || !story;
+    if (this.demoMeta) this.demoMeta.textContent = story
+      ? `${story.slug} · ${story.frameCount} frames · ${this._formatBytes(story.sizeBytes)} · ${story.credit}` : '';
+    if (this.demoStatus) {
+      this.demoStatus.textContent = this.demoMessage;
+      this.demoStatus.classList.toggle('is-error', this.demoError);
+    }
   }
 
   render(view) {
@@ -219,6 +336,11 @@ class StoryToolsUI {
     set('story-file-items', `${summary.drawableItems.toLocaleString()} drawable items · ${summary.logicalGroups.toLocaleString()} groups`);
     set('story-file-bounds', `${Math.round(summary.bounds.right - summary.bounds.left)} × ${Math.round(summary.bounds.bottom - summary.bounds.top)} source units`);
     set('story-player-file-name', summary.fileName);
+    const slug = document.getElementById('story-player-slug');
+    if (slug) {
+      slug.hidden = !summary.slug;
+      slug.textContent = summary.slug || '';
+    }
     const warnings = document.getElementById('story-file-warnings');
     if (warnings) {
       warnings.hidden = !summary.warnings.length;
@@ -235,6 +357,7 @@ class StoryToolsUI {
     }
     if (view.state === 'stop-decision') return 'Playback stopped. Restore the canvas or keep the partial result.';
     if (view.state === 'player-error') return view.error ? view.error.message : 'Playback failed.';
+    if (view.state === 'ready' && view.error) return `Could not start playback: ${view.error.message}`;
     return 'Ready.';
   }
 

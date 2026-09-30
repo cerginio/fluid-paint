@@ -14,7 +14,7 @@ function throwsCode(fn, code) {
 async function main() {
   assert.deepEqual(resolveFluidUiConfig().resolvedFeatures, [
     'color-picker', 'brush-size', 'colors-options', 'brush-options',
-    'player', 'file-bg', 'file-play', 'state-bake',
+    'player', 'demo-r2', 'file-bg', 'file-play', 'state-bake',
   ]);
   assert.deepEqual(resolveFluidUiConfig({ mode: 'empty' }).resolvedFeatures, []);
   assert.deepEqual(resolveFluidUiConfig({ mode: 'preset', preset: 'draw-min' }).resolvedFeatures,
@@ -27,6 +27,12 @@ async function main() {
   }).resolvedFeatures, ['color-picker', 'brush-size', 'brush-options', 'state-bake']);
   throwsCode(() => resolveFluidUiConfig({ mode: 'features', features: [] }), 'UI_FEATURES_REQUIRED');
   throwsCode(() => resolveFluidUiConfig({ mode: 'features', features: ['bogus'] }), 'UNKNOWN_UI_FEATURE');
+  throwsCode(() => resolveFluidUiConfig({ mode: 'features', features: ['demo-r2'] }), 'UI_FEATURE_DEPENDENCY');
+  throwsCode(() => resolveFluidUiConfig({ mode: 'preset', preset: 'draw-min', features: ['demo-r2'] }), 'UI_FEATURE_DEPENDENCY');
+  assert.deepEqual(resolveFluidUiConfig({ mode: 'features', features: ['demo-r2', 'player'] }).resolvedFeatures,
+    ['player', 'demo-r2']);
+  assert.equal(resolveFluidUiConfig({ mode: 'preset', preset: 'draw-min', features: ['demo-r2', 'player'] })
+    .resolvedFeatures.includes('demo-r2'), true);
   throwsCode(() => parseFluidUiConfig('?uiPreset=draw-min'), 'UI_MODE_REQUIRED');
   throwsCode(() => parseFluidUiConfig('?uiMode=full&uiMode=empty'), 'MULTIPLE_UI_MODES');
   throwsCode(() => parseFluidUiConfig('?uiMode=features&uiFeatures=,,,'), 'UI_FEATURES_REQUIRED');

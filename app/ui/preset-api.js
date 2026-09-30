@@ -8,6 +8,7 @@
     'colors-options',
     'brush-options',
     'player',
+    'demo-r2',
     'file-bg',
     'file-play',
     'state-bake',
@@ -73,6 +74,10 @@
       normalized = { version, mode: 'preset', preset: config.preset };
       if (extensions.length) normalized.features = extensions;
     }
+    if (resolvedFeatures.includes('demo-r2') && !resolvedFeatures.includes('player')) {
+      throw uiError('UI_FEATURE_DEPENDENCY', 'demo-r2 requires the player feature',
+        { feature: 'demo-r2', requires: 'player' });
+    }
     return { config: normalized, resolvedFeatures };
   }
 
@@ -126,7 +131,9 @@
       });
 
       const fileVisible = has('file-bg') || has('file-play');
-      const extensionVisible = fileVisible || has('player') || has('state-bake');
+      const extensionVisible = fileVisible || has('player') || has('state-bake') || has('demo-r2');
+      setAvailable(this.document?.getElementById('story-demo-tab'), has('demo-r2'));
+      setAvailable(this.document?.getElementById('story-demo-page'), has('demo-r2'));
       setAvailable(this.document?.getElementById('story-file-tab'), fileVisible);
       setAvailable(this.document?.getElementById('story-file-page'), fileVisible);
       setAvailable(this.document?.getElementById('story-player-tab'), has('player'));

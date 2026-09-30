@@ -48,6 +48,9 @@ class ToolPanel {
     this._installDrag();
     this._installHueStripe();
     this._installExtension();
+    this._extensionResizeObserver = this.extension && typeof ResizeObserver === 'function'
+      ? new ResizeObserver(() => requestAnimationFrame(() => this._placeExtension())) : null;
+    if (this._extensionResizeObserver) this._extensionResizeObserver.observe(this.extension);
     this._onFluidUiLayoutChanged = () => this.refreshFluidUi();
     document.addEventListener('fluid-ui-layout-changed', this._onFluidUiLayoutChanged);
 
@@ -317,6 +320,9 @@ class ToolPanel {
       );
       page.hidden = !matchingTab || page.getAttribute('data-extension-page') !== selected;
     }
+    if (!this.extension.hidden) {
+      this.extension.dispatchEvent(new CustomEvent('story-extension-tab-selected', { detail: { tab: selected } }));
+    }
   }
 
   setExtensionOpen(open, notifyClose = true) {
@@ -327,6 +333,12 @@ class ToolPanel {
     // the painter out of compact mode.
     const next = !!open;
     this.extension.hidden = !next;
+    if (next && !wasOpen) {
+      const selectedTab = this.extensionTabs.find((tab) => !tab.hidden && tab.getAttribute('aria-selected') === 'true');
+      if (selectedTab) this.extension.dispatchEvent(new CustomEvent('story-extension-tab-selected', {
+        detail: { tab: selectedTab.getAttribute('data-extension-tab') },
+      }));
+    }
     this.extensionToggle.setAttribute('aria-expanded', next ? 'true' : 'false');
     this.extensionToggle.textContent = next ? '−' : '+';
     this._placeExtension();
@@ -352,14 +364,18 @@ class ToolPanel {
     this.extension.style.removeProperty('transform');
     if (getComputedStyle(this.extension).position === 'fixed') {
       // backdrop-filter makes this nominally fixed child use #ui as its
-      // containing block in Chromium. Counter-shift it after a parent drag so
-      // the phone sheet still respects the viewport's 8px gutters.
+      // containing block in Chromium. Counter-shift both axes after a drag
+      // or resize so the phone sheet stays inside the viewport gutters.
       const fixedRect = this.extension.getBoundingClientRect();
-      const shift = fixedRect.left < 8 ? 8 - fixedRect.left
+      const shiftX = fixedRect.left < 8 ? 8 - fixedRect.left
         : fixedRect.right > window.innerWidth - 8
           ? window.innerWidth - 8 - fixedRect.right
           : 0;
-      if (shift) this.extension.style.transform = `translateX(${shift}px)`;
+      const shiftY = fixedRect.top < 8 ? 8 - fixedRect.top
+        : fixedRect.bottom > window.innerHeight - 8
+          ? window.innerHeight - 8 - fixedRect.bottom
+          : 0;
+      if (shiftX || shiftY) this.extension.style.transform = `translate(${shiftX}px, ${shiftY}px)`;
       return;
     }
 
@@ -457,6 +473,7 @@ class ToolPanel {
   }
 
   destroy() {
+    this._extensionResizeObserver?.disconnect();
     window.removeEventListener('resize', this._onWindowResize);
     document.removeEventListener('fluid-ui-layout-changed', this._onFluidUiLayoutChanged);
   }

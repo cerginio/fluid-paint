@@ -210,7 +210,14 @@ class StoryPlaybackController {
     if (this.state === 'completed-with-gaps') return this.playEarliestRemaining();
     if (this.state === 'completed') return this.restart();
     if (this.state !== 'ready') return false;
-    this._prepareFreshRun();
+    try {
+      this._prepareFreshRun();
+    } catch (error) {
+      if (this.baselineValid) this.painter.applySnapshot(this.baseline);
+      this.error = error;
+      this._setState('ready');
+      throw error;
+    }
     return this._runFrom(0);
   }
 

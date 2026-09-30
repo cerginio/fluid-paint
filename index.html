@@ -102,14 +102,17 @@
                  aria-label="Story tools">
             <header class="panel-extension-header">
                 <div id="panel-extension-grip" role="button" tabindex="0"
-                     aria-expanded="true" aria-controls="story-file-page story-player-page bake-page"
+                     aria-expanded="true" aria-controls="story-demo-page story-file-page story-player-page bake-page"
                      aria-label="Drag Story tools or tap to collapse"
                      title="Drag to move, tap to collapse">
                     <span></span><span></span><span></span>
                 </div>
                 <div class="panel-extension-tabs" role="tablist" aria-label="Story tools">
+                    <button id="story-demo-tab" type="button" role="tab"
+                            data-extension-tab="demo" aria-selected="true"
+                            aria-controls="story-demo-page">Demo</button>
                     <button id="story-file-tab" type="button" role="tab"
-                            data-extension-tab="file" aria-selected="true"
+                            data-extension-tab="file" aria-selected="false" tabindex="-1"
                             aria-controls="story-file-page">File</button>
                     <button id="story-player-tab" type="button" role="tab"
                             data-extension-tab="player" aria-selected="false" tabindex="-1"
@@ -121,6 +124,19 @@
                 <button id="panel-extension-close" type="button"
                         aria-label="Hide story tools">×</button>
             </header>
+
+            <div id="story-demo-page" class="panel-extension-page" role="tabpanel" tabindex="0"
+                 aria-labelledby="story-demo-tab" data-extension-page="demo">
+                <div class="story-demo-heading">
+                    <strong>Story demos</strong>
+                    <button id="story-demo-refresh" type="button">Refresh index</button>
+                </div>
+                <label class="story-demo-select-label" for="story-demo-select">Choose a story</label>
+                <select id="story-demo-select" disabled></select>
+                <div id="story-demo-meta" class="story-demo-meta"></div>
+                <div id="story-demo-status" class="story-status" role="status" aria-live="polite"></div>
+                <button id="story-demo-run" class="story-primary story-wide" type="button" disabled>Run</button>
+            </div>
 
             <div id="story-file-page" class="panel-extension-page"
                  role="tabpanel" tabindex="0" aria-labelledby="story-file-tab"
@@ -180,6 +196,7 @@
 
                 <div id="story-player-content" hidden>
                     <strong id="story-player-file-name" class="story-player-file"></strong>
+                    <small id="story-player-slug" class="story-player-slug" hidden></small>
                     <div id="story-player-status" class="story-status" role="status" aria-live="polite">Ready.</div>
 
                     <div id="story-player-progress" class="story-progress" role="progressbar"
@@ -321,6 +338,7 @@
     <script src="vendor/tilecraft/fluid-gamifier-bridge.js"></script>
     <script src="app/unpainted-range-registry.js"></script>
     <script src="app/story-file-loader.js"></script>
+    <script src="app/story-demo-catalog.js"></script>
     <script src="app/story-playback-controller.js"></script>
     <!-- colorpicker.js is GONE (Phase 8): the GL hue ring, its two programs and
          its hand-written hit tests are replaced by the iro.js wheel below. -->

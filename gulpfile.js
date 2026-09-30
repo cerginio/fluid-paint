@@ -78,6 +78,7 @@ const paths = {
     // The floating tool panel (Phase 7). After the dispatcher, before paint.js.
     'app/ui/preset-api.js',
     'app/ui/panel.js',
+    'app/story-demo-catalog.js',
     'app/ui/story-tools.js',
     'paint-setup.js',
     'paint.js',

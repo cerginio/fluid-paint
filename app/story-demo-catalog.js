@@ -8,7 +8,7 @@ const StoryDemoFileLoader = typeof module !== 'undefined' && module.exports
   ? require('./story-file-loader') : globalThis.StoryFileLoader;
 
 class StoryDemoCatalog {
-  constructor(fetchImpl = globalThis.fetch) {
+  constructor(fetchImpl = (...args) => globalThis.fetch(...args)) {
     if (typeof fetchImpl !== 'function') throw new TypeError('A fetch function is required.');
     this.fetchImpl = fetchImpl;
     this.index = null;
