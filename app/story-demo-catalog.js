@@ -1,6 +1,7 @@
 'use strict';
 
 const STORY_DEMO_BASE_URL = 'https://cdn.storytilecraft.cc/fluid-demo/';
+const STORY_DEMO_FALLBACK_URL = 'https://pub-17dfba1e4d9148e7bcd3547a717794f9.r2.dev/fluid-demo/';
 const STORY_DEMO_INDEX_MAX_BYTES = 128 * 1024;
 const STORY_DEMO_INDEX_MAX_STORIES = 200;
 const STORY_DEMO_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -68,7 +69,7 @@ class StoryDemoCatalog {
   }
 
   async refreshIndex({ signal } = {}) {
-    const response = await this.fetchImpl(`${STORY_DEMO_BASE_URL}index.json`, {
+    const response = await this._fetchWithFallback('index.json', {
       method: 'GET', cache: 'no-cache', signal,
     });
     const { text } = await StoryDemoCatalog._readJson(response, STORY_DEMO_INDEX_MAX_BYTES);
@@ -85,11 +86,20 @@ class StoryDemoCatalog {
         !this.index?.stories.some((story) => story.slug === slug)) {
       throw new TypeError('Choose a story from the validated demo index.');
     }
-    const response = await this.fetchImpl(`${STORY_DEMO_BASE_URL}${slug}.json`, {
+    const response = await this._fetchWithFallback(`${slug}.json`, {
       method: 'GET', signal,
     });
     const { text, byteSize } = await StoryDemoCatalog._readJson(response, StoryDemoFileLoader.MAX_BYTES);
     return StoryDemoFileLoader.parse(text, `${slug}.json`, byteSize);
+  }
+
+  async _fetchWithFallback(path, options) {
+    try {
+      return await this.fetchImpl(`${STORY_DEMO_BASE_URL}${path}`, options);
+    } catch (error) {
+      if (options.signal?.aborted || error?.name === 'AbortError') throw error;
+      return this.fetchImpl(`${STORY_DEMO_FALLBACK_URL}${path}`, options);
+    }
   }
 
   static async _readJson(response, maxBytes) {
@@ -138,6 +148,7 @@ class StoryDemoCatalog {
 }
 
 StoryDemoCatalog.BASE_URL = STORY_DEMO_BASE_URL;
+StoryDemoCatalog.FALLBACK_URL = STORY_DEMO_FALLBACK_URL;
 StoryDemoCatalog.INDEX_MAX_BYTES = STORY_DEMO_INDEX_MAX_BYTES;
 StoryDemoCatalog.INDEX_MAX_STORIES = STORY_DEMO_INDEX_MAX_STORIES;
 

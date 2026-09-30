@@ -45,6 +45,47 @@ test('a validated index controls the only model URL and shares File preflight', 
   assert.equal(urls.length, 2);
 });
 
+test('network rejection retries the same index and model path on r2.dev', async () => {
+  const requests = [];
+  const catalog = new StoryDemoCatalog(async (url, options) => {
+    requests.push({ url, options });
+    if (url.startsWith(StoryDemoCatalog.BASE_URL)) throw new TypeError('Failed to fetch');
+    return url.endsWith('index.json') ? jsonResponse(index()) : jsonResponse(model());
+  });
+  await catalog.refreshIndex();
+  const loaded = await catalog.fetchStory(entry.slug);
+  assert.equal(loaded.summary.framesTotal, 8);
+  assert.deepEqual(requests.map(({ url }) => url), [
+    `${StoryDemoCatalog.BASE_URL}index.json`,
+    `${StoryDemoCatalog.FALLBACK_URL}index.json`,
+    `${StoryDemoCatalog.BASE_URL}${entry.slug}.json`,
+    `${StoryDemoCatalog.FALLBACK_URL}${entry.slug}.json`,
+  ]);
+  assert.equal(requests[0].options, requests[1].options);
+  assert.equal(requests[0].options.cache, 'no-cache');
+  assert.equal(requests[2].options, requests[3].options);
+});
+
+test('HTTP, invalid JSON, and abort do not trigger the fallback', async () => {
+  const urls = [];
+  const catalog = new StoryDemoCatalog(async (url) => {
+    urls.push(url);
+    if (urls.length === 1) return jsonResponse(index());
+    if (urls.length === 2) return new Response('{}', { status: 404,
+      headers: { 'Content-Type': 'application/json' } });
+    if (urls.length === 3) return new Response('{', {
+      headers: { 'Content-Type': 'application/json' } });
+    throw new DOMException('The operation was aborted.', 'AbortError');
+  });
+  const first = await catalog.refreshIndex();
+  await assert.rejects(catalog.refreshIndex(), /HTTP 404/);
+  await assert.rejects(catalog.refreshIndex(), /valid JSON/);
+  await assert.rejects(catalog.refreshIndex(), { name: 'AbortError' });
+  assert.equal(catalog.index, first);
+  assert.equal(urls.length, 4);
+  assert.ok(urls.every((url) => url === `${StoryDemoCatalog.BASE_URL}index.json`));
+});
+
 test('a failed refresh keeps the last validated catalog', async () => {
   let next = index();
   const catalog = new StoryDemoCatalog(async () => jsonResponse(next));

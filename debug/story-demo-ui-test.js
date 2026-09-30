@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
 const { chromium } = require('playwright');
+const StoryDemoCatalog = require('../app/story-demo-catalog');
 require('./browser-lock').acquireBrowserLock('Story demo UI');
 
 const root = path.resolve(__dirname, '..');
@@ -174,6 +175,35 @@ const model = { frames: Array.from({ length: 8 }, (_, n) => ({ id: n + 1 })), la
     await page.locator('#fail-index').uncheck();
     await probe.locator('#story-demo-refresh').click();
     await page.waitForFunction(() => document.getElementById('app').contentDocument?.querySelectorAll('#story-demo-select option').length === 3);
+
+    const fallbackPage = await browser.newPage({ viewport: { width: 1000, height: 720 } });
+    let failedCdnRequests = 0;
+    const fallbackRequests = [];
+    await fallbackPage.route('https://cdn.storytilecraft.cc/fluid-demo/**', async (route) => {
+      failedCdnRequests++;
+      await route.abort('failed');
+    });
+    await fallbackPage.route('https://pub-17dfba1e4d9148e7bcd3547a717794f9.r2.dev/fluid-demo/**', async (route) => {
+      const url = route.request().url();
+      fallbackRequests.push(url);
+      await route.fulfill({ status: 200, contentType: 'application/json',
+        headers: { 'Access-Control-Allow-Origin': '*' },
+        body: JSON.stringify(url.endsWith('/index.json') ? index : model) });
+    });
+    await fallbackPage.goto(base);
+    await fallbackPage.waitForFunction(() => window.__painter?.storyTools);
+    await fallbackPage.click('#panel-extension-toggle');
+    await fallbackPage.waitForFunction(() => document.querySelectorAll('#story-demo-select option').length === 3);
+    await fallbackPage.selectOption('#story-demo-select', slugs[2]);
+    await fallbackPage.click('#story-demo-run');
+    await fallbackPage.waitForFunction(() => document.querySelector('#story-player-tab').getAttribute('aria-selected') === 'true');
+    assert.equal(await fallbackPage.locator('#story-player-slug').textContent(), slugs[2]);
+    assert.equal(failedCdnRequests, 2);
+    assert.deepEqual(fallbackRequests, [
+      `${StoryDemoCatalog.FALLBACK_URL}index.json`,
+      `${StoryDemoCatalog.FALLBACK_URL}${slugs[2]}.json`,
+    ]);
+    await fallbackPage.close();
     console.log('Story demo UI browser: PASS');
   } finally {
     await browser.close();
