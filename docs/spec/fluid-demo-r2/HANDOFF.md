@@ -1,23 +1,33 @@
 # Handoff: Fluid Paint — публічні демо з R2
 
 Стан на 2026-09-30, гілка `feat/brush_shapes`. Фази 1–3 зі
-[спеки](../../FLUID-R2-DEMO-SPEC.md) завершені й прийняті QA власником.
+[спеки](../../FLUID-R2-DEMO-SPEC.md) та фаза 4 за
+[BUG-REPORT.md](../fluid-player-ux-fix/BUG-REPORT.md) завершені; власник
+прийняв фазу 4 командою `handoff:next`.
+Код фази 4: `ua-dream` `0266a0bf`, Fluid Paint `4dd7dee`;
+vendored `message-api.js` `aa51aff`, manifest `ua-dream` `67be1aca`.
 
 | Що | Де | Репозиторій |
 | --- | --- | --- |
 | Спека | `docs/FLUID-R2-DEMO-SPEC.md` | Fluid Paint |
 | Розслідування мапінгу Fluid Play | `docs/spec/fluid-player-ux-fix/BUG-REPORT.md` | Fluid Paint; причини також у `ua-dream` |
+| QA-фікстура мапінгу | `docs/spec/fluid-player-ux-fix/triangle-parity.json` | Fluid Paint |
+| Експорт форми й браузерна проба | `tilecraft/lib/fluid-model.js`, `tilecraft/tests/fluid-player-model-probe.html` | `ua-dream` |
 | Цей handoff і майбутній QA | `docs/spec/fluid-demo-r2/` | Fluid Paint |
 | Demo UI, catalog client, Player, preset API | `index.html`, `app/`, `debug/`, `gulpfile.js` | Fluid Paint |
 | Канонічні fixture й генератор index | `tilecraft/viewer/engines/three/fixtures/catalog/`, `tilecraft/scripts/story-catalog-index.mjs` | `ua-dream` |
 | Публічні об'єкти й CORS | bucket `stories`, `/fluid-demo/` | зовнішній R2/CDN |
 
 Vendored `message-api.js`, `fluid-model.js` і `fluid-gamifier-bridge.js` мають
-канонічні копії в `ua-dream` і копії тут. Ця спека їх не змінює. Якщо під час
-роботи потреба змінити будь-який із них виникне, обидві копії та процедуру
-звірити за `ua-dream/docs/spec/fluid-paint/fluid-paint-vendor-manifest.md`.
+канонічні копії в `ua-dream` і копії тут. Фаза 4 змінила обидві копії
+`fluid-model.js`. Паралельна зміна `message-api.js` на боці `ua-dream`
+додала необов'язковий `sessionId`; його vendored копію звірено за SHA-256,
+але канонічна зміна належить іншій незавершеній роботі і не входить у коміт
+фази 4 на тому боці. Процедура —
+`ua-dream/docs/spec/fluid-paint/fluid-paint-vendor-manifest.md`.
 
-> **Далі:** фаза 4 — виправлення мапінгу Fluid Play за [BUG-REPORT.md](../fluid-player-ux-fix/BUG-REPORT.md); перед нею перевірити відкриті операційні пункти нижче.
+> **Далі:** відкриті операційні пункти нижче; нової фази коду в цьому handoff
+> не заплановано.
 
 ## Що зроблено і працює
 
@@ -31,6 +41,9 @@ Vendored `message-api.js`, `fluid-model.js` і `fluid-gamifier-bridge.js` маю
 | `app/ui/preset-api.js` | `demo-r2` є в `full`; у `features`/`preset` вмикається явно й потребує `player`. `empty` і старі пресети не запитують R2. |
 | `index.html`, `app/layout.css`, `app/ui/panel.js`, `gulpfile.js` | Вкладки `Demo | File | Player | State`, статуси й доступний slug у Player; mobile sheet лишається в межах viewport. Option Demo має темний текст на світлому фоні, вкладки не обрізаються при 320 px. CSS-виправлення ще треба викласти на production. |
 | `debug/story-demo-ui-probe.html`, `debug/story-demo-ui-test.js` | Локальна контрольована проба трьох назв, помилок index/model і playback; без R2 чи Tilecraft Editor. |
+| `tilecraft/lib/fluid-model.js`, `vendor/tilecraft/fluid-model.js` | Кількість вершин не масштабується; `a`, `sa` і видимі форми передаються; полігон із заданим числом сторін поза `3..8` відхиляється. Обидві копії побайтно рівні. |
+| `fluid-engine/tilecraft-stroke-player.js`, `app/story-playback-controller.js`, `index.html` | Polygon footprint і кут відтворюються; `mod=2` дає два контакти. Альфа використовує криву ручного пензля; до Play обирається Natural/RYB або Digital/RGB. |
+| `debug/tilecraft-spot-gpu-test.js`, `debug/tilecraft-source-model-ui-test.js` | Браузерні проби Tilecraft-експорту, GPU alpha mass/покриття tap і path, завантаження фікстури через UI. |
 
 ## Головні виміряні факти
 
@@ -76,6 +89,19 @@ Vendored `message-api.js`, `fluid-model.js` і `fluid-gamifier-bridge.js` маю
 - На боці `ua-dream` тест моделі — 11/11 PASS, але закріплює хибне
   масштабування `polygonSize` (див. BUG-REPORT). Цей стан не стосується
   приймання фази 3.
+- Фаза 4, guard: `npx vitest run tilecraft/tests/fluid-model.test.js` на боці
+  `ua-dream` — 15/15; тут `npm run test:tilecraft`, `npm run test:timing`,
+  `npm run build`, `npm run test:fluid-control`, `npm run test:ui-preset`,
+  `npm run test:story-ui` — PASS; `npm run test:color` — 42/42,
+  `npm run test:story-demo` — 8/8. Три vendored файли збіглися за SHA-256
+  з робочими канонічними копіями на момент перевірки.
+- Фаза 4, браузерні probe: `debug/tilecraft-source-model-ui-test.js` — PASS;
+  `debug/tilecraft-spot-gpu-test.js` — PASS. За seed 20260930, DPR 1,
+  alpha `0.0204` один manual tap і replay spot дали однакові alpha mass
+  `1802.20`, площу `23 164` пікселів і трикутну гармоніку `h3=0.254`.
+  Один прямий path-перехід дав відношення replay/manual `0.9963` за mass
+  і `0.9992` за площею. UI-проба фікстури підтвердила 6 операцій,
+  `a=128`, різні кути `sa`/`mod=2` та обидва режими кольору.
 
 ## НЕЗАКРИТЕ — почни звідси
 
@@ -97,29 +123,10 @@ Vendored `message-api.js`, `fluid-model.js` і `fluid-gamifier-bridge.js` маю
    проба пройшли. Власник дав `handoff:next`; сценарії та межі перевірки —
    у [QA.md](./QA.md#фаза-3--публічний-r2-і-live-інтеграція).
 
-4. **Фаза 4 — виправлення мапінгу Fluid Play (`ua-dream` ↔ Fluid Paint).**
-   Після фази 3 виконати [BUG-REPORT.md](../fluid-player-ux-fix/BUG-REPORT.md)
-   як **одну наскрізну фазу**. На боці `ua-dream`: зберегти в моделі
-   `polygonSize` як цілу кількість вершин без масштабування, передати
-   `tile.sa` і `tile.a`, узгодити підтримані форми й контракт vendored
-   `fluid-model.js`/bridge. На боці Fluid Paint: відтворити силует і поворот
-   polygon spot, врахувати альфу плитки, калібрувати кількість фарби
-   окремо для spot і path та дати до запуску вибір Natural/RYB або
-   Digital/RGB з відповідним кодуванням імпортного hex. Звірити обидві
-   копії vendored файлів за `ua-dream/docs/spec/fluid-paint/fluid-paint-vendor-manifest.md`.
-   **Закриття:** однакова fixture з трикутником (`polygonSize:3`),
-   `sa≠0`, `a<255` і RGB-кольорами зберігає ці поля в JSON, має
-   `brushShape.sides === 3` у плані, дає трикутний контур у Fluid Play;
-   Natural і Digital дають перевірений мапінг кольору, а виміряні alpha
-   mass/площа покриття replay spot відповідають узгодженому еталону
-   ручного tap. Фаза завершується лише коли обидва репозиторії лишаються
-   робочими. **Guard:** тести моделі `ua-dream`, `npm run test:tilecraft`,
-   `npm run test:color`, `npm run test:timing`, `npm run build` тут;
-   окремо перевірити однаковий vendored контракт. **QA probe:** відкрити
-   той самий кадр у Tilecraft і Fluid Play на парі локальних стендів,
-   запустити replay, порівняти контур, поворот, прозорість і два колірні
-   режими; зафіксувати GPU readback для короткого tap і replay spot.
-   Перед review додати окремі сценарії в `QA.md`, згруповані за сторонами.
+~~4. **Фаза 4 — виправлення мапінгу Fluid Play (`ua-dream` ↔ Fluid Paint).**~~
+   — ЗАКРИТО 2026-09-30 за `handoff:next` власника. Експорт, форма,
+   прозорість, режими кольору, guard і контрольовані браузерні проби пройшли;
+   виміри наведено вище, сценарії — у [QA.md](./QA.md#фаза-4--мапінг-tilecraft-і-fluid-play).
 
 ## Відкриті питання й зовнішні передумови
 
@@ -134,7 +141,12 @@ Vendored `message-api.js`, `fluid-model.js` і `fluid-gamifier-bridge.js` маю
   `publishedAt` і, якщо є, `generatedAt`, як у канонічному fixture. Спека
   не задає формат явно; перед публікацією підтвердити, чи це остаточний
   контракт каталогу.
-- Для фази 4 ще потрібен вимірюваний допуск паритету alpha mass/площі
-  покриття на підтриманому WebGL шляху; за скриншотами числовий допуск
-  встановити не можна. Окремо перевірити, чи `mod == 2` потребує двох
-  проходів для збереження подвійного контуру Tilecraft.
+- На боці Fluid Paint залишається візуальне порівняння однієї моделі на
+  Tilecraft і Fluid Play: контрольований GPU допуск `0.85…1.15` виміряно
+  для одного tap і одного path-переходу, але не для утримання 3/10 tick.
+  `mod=2` використовує два контакти; густина в зоні їх перетину може
+  відрізнятися від одного Canvas fill у Tilecraft.
+- На боці `ua-dream` паралельну зміну `tilecraft/lib/message-api.js` з
+  `sessionId` слід завершити в її власному циклі й зафіксувати commit pin
+  у vendor manifest. Vendored Fluid Paint копія у `aa51aff` збігається з
+  поточним канонічним робочим файлом; manifest оновлено в `67be1aca`.
