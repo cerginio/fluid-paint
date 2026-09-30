@@ -2,8 +2,163 @@
 
 Для локальної проби з кореня Fluid Paint після `make install` запустити
 `make demo-qa-server`. Відкрити URL нижче у браузері.
-Проба використовує контрольовані JSON-відповіді; інтернет і R2 не потрібні.
+Проби фаз 1–2 використовують контрольовані JSON-відповіді; інтернет і R2
+для них не потрібні.
 Після перевірки зупинити сервер через Ctrl+C.
+
+## Фаза 3 — публічний R2 і live інтеграція
+
+**Рев'ю:** власник прийняв фазу командою `handoff:next` 2026-09-30.
+Перевірка реального DNS у його мережі та викладка CSS лишаються
+операційними пунктами нижче.
+
+Для цих сценаріїв потрібен інтернет. Локально запустити `make demo-qa-server`
+на порту 3000; production адреса — `https://fluid-paint.netlify.app/`.
+Сценарії QA-3A–QA-3E перевіряють зовнішній каталог і зв'язку з ним.
+
+**Виміряно 2026-09-30:** канонічний `story-catalog-index.mjs --check` пройшов:
+три моделі по 8 кадрів і 2 шари. GET index та кожної моделі з Origin
+`https://fluid-paint.netlify.app`, `http://localhost:3000` і
+`http://127.0.0.1:3000` повернув 200, `application/json` і точний
+`Access-Control-Allow-Origin`; SHA-256 кожної відповіді збігся з відповідним
+канонічним fixture (763, 4 095 097, 4 094 566 і 4 093 329 байти).
+У мережі цієї проби TLS CDN прийнятий Node і Chromium; у мережі власника
+`cdn.storytilecraft.cc` блокується з помилкою сертифіката. Резервний
+`r2.dev/fluid-demo/` віддав ті самі чотири файли для всіх трьох Origin:
+12 відповідей 200 з точним CORS і SHA-256, що збігається з fixture.
+
+**Локальна браузерна проба:** на `http://127.0.0.1:3000/` з реальним CDN
+показано три назви; кожен slug завантажив свою модель, відкрив Player,
+показав `Painting story…`, 8 кадрів і 46 861 drawable items. Помилок сторінки
+не було. Progress для polygon зріс з 1% до 4% за 30 секунд у Chromium із
+SwiftShader на швидкості 16×. Повного завершення відтворення ця проба не
+підтвердила: очікування 180 секунд вичерпалось. QA-3C–QA-3E лишаються
+для візуальної перевірки власником.
+Після успішного live index локальна проба вимкнула мережу: Refresh зберіг
+три option, вибраний polyline і доступну Run; після повернення мережі
+статус знову показав `3 demos · Last update:`.
+Коли Chromium примусово відхилив CDN-запити, реальний `r2.dev` віддав index
+і `story-8-frames-hibrid.json`; Player перейшов у `playing`, показав 8 кадрів
+і 46 861 drawable items без помилок сторінки. Це перевіряє код обходу,
+але не відтворює DNS мережі власника.
+Guard після узгодження коефіцієнта пензля: `npm run test:story-demo` — 8/8;
+`npm run test:story-ui`, `npm run test:ui-preset`, `npm run test:tilecraft`
+і `npm run build` — PASS. `npm run test:story-demo:ui` — PASS.
+Після виправлення UI локальний Chromium на ширині 1016 і 320 px показав усі
+чотири вкладки без обрізання тексту; панель була в межах viewport, а option
+Demo мав темний текст `rgb(17, 17, 17)` на білому фоні. Повторний
+`npm run test:story-demo:ui` і `npm run build` — PASS.
+
+**Стан production:** `https://fluid-paint.netlify.app/?debug=none` показує
+Demo й три назви. При примусовій відмові CDN Chromium завантажив index і
+кожну з трьох моделей через `r2.dev` (усі GET 200, 8 кадрів і 46 861
+drawable items, Player перейшов у `playing`). Це перевірка production
+коду, але не DNS у мережі власника. CSS-виправлення списку й вкладок ще
+не розгорнуто: production option лишається білим текстом на прозорому
+фоні. У цьому QA немає рядка `**Деплой:**`; команда автоматичного деплою
+для теми не задана.
+
+### QA-3A. Резервний публічний index
+
+**Відкрити:** `https://pub-17dfba1e4d9148e7bcd3547a717794f9.r2.dev/fluid-demo/index.json`.
+**Клікнути:** нічого.
+**Дивитись:** JSON-відповідь та адресу в браузері.
+**Очікуваний результат:** `schemaVersion: 1`, три записи зі slug
+`story-8-frames-polygon`, `story-8-frames-polyline`,
+`story-8-frames-hibrid`; попередження TLS немає.
+
+### QA-3B. Локальний браузер читає R2 з CORS
+
+**Відкрити:** `http://127.0.0.1:3000/index.html?debug=none`.
+**Клікнути:** `+` у панелі Fluid Paint.
+**Дивитись:** вкладки й список Demo; Network у DevTools для
+`/fluid-demo/index.json`.
+**Очікуваний результат:** вкладки `Demo | File | Player | State`, три назви
+історій, статус `3 demos · Last update:` з часом; GET з CDN або резервного
+`r2.dev` має 200 і `Access-Control-Allow-Origin: http://127.0.0.1:3000`.
+
+### QA-3C. Polygon з R2
+
+**Відкрити:** `http://127.0.0.1:3000/index.html?debug=none`.
+**Клікнути:** `+`, вибрати `Story Rombs (polygon)`, натиснути `Run`.
+**Дивитись:** вкладка Player, summary, статус, progress і canvas.
+**Очікуваний результат:** Player активний; видно `story-8-frames-polygon`,
+`8 frames`, `46,861 drawable items`; статус `Painting story…`, progress
+зростає, на canvas з'являється фарба.
+
+### QA-3D. Polyline з R2
+
+**Відкрити:** `http://127.0.0.1:3000/index.html?debug=none`.
+**Клікнути:** `+`, вибрати `Story Rombs (polyline)`, натиснути `Run`.
+**Дивитись:** вкладка Player, summary, статус, progress і canvas.
+**Очікуваний результат:** Player активний; видно `story-8-frames-polyline`,
+`8 frames`, `46,861 drawable items`; статус `Painting story…`, progress
+зростає, на canvas з'являється фарба.
+
+### QA-3E. Hibrid з R2
+
+**Відкрити:** `http://127.0.0.1:3000/index.html?debug=none`.
+**Клікнути:** `+`, вибрати `Story Rombs (hybrid)`, натиснути `Run`.
+**Дивитись:** вкладка Player, summary, статус, progress і canvas.
+**Очікуваний результат:** Player активний; видно `story-8-frames-hibrid`,
+`8 frames`, `46,861 drawable items`; статус `Painting story…`, progress
+зростає, на canvas з'являється фарба.
+
+### QA-3F. Production читає три демо
+
+**Відкрити:** `https://fluid-paint.netlify.app/?debug=none`.
+**Клікнути:** `+` у панелі Fluid Paint.
+**Дивитись:** вкладки й список Demo; Network у DevTools для
+`/fluid-demo/index.json`.
+**Очікуваний результат:** `Demo | File | Player | State`, три назви,
+`3 demos · Last update:`; GET з CDN або резервного `r2.dev` має 200 і
+`Access-Control-Allow-Origin: https://fluid-paint.netlify.app`.
+
+### QA-3G. Помилка Refresh зберігає список
+
+**Відкрити:** `https://fluid-paint.netlify.app/?debug=none`.
+**Клікнути:** `+`, дочекатись трьох назв, у DevTools Network ввімкнути
+`Offline`, натиснути `Refresh index`, повернути `Online`.
+**Дивитись:** список, вибір і статус Demo.
+**Очікуваний результат:** три назви й вибір залишаються; статус починається
+`Could not update demos:`. Повторний `Refresh index` після повернення мережі
+показує `3 demos · Last update:`.
+
+### QA-3H. Заблокований CDN не ховає список
+
+**Відкрити:** `https://fluid-paint.netlify.app/?debug=none` у мережі, де
+`cdn.storytilecraft.cc` дає помилку сертифіката.
+**Клікнути:** `+` у панелі Fluid Paint.
+**Дивитись:** список Demo й Network у DevTools для `/fluid-demo/index.json`.
+**Очікуваний результат:** три назви й `3 demos · Last update:`; невдалий
+CDN-запит супроводжується GET `r2.dev/fluid-demo/index.json` зі статусом 200.
+Перша помилка CDN може залишитися в консолі браузера.
+
+### QA-3I. Заблокований CDN не зупиняє Run
+
+**Відкрити:** `https://fluid-paint.netlify.app/?debug=none` у тій самій мережі.
+**Клікнути:** `+`, вибрати `Story Rombs (hybrid)`, натиснути `Run`.
+**Дивитись:** вкладка Player, summary, progress і Network у DevTools.
+**Очікуваний результат:** видно `story-8-frames-hibrid`, `8 frames`,
+`46,861 drawable items`; статус `Painting story…`, progress зростає;
+GET `r2.dev/fluid-demo/story-8-frames-hibrid.json` має статус 200.
+
+### QA-3J. Пункти списку Demo читаються
+
+**Відкрити:** `http://127.0.0.1:3000/index.html?debug=none`.
+**Клікнути:** `+`, потім список `Choose a story`.
+**Дивитись:** відкритий список назв Demo.
+**Очікуваний результат:** усі три назви видно темним текстом на світлому
+фоні; вибраний пункт читається й у закритому полі.
+
+### QA-3K. Вкладки вміщуються на вузькому екрані
+
+**Відкрити:** `http://127.0.0.1:3000/index.html?debug=none` у viewport
+320 × 758 px.
+**Клікнути:** `+`.
+**Дивитись:** заголовок панелі Story tools і краї viewport.
+**Очікуваний результат:** `Demo | File | Player | State` видно повністю,
+кнопка `×` доступна; панель не виходить за 8 px від країв viewport.
 
 ## Фаза 2 — Demo UI і Player
 
@@ -113,6 +268,9 @@
 **Очікуваний результат:** `Rejected oversized index: Demo response exceeds the 131072 byte limit.`
 Перевірено автоматизованою браузерною пробою 2026-09-30.
 
-## Ще не реалізовано
+## Ще не закрито
 
-- Публічні файли, CORS та live перевірка CDN — фаза 3.
+- QA-3H–QA-3I у мережі власника без примусового блокування CDN.
+- Production деплой CSS та QA-3J–QA-3K на production.
+- Візуальне приймання власником QA-3C–QA-3E, включно з поведінкою canvas
+  протягом повного відтворення.

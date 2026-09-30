@@ -345,7 +345,7 @@ html, body {
   position: absolute;
   z-index: 1;
   top: 0;
-  width: min(320px, calc(100vw - 24px));
+  width: min(330px, calc(100vw - 24px));
   max-height: min(680px, calc(100dvh - 24px));
   overflow: hidden;
   color: white;
@@ -405,6 +405,7 @@ html, body {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0;
   flex: 1;
+  min-width: 0;
 }
 
 .panel-extension-tabs button,
@@ -465,6 +466,7 @@ html, body {
 .story-demo-heading strong { font-size: 14px; }
 .story-demo-select-label { display: block; margin: 14px 0 6px; }
 #story-demo-select { display: block; width: 100%; min-width: 0; color-scheme: dark; }
+#story-demo-select option { color: #111; background: #fff; }
 .story-demo-meta { margin: 10px 0; color: rgba(255, 255, 255, .72); line-height: 1.45; overflow-wrap: anywhere; }
 #story-demo-status { min-height: 36px; margin-bottom: 12px; overflow-wrap: anywhere; }
 
@@ -961,6 +963,8 @@ html, body {
   padding-block: 0;
 }
 #panel-extension .panel-extension-tabs button {
+  padding-inline: 4px;
+  white-space: nowrap;
   border-left-width: 0;
   border-radius: 0;
 }
@@ -1126,10 +1130,10 @@ html, body {
   #panel-extension {
     position: fixed;
     left: 8px !important;
-    right: 8px !important;
+    right: auto !important;
     top: auto;
     bottom: max(8px, env(safe-area-inset-bottom));
-    width: auto;
+    width: calc(100vw - 16px);
     max-height: min(72dvh, 620px);
     border-radius: 14px 14px 12px 12px;
     z-index: 40;
@@ -1138,7 +1142,12 @@ html, body {
   .panel-extension-page { max-height: calc(min(72dvh, 620px) - 58px); }
   #panel-extension button,
   #panel-extension select { min-height: 44px; }
+  #panel-extension .panel-extension-tabs button { padding-inline: 2px; }
   #story-thickness { min-height: 44px; }
+}
+
+@media (max-width: 360px) {
+  #panel-extension .panel-extension-tabs button { font-size: 13px; }
 }
 
 /* Debug facility toggles, pinned to two corners.
