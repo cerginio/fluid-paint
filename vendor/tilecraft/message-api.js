@@ -17,6 +17,10 @@ function createMessageApi({
     maxIncomingBytes = Number.POSITIVE_INFINITY,
     acceptStreamOpen = null,
     protocolVersion = null,
+    // Спільна сесія, відома обом сторонам заздалегідь (напр. `sync-session` з URL).
+    // Без неї кожна сторона генерує свою й «адоптує» чужу з hello — при
+    // одночасних hello вони розходяться, і фільтр сесії тихо глушить усі RPC.
+    sessionId = null,
     adoptSessionId = true,                // embedded can adopt host sessionId from hello
     reAdoptSessionOnHello = false,        // embedded peer may follow an authoritative parent restart
     helloRetries = 20,
@@ -44,6 +48,7 @@ function createMessageApi({
       maxIncomingBytes,
       acceptStreamOpen,
       protocolVersion,
+      sessionId,
       adoptSessionId,
       reAdoptSessionOnHello,
       helloRetries,
@@ -70,7 +75,7 @@ function createMessageApi({
     constructor(cfg) {
       Object.assign(this, cfg);
   
-      this.sessionId = uuid(); // may be adopted from hello if desired
+      this.sessionId = this.sessionId || uuid(); // задана явно, інакше адоптується з hello
       this.handlers = new Map();        // eventName -> Set(fn)
       this.rpcHandlers = new Map();     // type -> fn(payload, envelope, peer) => result
       this.pending = new Map();         // msgId -> {resolve,reject,timeoutId}
