@@ -4,7 +4,7 @@
 // layer rules and canvas-coordinate transform belong to the importing host, not
 // to the fluid simulation.  The adapter never reads engine.brush/simulator.
 
-const TILECRAFT_BRUSH_SIZE_CORRECTION_RATE = 0.5;
+const TILECRAFT_BRUSH_SIZE_CORRECTION_RATE = 1;
 // Widest-to-narrowest `s` a single immutable stroke may cover before the run
 // is split. 2x cuts the onset ramp -- where the over-width lives -- while
 // leaving ordinary pressure variation, and a 1->2 `s` step, in one stroke.

@@ -331,9 +331,9 @@ console.log('tilecraft stroke player: PASS (frame grouping with stable paint sta
     advanceTick() {},
     waitFrame: async () => {},
   });
-  assert.deepEqual(planCalls, [['begin', 2, 0.5], ['to', 3], ['end']],
+  assert.deepEqual(planCalls, [['begin', 2, 1], ['to', 3], ['end']],
     'playPlan combines the fixed brush-size correction with its runtime thickness multiplier');
-  assert.equal(TilecraftStrokePlayer.brushSizeCorrectionRate, 0.5,
+  assert.equal(TilecraftStrokePlayer.brushSizeCorrectionRate, 1,
     'story playback exposes its fixed brush-size correction rate');
   assert.equal(registry.pendingCount, 0);
   console.log('tilecraft plan navigation: PASS (frame ranges and no double paint)');
