@@ -121,6 +121,7 @@ Run `make test-fast` for the normal inner loop. It executes:
 | --- | --- |
 | `npm run lint:shaders` | WebGL shader precision and texture portability rules |
 | `npm run test:color` | RYB/RGB conversion, composition, cube corners, and CSS color formatting |
+| `npm run test:color-adapter` | Ізольований адаптер RGB-полотна, обидві палітри, HEX, alpha та валідація |
 | `npm run test:timing` | Stroke timing across frame rates, overload, resume, taps, and endpoints |
 | `npm run test:tilecraft` | Story stroke mapping, pacing, navigation, stacking, and cancellation |
 
@@ -134,6 +135,7 @@ the repository's browser lock prevents competing Chromium GPU runs.
 
 | npm command | Coverage |
 | --- | --- |
+| `npm run test:color-adapter:gpu` | Ізольована GPU-проба фази A: WebGL1/2, float/half-float, декодування й незмінність матеріалу; production Paint ще не мігровано |
 | `npm run test:live-gpu` | Live engine behavior in headless Chromium/WebGL |
 | `npm run test:tilecraft:gpu` | Accelerated story playback through the real GPU path |
 | `npm run test:story-ui` | Story import, controls, navigation, registry, and mobile layout |

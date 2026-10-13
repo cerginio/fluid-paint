@@ -66,6 +66,7 @@ const paths = {
     // gradients through the cube at module load (Phase 10). The bundle is
     // concatenated in this order, so this ordering is the load order.
     'app/ui/ryb.js',
+    'app/paint-color-adapter.js',
     'lib/iro.js',
     'app/ui/color.js',
     'app/ui/sliders.js',

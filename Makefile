@@ -58,10 +58,12 @@ lint:
 test-fast:
 	$(NPM) run lint:shaders
 	$(NPM) run test:color
+	$(NPM) run test:color-adapter
 	$(NPM) run test:timing
 	$(NPM) run test:tilecraft
 
 test-browser:
+	$(NPM) run test:color-adapter:gpu
 	$(NPM) run test:live-gpu
 	$(NPM) run test:tilecraft:gpu
 	$(NPM) run test:story-ui

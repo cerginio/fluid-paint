@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="uk"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>fluid-2 · Phase A · RGB GPU probe</title>
+<style>body{background:#17202b;color:#edf2f7;font:16px system-ui;margin:24px}button,select{font:inherit;padding:8px;margin:4px}canvas{image-rendering:pixelated;width:512px;max-width:100%;border:1px solid #667}pre{white-space:pre-wrap}.sample{display:inline-block;padding:12px;margin:4px;border:1px solid #667}</style>
+<h1>fluid-2 · Фаза A</h1>
+<p>Ізольований host. Production Paint не мігровано. RGB renderer постійний; RAF не виконує simulation steps.</p>
+<label>Палітра <select id="palette"><option value="natural">Natural</option><option value="digital">Digital</option></select></label>
+<button id="run">Запустити перевірку</button><strong id="status">Готово до запуску</strong>
+<p id="samples"></p><canvas id="canvas" width="128" height="96"></canvas><pre id="report"></pre>
+<script src="../debug/gpu-profiles.js"></script>
+<script src="../fluid-engine/gl/glsl3.js"></script><script src="../fluid-engine/gl/wrappedgl.js"></script>
+<script src="../utilities.js"></script><script src="../rectangle.js"></script><script src="../common.js"></script>
+<script src="../fluid-engine/brush.js"></script><script src="../fluid-engine/simulation.js"></script>
+<script src="../fluid-engine/renderer.js"></script><script src="../fluid-engine/index.js"></script>
+<script src="../app/ui/ryb.js"></script><script src="../app/paint-color-adapter.js"></script>
+<script src="paint-color-adapter-probe.js"></script></html>
