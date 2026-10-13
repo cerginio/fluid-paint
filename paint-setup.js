@@ -111,6 +111,9 @@ const MAX_PAINTING_WIDTH = 4096; //this is further constrained by the maximum te
 //brush parameters
 const MAX_BRISTLE_COUNT = 100;
 const MIN_BRISTLE_COUNT = 10;
+const INITIAL_BRISTLE_COUNT = 12;
+const INITIAL_FLUIDITY = 0.7;
+const INITIAL_BRUSH_SCALE = 12;
 const MIN_BRUSH_SCALE = 5;
 const MAX_BRUSH_SCALE = 75;
 // Host-controlled therapeutic modes may deliberately use a broader gesture

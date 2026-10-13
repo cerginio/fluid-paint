@@ -162,6 +162,8 @@ class Paint {
             maxBristleCount: MAX_BRISTLE_COUNT,
             blackPigment: this.blackPigment,
         });
+        this.engine.setSimulation({ fluidity: INITIAL_FLUIDITY });
+        this.engine.setBrush({ bristleCount: INITIAL_BRISTLE_COUNT });
 
         // The undo ring. Depth is this app's decision, not the engine's -- the
         // engine only knows how to fill a snapshot and reload one. It does
@@ -186,7 +188,7 @@ class Paint {
         this.brushInitialized = false; // whether we have a valid brush position
         this.brushX = 0;
         this.brushY = 0;
-        this.brushScale = 50;
+        this.brushScale = INITIAL_BRUSH_SCALE;
         /* Bristle footprint for manual painting. null is the round default --
          * the engine treats a missing brushShape and an explicit null the same
          * way, so a host that never touches this paints exactly as before. */
@@ -235,7 +237,8 @@ class Paint {
 
         this.bristleCountSlider = new Slider(
             document.getElementById('bristles-slider'),
-            1,
+            Math.sqrt((this.engine.bristleCount - MIN_BRISTLE_COUNT) /
+                (MAX_BRISTLE_COUNT - MIN_BRISTLE_COUNT)),
             0,
             1,
             (t) => {

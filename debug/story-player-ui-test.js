@@ -32,6 +32,19 @@ const server = http.createServer((request, response) => {
     page.on('pageerror', (error) => errors.push(error.message));
     await page.goto(`http://127.0.0.1:${server.address().port}/index.html?debug=none`);
     await page.waitForFunction(() => window.__painter && window.__painter.storyPlaybackController);
+    assert.deepEqual(await page.evaluate(() => {
+      const painter = window.__painter;
+      return {
+        fluidity: painter.engine.fluidity,
+        fluiditySlider: painter.fluiditySlider.getValue(),
+        bristles: painter.engine.bristleCount,
+        bristlesLabel: painter.bristleCountSlider.formatValue(painter.bristleCountSlider.getValue()),
+        size: painter.brushScale,
+        sizeSlider: painter.brushSizeSlider.getValue(),
+        barSizeSlider: painter.barSizeSlider.getValue(),
+      };
+    }), { fluidity: 0.7, fluiditySlider: 0.7, bristles: 12, bristlesLabel: '12',
+      size: 12, sizeSlider: 12, barSizeSlider: 12 }, 'startup defaults agree with the engine and UI');
     assert.equal(await page.evaluate(() => window.__painter.storyPlaybackController.speed), 1,
       'story playback defaults to 1x');
 
