@@ -1,12 +1,14 @@
 # Handoff: fluid-2
 
-Стан на 2026-10-13. Гілка під час фазування: `feat/brush_shapes`.
+Стан на 2026-10-14. Гілка під час фазування: `feat/brush_shapes`.
 План і defaults закомічені в `a0ea507`. Фаза A прийнята власником і
 закрита командою `handoff:next` 2026-10-13; її код і документи входять
 у closing commit цієї фази.
 Фаза A закомічена в `df381ba`. Фаза B прийнята власником і закрита
 командою `handoff:next` 2026-10-13; код і closure-документи входять
-у closing commit B. Фаза C не розпочата.
+у closing commit B (`721d990`). Фаза C прийнята власником через
+`handoff:next` і закрита 2026-10-14; код і closure-документи входять
+у closing commit C.
 Спека: [PATCH-PALETTE-AND-SHADER-BUNDLE-SPEC.md](../docs/PATCH-PALETTE-AND-SHADER-BUNDLE-SPEC.md).
 Тема локальна для цього репозиторію; зовнішній Tilecraft та vendored
 transport/model/bridge не змінювати.
@@ -16,8 +18,9 @@ transport/model/bridge не змінювати.
 brush size `12`. Ці зміни в `paint-setup.js` / `paint.js` не є виконанням
 фаз A–C; engine defaults інших хостів лишаються чинними.
 
-> **Далі:** фаза C — шейдери в bundle, source loader та dev watch за §4 і §5 P2 спеки.
-> B прийнята й закрита; C не починати без окремого дозволу. Deploy поза scope.
+> **Далі:** фази A–C завершено й прийнято. Нової фази не призначено;
+> чекати наступного завдання власника. Physical GPU/mobile coverage debt
+> збережено; deploy поза scope.
 
 ## Що зроблено і працює
 
@@ -26,10 +29,12 @@ brush size `12`. Ці зміни в `paint-setup.js` / `paint.js` не є вик
 | `docs/PATCH-PALETTE-AND-SHADER-BUNDLE-SPEC.md` | Контракт двох патчів, межі, сумісність і приймання. |
 | `paint.js`, `app/ui/color.js`, `app/ui/ryb.js` | B: `paletteMode`, точний RGB override, shared `_paintRgb()` для мазка й обох previews; screen/resize/export/Bake завжди RGB. |
 | `app/story-playback-controller.js`, `app/fluid-control-api.js`, `fluid-engine/tilecraft-stroke-player.js` | B: story/control HEX точні; story інжектує shared adapter. Standalone player лишається legacy-pigment за замовчуванням. |
-| `gulpfile.js`, `common.js`, `fluid-engine/gl/wrappedgl.js` | Чинна збірка копіює шейдери; runtime завантажує їх окремими XHR. |
+| `gulpfile.js`, `debug/shader-bundle-build.js` | C: registry з чинних manifests перед scripts; unminified GLSL, physical/logical collision та missing/empty build errors; serialized shader/manifest watch. |
+| `common.js`, `fluid-engine/gl/wrappedgl.js`, `paint.js`, `examples/minimal/minimal.js` | C: registry-first без fallback за присутнього реєстру; source HTTP/network/timeout/abort/HTML errors, once-only completion та видимі init errors. Engine I/O не додано. |
+| `debug/shader-bundle-test.js`, `debug/shader-bundle-gpu-test.js` | C unit/actual negative Gulp builds і production/dev/source браузерна проба; npm/Makefile/SDLC інтегровані. |
 | `AGENTS.md` | Тему зареєстровано з цим HANDOFF. |
 
-Таблицю оновлено за реалізацією та свіжим eval B; shader bundling лишається C.
+Таблицю оновлено за реалізацією C; власник прийняв C через `handoff:next`.
 На момент створення плану в дереві вже була зміна
 `.claude/skills/handoff/SKILL.md`; власник явно замовив включити її в коміт.
 Перед фазою звірити актуальний Git-стан; не відкидати чужі зміни.
@@ -113,6 +118,79 @@ brush size `12`. Ці зміни в `paint-setup.js` / `paint.js` не є вик
   `C:/Users/cergi/AppData/Local/Temp/fluid-2-B-MuagKi/`; 3 пари ×30 steps,
   frozen/active raw/export delta 0. Перед commit index порожній.
 
+## Фаза C — прийнята й закрита 2026-10-14
+
+- Build helper читає й виконує **наявні** engine/app manifests у Node VM;
+  третього списку немає. `dist/.build/shader-registry.js` генерується після
+  clean, перед scripts, і йде першим у bundle. Ключі фізичні, `shaderSources`
+  лишаються логічними. Тексти source й production registry побайтно рівні.
+- `FLUID_SHADER_SOURCES` присутній → лише registry; missing/blank/type error
+  → init error, 0 XHR fallback. Source loader перевіряє 2xx, blank/HTML,
+  network/abort/30s timeout, відкриття/відправлення; completion success/error
+  один раз, у тому числі empty files/trees. Paint показує role=alert,
+  minimal — status; за load error engine не створюється.
+- Guard: shader unit **25/25**, color **42/42**, adapter **6/6**, lint і build
+  PASS. Missing/empty/collision перевірено не лише helper: справжні `gulp build`
+  у Temp fixtures повернули ненульовий exit і не створили bundle.
+- Probe PASS: WebGL1 і WebGL2 production, shader routes **заблоковано**, кожен
+  має **0 shader requests**, material delta `1.3786293268203735` після мазка.
+  Screen PNG показує матеріал; resize preview/commit GL errors 0; Save As…
+  через реальний button завантажує PNG по 5173 bytes. Registry keys рівні
+  manifest, усі GLSL string contents точні (поточний набір 22, не hardcoded).
+- Source Paint/minimal: 22/19 запитів, обидва малюють; старий engine host
+  лишається pigment. Controlled registry/404/network/HTML200/minimal404
+  показують конкретний `splat.vert`, без pageerrors та без engine.
+- Реальний Gulp serve/watch на випадковому порту: shader comment потрапив у
+  bundle; доданий у тимчасовий app manifest `picker.vert` потрапив у registry
+  й bundle. Обидві source правки відновлено; restored bundle **точно рівний**
+  початковому dev bundle. Dev Paint теж малює із заблокованими routes, 0 XHR.
+- Повний npm-еквівалент актуального `make verify` + fluid-control PASS:
+  `C:/Users/cergi/AppData/Local/Temp/fluid-2-C-finish/commands.json` містить
+  **16 виконань, 15 різних команд, усі exit 0** (build двічі); поруч окремі
+  stdout/stderr. Make на цьому хості відсутній. Browser suites запускалися
+  послідовно під чинним browser lock; Node `v24.19.0`.
+- Фінальна C-проба: `C:/Users/cergi/AppData/Local/Temp/fluid-2-C-gQmano/result.json`,
+  `production-build.log`, `dev-watch.log`, `bundle-webgl{1,2}-{screen,resize,save}.png`,
+  `source-{paint,minimal}.png`, `error-{registry,http404,network,html200,minimal404}.png`,
+  `dev-bundle.png`. Точні URL й реально виконані кроки — QA-C1…C14.
+- Negative Gulp evidence: Temp `fluid-2-C-build-missing-G8z3Em`,
+  `fluid-2-C-build-empty-JrEJhS`, `fluid-2-C-build-collision-dsavOG`;
+  кожен має `stdout.log`, `stderr.log`, `result.json`. Evidence не в repo.
+- C server/dev закриті; **51086/50095 bind-back PASS**. Усі запущені eval
+  servers закривали власні runners; чужі процеси не зупиняли.
+  Додатковий фінальний bind-back усіх записаних C/A/B портів (включно з
+  попередніми C attempts), empty index, незмінний HEAD і `git diff --check`:
+  Temp finish `final-verification.json` — PASS.
+  Generated artifacts лишаються ignored у dist; QA evidence тільки Temp.
+- Physical GPU/mobile visual coverage debt A/B збережено. Ці цифри —
+  Chromium/SwiftShader, не фізичний GPU PASS. Palette redesign, vendored і
+  зовнішній Tilecraft не змінювались. На review 2026-10-13 commit/deploy/owner
+  acceptance ще не було; C прийнята 2026-10-14, deploy не виконано.
+  Abort/30s timeout події перевірено unit, не окремим browser fault injection.
+
+- Незалежний rerun батьківського агента перед review: shader lint, shader
+  unit 25/25, повна C browser/watch-проба й фінальний production build — PASS.
+  JSON/PNG: `C:/Users/cergi/AppData/Local/Temp/fluid-2-C-WscaUV/`.
+  WebGL1/2: 0 shader requests, resize GL errors 0, реальний Save PNG;
+  source/minimal та всі контрольовані UI errors PASS. Screen і saved PNG
+  переглянуто: ненульовий синій матеріал видно. Порти 49271/52872 та
+  попередні 50095/51086 перевірено bind-back; index порожній, HEAD `721d990`.
+
+### Closing journal C — 2026-10-14
+
+- Власник прийняв C через `handoff:next`. Свіжі lint, shader unit 25/25
+  і production build PASS. Повторна повна C browser/watch-проба PASS:
+  `C:/Users/cergi/AppData/Local/Temp/fluid-2-C-EeUP4P/result.json`.
+  WebGL1/2 draw/resize/Save: 0 shader requests, GL errors 0; source/errors,
+  shader/manifest watch і exact dev restore PASS; cleanup 63897/52845 PASS.
+- Перший closing probe `fluid-2-C-5GcOoL` мав timeout manifest bundle rebuild
+  після успішного registry rebuild; повтор без змін коду PASS. Причину
+  не встановлено, intermittent watch/probe failure збережено як debt.
+- Повний SDLC прогін вище історичний, зараз не повторювався. Physical
+  GPU/mobile та browser abort/timeout coverage debt збережено.
+- Окрему сторонню зміну `paint-setup.js` (brush size 12 → 32) не включати
+  в closing commit C. Сервер власника на 62865 не зупиняти.
+
 ## Головні виміряні факти
 
 - Попередній розбір 2026-10-13: `node debug/color-parity-test.js` — 42/42.
@@ -192,7 +270,7 @@ brush size `12`. Ці зміни в `paint-setup.js` / `paint.js` не є вик
    без simulation steps, а в активній симуляції збігаються два
    детерміновані прогони. Компроміс Natural-змішування описано.
 
-3. **Фаза C — шейдери в bundle, source loader та dev watch.**
+~~3. **Фаза C — шейдери в bundle, source loader та dev watch.**~~ — **ЗАКРИТО 2026-10-14**, прийнято власником.
 
    Патч P2 незалежний від P1 технічно; у цьому плані виконується після B.
    Контракт: production та dev bundle містить повний набір потрібних
@@ -215,13 +293,10 @@ brush size `12`. Ці зміни в `paint-setup.js` / `paint.js` не є вик
    WebGL1/WebGL2 screen/resize/save; source example, dev rebuild та
    контрольовані помилки. Наприкінці — обов'язкові checks із `docs/SDLC.md`.
 
-   Чернетка QA-C1:
-   **qa:open:** `http://localhost:3000/` після `npm run dev`, Network відкрито.
-   **qa:action:** очистити Network, перезавантажити сторінку й намалювати мазок.
-   **qa:inspect:** полотно, Console та Network з фільтром shader-файлів.
-   **qa:expected:** мазок видно, помилок немає, запитів `.frag` / `.vert` — 0.
-   Окремий автоматизований сценарій повинен блокувати shader URLs, а не
-   покладатися на кеш. URL source example перевірити на реальному source server.
+   Виконано QA-C1…C14: production WebGL1/2 з blocked shader routes, actual draw,
+   screen/resize/Save, source Paint/minimal, controlled errors, actual shader
+   та manifest dev rebuild, unit/negative build і повний SDLC — [QA.md](./QA.md).
+   Результати й evidence вище. **C прийнята; наступної фази не призначено.**
 
    Закриття: усі §5 P2 виконано, повна регресія перевірена; незалежні P1/P2
    зміни мають окрему історію review/комітів. Deploy не виконувати.
@@ -256,7 +331,7 @@ Owner-питань для входу в B немає. Рішення за уто
 На фазуванні жодні eval, сервери, runtime-правки або commit не запускалися.
 
 `app/QA.md` створено у A: QA-A1…A8 мають перевірені URL/команди та результати.
-QA-B1…B9 виконано у B; чернетка C лишається планом, не виконаним сценарієм.
+QA-B1…B9 виконано у B; QA-C1…C14 виконано у C, C прийнята 2026-10-14.
 Нові секції наступних фаз вставляти згори; сервери, запущені агентом,
 зупиняти перед review. Рядок автодеплою не додавати: deploy поза scope.
 

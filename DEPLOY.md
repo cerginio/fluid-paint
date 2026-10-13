@@ -49,7 +49,18 @@ and testing.
 - Build command: `npm run build`
 - Publish directory: `dist`
 - Node version: `24`
-- Gulp builds this static site and copies the shader asset trees into `dist`.
+- Gulp derives the shader registry from the engine/app manifests before
+  scripts, writes ignored `dist/.build/shader-registry.js`, and prepends it to
+  `dist/bundle.js`. GLSL text is preserved, not minified. Missing/blank files
+  and physical/logical key collisions stop the build with the source path.
+- Shader trees are also copied into `dist` for compatibility, but bundled
+  Paint uses the registry and makes **zero** `.frag`/`.vert` requests. A broken
+  runtime registry produces an initialization alert, never an XHR fallback.
+- Before publishing, run `npm run test:shader-bundle` and
+  `npm run test:shader-bundle:gpu` (included in `make verify`). The browser
+  runner builds production, blocks shader routes, exercises WebGL1/2 draw,
+  resize and PNG save, source examples, errors and real dev watch, then stops
+  its servers and verifies ports free. Evidence is in the printed Temp path.
 
 ## CI / non-interactive deploy
 

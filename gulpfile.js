@@ -3,6 +3,8 @@ const { src, dest, series, parallel, watch } = require('gulp');
 const fs = require('fs/promises');
 const http = require('http');
 const path = require('path');
+const { writeShaderRegistry } = require('./debug/shader-bundle-build');
+const registryFile = 'dist/.build/shader-registry.js';
 
 const plumber = require('gulp-plumber');
 const concat = require('gulp-concat');
@@ -88,8 +90,8 @@ const paths = {
 
   ],
   // Two shader trees since Phase 4. Each is copied to the same relative place
-  // in dist as it sits in the source, because the base paths in common.js are
-  // literal fetch prefixes -- a flattened dist would 404 every request.
+  // in dist as it sits in the source for compatibility. Bundled Paint reads
+  // the generated registry instead; common.js fetch prefixes remain source-only.
   engineShaders: 'fluid-engine/shaders/**/*.{glsl,frag,vert}',
   appShaders: 'app/shaders/**/*.{glsl,frag,vert}',
   html: 'index.html',
@@ -102,8 +104,12 @@ async function clean() {
 }
 
 // ---------- SCRIPTS ----------
+async function shaderRegistry() {
+  await writeShaderRegistry(__dirname, path.resolve(__dirname, registryFile));
+}
+
 function scripts() {
-  return src(paths.js, { allowEmpty: true })
+  return src([registryFile, ...paths.js], { allowEmpty: false })
     .pipe(plumber())
     .pipe(concat('bundle.js', { newLine: ';\n' }))
     .pipe(terser({
@@ -199,8 +205,8 @@ function staticFiles() {
 // bundle. So copying the example into dist/ would ship a page that 404s four
 // times and renders nothing, which is worse than not shipping it.
 //
-// The example is run from source (`npm run dev`, then
-// /examples/minimal/index.html) and is verified there by debug/phase9-probe.js,
+// The example is run from a repo-root source server (NOT npm run dev, which
+// serves dist), at /examples/minimal/index.html, and verified by phase9-probe.js,
 // which serves the repo root rather than dist. If a bundled example is ever
 // wanted, it needs its own concat target -- not a copy of this directory.
 
@@ -235,25 +241,28 @@ function startServer(done) {
     } catch {
       response.writeHead(404).end('Not found');
     }
-  }).listen(3000, () => {
-    console.log('Development server running at http://localhost:3000');
+  }).listen(Number(process.env.PORT || 3000), '127.0.0.1', function () {
+    console.log(`Development server running at http://127.0.0.1:${this.address().port}`);
     done();
   });
 
   watch(paths.html, html);
   watch(paths.css, styles);
-  watch(paths.engineShaders, engineShaders);
-  watch(paths.appShaders, appShaders);
-  watch(paths.js, scripts);
+  // One watcher serializes manifest/shader/JS rebuilds; no competing writes
+  // of registry and bundle. Manifests already belong to paths.js.
+  watch([...paths.js, paths.engineShaders, paths.appShaders],
+    series(shaderRegistry, parallel(scripts, shaders)));
 }
 
 const build = series(
   clean,
+  shaderRegistry,
   parallel(html, styles, shaders, scripts, staticFiles)
 );
 
 exports.clean = clean;
-exports.scripts = scripts;
+exports.scripts = series(shaderRegistry, scripts);
+exports.shaderRegistry = shaderRegistry;
 exports.styles = styles;
 exports.shaders = shaders;
 exports.html = html;

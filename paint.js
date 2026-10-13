@@ -38,6 +38,15 @@ class Paint {
         // shaderTrees() merges the engine's and app chrome's manifests; see common.js.
         loadShaderTrees(shaderTrees(), (shaderSources) => {
             this._start(shaderSources);
+        }, (error) => {
+            this.initializationError = error;
+            console.error(error);
+            const status = document.createElement('div');
+            status.id = 'shader-load-error';
+            status.setAttribute('role', 'alert');
+            status.textContent = error.message;
+            status.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#400;color:white;padding:16px';
+            document.body.appendChild(status);
         });
     }
 

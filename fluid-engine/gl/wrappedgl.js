@@ -860,22 +860,50 @@ class WrappedGL {
    * shaderSources['shaders/...'] lookup in the app. The key is the shader's
    * logical name; where it lives on disk is the loader's business.
    */
-  static loadTextFiles(filenames, onLoaded, basePath) {
+  static loadTextFiles(filenames, onLoaded, basePath, onError = (error) => { throw error; }) {
     const prefix = basePath || '';
     let loadedSoFar = 0;
-    const results = {};
+    let finished = false;
+    const results = Object.create(null);
+    const fail = (error) => {
+      if (finished) return;
+      finished = true;
+      onError(error);
+    };
+    if (filenames.length === 0) { finished = true; onLoaded(results); return; }
     for (let i = 0; i < filenames.length; ++i) {
+      if (finished) break;
       const name = filenames[i];
+      const url = prefix + name;
       const request = new XMLHttpRequest();
-      request.onreadystatechange = function () {
-        if (request.readyState === 4) {
-          results[name] = request.responseText;
-          loadedSoFar += 1;
-          if (loadedSoFar === filenames.length) onLoaded(results);
-        }
+      let settled = false;
+      const reject = (reason) => {
+        if (settled || finished) return;
+        settled = true;
+        fail(new Error(`Shader load failed: ${url}: ${reason}`));
       };
-      request.open('GET', prefix + name, true);
-      request.send();
+      request.onload = function () {
+        if (settled || finished) return;
+        if (request.status < 200 || request.status >= 300) { reject(`HTTP ${request.status}`); return; }
+        if (!request.responseText.trim()) { reject('empty response'); return; }
+        // A misconfigured static server may return an HTML fallback with 200.
+        if (/^\s*(?:<!doctype\s+html|<html\b)/i.test(request.responseText) ||
+            /text\/html/i.test(request.getResponseHeader('Content-Type') || '')) {
+          reject('HTML response, expected shader text'); return;
+        }
+        settled = true;
+        results[name] = request.responseText;
+        loadedSoFar += 1;
+        if (loadedSoFar === filenames.length) { finished = true; onLoaded(results); }
+      };
+      request.onerror = () => reject('network error');
+      request.onabort = () => reject('request aborted');
+      request.ontimeout = () => reject('request timed out');
+      try {
+        request.open('GET', url, true);
+        request.timeout = 30000;
+        request.send();
+      } catch (error) { reject(error.message); }
     }
   }
 
@@ -896,7 +924,7 @@ class WrappedGL {
 
       const program = this.createProgram(vSources.join('\n'), fSources.join('\n'), attributeLocations);
       successCallback(program);
-    });
+    }, '', failureCallback);
   }
 
   createProgramsFromFiles(programParameters, successCallback, failureCallback) {

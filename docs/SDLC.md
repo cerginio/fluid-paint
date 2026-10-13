@@ -64,6 +64,13 @@ This creates a development build in `dist/`, serves it at
 Stop it with Ctrl+C. The server binds to localhost and is intended for
 development, not production hosting.
 
+If port 3000 is unavailable, use `PORT=62865 npm run dev` (Git Bash).
+The server binds only `127.0.0.1` and prints its actual port; `PORT=0` selects
+an ephemeral port for probes. Do not stop someone else's server.
+Dev watches both shader trees and the existing manifests (`common.js` and
+`fluid-engine/index.js`, already in the JavaScript source list); a single
+serialized watcher regenerates the registry before rebuilding scripts.
+
 Important source areas are:
 
 - `index.html` and `app/`: application shell, UI, layout, and UI shaders.
@@ -93,11 +100,40 @@ The production build always cleans and recreates `dist/`. Gulp:
 
 - concatenates JavaScript in declared dependency order into minified
   `dist/bundle.js`;
+- evaluates the existing engine/app manifests with the build-only helper
+  `debug/shader-bundle-build.js`, writes `dist/.build/shader-registry.js`, and
+  prepends that generated registry before all application scripts. There is
+  no separately maintained shader inventory. Physical keys retain both trees
+  (`fluid-engine/shaders/...`, `app/shaders/...`), while the loader preserves
+  engine logical keys (`shaders/...`). GLSL strings retain their exact text,
+  including newlines, directives and comments; GLSL is not minified;
 - processes `app/layout.css` with Autoprefixer and cssnano;
 - minifies `index.html`, replaces local script tags with `bundle.js`, and copies
   it to `dist/`;
 - preserves the `app/shaders/` and `fluid-engine/shaders/` directory layouts;
 - copies `LICENSE`.
+
+Registry generation runs after clean and before scripts. Missing/unreadable,
+blank shaders or duplicate physical/logical keys fail the build with the path.
+The generated file is ignored with `dist/`; never hand-edit or commit it.
+Both production and dev bundles use `globalThis.FLUID_SHADER_SOURCES` first.
+A present but incomplete/invalid registry is an initialization error with no
+XHR fallback. The copied shader trees remain compatibility assets, not assets
+requested by the bundled application.
+
+Source mode (serve the repository root, not `dist/`) and `examples/minimal/`
+still use XHR. `WrappedGL.loadTextFiles(files, onLoaded, basePath, onError)` and
+`loadShaderTrees(trees, onLoaded, onError)` complete exactly once, also for an
+empty list. The error callback receives an Error with the physical URL for
+HTTP/non-2xx, network, abort, timeout (30 seconds), blank or HTML responses.
+If omitted, the error callback throws rather than silently hanging. Paint
+shows a `#shader-load-error` alert and minimal shows its `#status` error;
+neither constructs an engine from failed sources. Engine constructors still
+receive ready `shaderSources` and have no registry/I/O dependency.
+
+Run source examples with `npx --no-install http-server . -p 62865 -a 127.0.0.1 -c-1`;
+open `http://127.0.0.1:62865/examples/minimal/index.html`. `npm run dev` serves
+the bundled `dist/` only, not that source-only example.
 
 `dist/`, `node_modules/`, and local `.netlify/` state are generated and ignored
 by Git. Do not hand-edit or commit them. Use `make clean` to remove `dist/`.
@@ -123,6 +159,7 @@ Run `make test-fast` for the normal inner loop. It executes:
 | `npm run test:color` | RYB/RGB conversion, composition, cube corners, and CSS color formatting |
 | `npm run test:color-adapter` | Адаптер RGB-полотна, обидві палітри, HEX, alpha, валідація та production інтеграція P1 |
 | `npm run test:timing` | Stroke timing across frame rates, overload, resume, taps, and endpoints |
+| `npm run test:shader-bundle` | Manifest equality, exact text, missing/empty/collision build failures, registry-first/no fallback, empty-list and exactly-once completion, HTTP/network/abort/timeout/HTML errors; actual Gulp negative builds in Temp fixtures |
 | `npm run test:tilecraft` | Story stroke mapping, pacing, navigation, stacking, and cancellation |
 
 These tests do not require a browser and return a non-zero exit status on a
@@ -138,6 +175,7 @@ the repository's browser lock prevents competing Chromium GPU runs.
 | `npm run test:color-adapter:gpu` | Ізольована GPU-проба фази A: WebGL1/2, float/half-float, декодування й незмінність матеріалу; production Paint перевіряється окремою P1-пробою |
 | `npm run test:paint-palette:gpu` | Реальний Paint P1: fixed RGB render, HEX/API endpoints, palette switch invariance, history/resize/background/export/Bake |
 | `npm run test:live-gpu` | Live engine behavior in headless Chromium/WebGL |
+| `npm run test:shader-bundle:gpu` | Builds production first; blocked shader routes with zero requests and actual draw; WebGL1/2 screen/resize/PNG save, source Paint/minimal, controlled UI errors, actual dev shader/manifest rebuild, owned-server bind-back cleanup. SwiftShader, not physical GPU |
 | `npm run test:tilecraft:gpu` | Accelerated story playback through the real GPU path |
 | `npm run test:story-ui` | Story import, controls, navigation, registry, and mobile layout |
 | `npm run test:bake` | GPU-backed bake behavior |
@@ -270,8 +308,9 @@ reliable than restoring the previously published immutable deploy.
   browser test is running, inspect the lock details before removing a genuinely
   stale lock; see `debug/browser-lock.js`.
 - **The built page is blank or shaders 404:** rebuild from a clean tree and
-  verify the mirrored shader directories and `gulpfile.js` source lists.
-- **Port 3000 is occupied:** stop the conflicting process; the Gulp development
-  server currently has a fixed port.
+  inspect the path in the registry/source error. In bundle mode shader XHRs
+  must be zero; copied shader files cannot repair an incomplete registry.
+- **Port 3000 is occupied or denied:** use `PORT=62865 npm run dev` and the
+  printed URL; leave foreign processes alone.
 - **Netlify cannot find the site:** run `netlify link`, or pass
   `NETLIFY_FLAGS="--site=<site-id>"`.

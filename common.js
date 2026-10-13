@@ -140,15 +140,43 @@ function shaderTrees() {
   ];
 }
 
-function loadShaderTrees(trees, onLoaded) {
-  const merged = {};
+function loadShaderTrees(trees, onLoaded, onError = (error) => { throw error; }) {
+  const merged = Object.create(null);
+  const logical = new Set();
+  let finished = false;
+  const fail = (error) => {
+    if (finished) return;
+    finished = true;
+    onError(error);
+  };
+  const registryPresent = Object.prototype.hasOwnProperty.call(globalThis, 'FLUID_SHADER_SOURCES');
+  const registry = globalThis.FLUID_SHADER_SOURCES;
+  // Validate the complete inventory before any request/callback, including
+  // collisions in source mode. A present but broken registry NEVER falls back.
+  for (const tree of trees) {
+    for (const name of tree.files) {
+      const key = tree.basePath + name;
+      if (logical.has(name)) { fail(new Error(`Shader key collision: ${key} (logical ${name})`)); return; }
+      logical.add(name);
+      if (registryPresent) {
+        if (!registry || !Object.prototype.hasOwnProperty.call(registry, key) ||
+            typeof registry[key] !== 'string' || !registry[key].trim()) {
+          fail(new Error(`Missing/empty bundled shader: ${key}`)); return;
+        }
+        merged[name] = registry[key];
+      }
+    }
+  }
+  if (registryPresent || trees.length === 0) { finished = true; onLoaded(merged); return; }
   let remaining = trees.length;
   for (const tree of trees) {
+    if (finished) break;
     WrappedGL.loadTextFiles(tree.files, (sources) => {
+      if (finished) return;
       Object.assign(merged, sources);
       remaining -= 1;
-      if (remaining === 0) onLoaded(merged);
-    }, tree.basePath);
+      if (remaining === 0) { finished = true; onLoaded(merged); }
+    }, tree.basePath, fail);
   }
 }
 

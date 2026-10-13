@@ -60,9 +60,11 @@ test-fast:
 	$(NPM) run test:color
 	$(NPM) run test:color-adapter
 	$(NPM) run test:timing
+	$(NPM) run test:shader-bundle
 	$(NPM) run test:tilecraft
 
 test-browser:
+	$(NPM) run test:shader-bundle:gpu
 	$(NPM) run test:color-adapter:gpu
 	$(NPM) run test:paint-palette:gpu
 	$(NPM) run test:live-gpu

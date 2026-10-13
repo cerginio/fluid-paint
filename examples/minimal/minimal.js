@@ -515,5 +515,8 @@ document.addEventListener('DOMContentLoaded', () => {
       setStatus(err.message, true);
       console.error(err);
     }
-  }, ENGINE_SHADER_BASE);
+  }, ENGINE_SHADER_BASE, (error) => {
+    setStatus(error.message, true);
+    console.error(error);
+  });
 });

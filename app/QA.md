@@ -20,6 +20,220 @@ Stdout: `C:/Users/cergi/AppData/Local/Temp/fluid-2-A-final-gpu.log`.
 власний temp-каталог. Після eval сервер зупинено, порт звільнено.
 На цій машині 3000 повернув EACCES, 8087 зайнятий; чужий сервер не чіпали.
 
+## Фаза C — прийнята й закрита (2026-10-14)
+
+**Відтворення:** `npm run test:shader-bundle:gpu` у корені репозиторію.
+Runner спочатку робить production build, запускає source server на випадковому
+вільному порту, Chromium/SwiftShader, виконує всі browser сценарії C1…C12,
+потім закриває browser і **лише власні** servers та перевіряє bind-back портів.
+Зовнішній інтернет не потрібен. Dev-проба самостійно запускає справжній Gulp
+serve з `PORT=0`; правки shader/manifest тимчасові, відновлюються у finally.
+Не запускати цей watcher/probe одночасно з редагуванням тих самих файлів.
+
+Для ручного source review — команда source server у преамбулі, замінити
+записаний порт 51086 на власний 62865. Для bundle review — `PORT=62865 npm run dev`,
+відкрити `http://127.0.0.1:62865/index.html?webgl=1&debug=none&diag=0&seed=41`
+і повторити з `webgl=2`. `npm run dev` **не** роздає source examples.
+Записані нижче URL реально відкриті runner, але серверів після eval не лишено.
+
+Фінальні докази: `C:/Users/cergi/AppData/Local/Temp/fluid-2-C-gQmano/`:
+`result.json`, `production-build.log`, `dev-watch.log`, справжні PNG, названі
+нижче. У `result.json`: pass=true, source port 51086 і dev port 50095,
+обидва cleanup.bindBack=true. Матеріал внесено через чинний engine Stroke API,
+resize — через чинні Paint methods, Save — справжні UI clicks. Це не ручний
+pointer або physical-GPU PASS; screenshots доповнюють числові checks.
+GLSL source й production registry тексти рівні, keys рівні live manifests;
+кількість 22 є спостереженням, не константою тесту.
+
+CLI stdout/stderr/exit codes повного SDLC прогону:
+`C:/Users/cergi/AppData/Local/Temp/fluid-2-C-finish/commands.json` і сусідні logs.
+`final-verification.json` поруч: bind-back записаних C/A/B портів, збереження
+HEAD, empty index, `git diff --check`, відсутність тимчасових watch правок.
+16 виконань (15 різних команд, build двічі), усі exit 0. Make відсутній;
+виконано npm-еквівалент актуального `make verify` плюс fluid-control.
+
+Незалежне підтвердження батьківського агента: lint, unit 25/25,
+`test:shader-bundle:gpu` та фінальний production build PASS.
+Нові JSON/PNG: `C:/Users/cergi/AppData/Local/Temp/fluid-2-C-WscaUV/`;
+screen і saved PNG переглянуто, синій матеріал видно. Порти 49271/52872
+і попередні 50095/51086 вільні. Повний SDLC commands manifest та наявність
+окремих stdout/stderr перевірено: 16 виконань / 15 команд, усі exit 0.
+
+### QA-C1. Bundle малює без жодного shader request
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:51086/dist/index.html?webgl=1&debug=none&diag=0&seed=41`,
+потім та сама адреса з `webgl=2`.
+**qa:action:** runner блокує всі `.frag`/`.vert` routes до навігації, вносить
+мазок через `engine.beginStroke`/`endStroke`, викликає Paint update.
+**qa:inspect:** `bundle-webgl1-screen.png`, `bundle-webgl2-screen.png`,
+`result.json` → `bundle-WebGL1/2`.
+**qa:expected:** синій матеріал на білому полотні; shaderRequests=0, errors=[],
+фактичні webglVersion=1/2, materialDelta=1.3786293268203735 (>0).
+manifestEqual=true і shaderTextExact=true. Покрито C GPU runner; не кешем.
+
+### QA-C2. Resize preview й commit працюють в обох WebGL
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:51086/dist/index.html?webgl=1&debug=none&diag=0&seed=41`
+та `http://127.0.0.1:51086/dist/index.html?webgl=2&debug=none&diag=0&seed=41`.
+**qa:action:** runner створює `newPaintingRectangle`, збільшує 180×130 до
+196×142, задає TOP_RIGHT/RESIZING, виконує update й `_commitResize()`;
+потім змінює viewport із 960×720 на 1000×740.
+**qa:inspect:** `bundle-webgl1-resize.png`, `bundle-webgl2-resize.png`,
+`result.json` → `resized`.
+**qa:expected:** матеріал видно після resize; width=196, height=142,
+glErrorPreview=0, glErrorCommitted=0; shader requests лишаються 0.
+
+### QA-C3. Save As… завантажує справжній PNG
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:51086/dist/index.html?webgl=1&debug=none&diag=0&seed=41`
+та `http://127.0.0.1:51086/dist/index.html?webgl=2&debug=none&diag=0&seed=41`, після QA-C2.
+**qa:action:** натиснути `#panel-grip`, потім `#save-button`; runner ловить
+browser download і зберігає файл, а не імітує blob.
+**qa:inspect:** `bundle-webgl1-save.png`, `bundle-webgl2-save.png`, `pngBytes` у JSON.
+**qa:expected:** обидва файли — PNG по 5173 bytes, містять намальований
+матеріал; console errors=[], shader requests=0. Покрито C GPU runner.
+
+### QA-C4. Source Paint використовує файловий loader
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:51086/index.html?debug=none&diag=0&seed=41`.
+**qa:action:** runner вносить мазок через production Stroke API.
+**qa:inspect:** `source-paint.png`, `result.json` → `source-paint`, Network.
+**qa:expected:** матеріал видно, materialDelta=1.3415980339050293, errors=[],
+22 файлові shader requests (поточний manifest), без реєстру bundle.
+
+### QA-C5. Minimal source host лишається сумісним
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:51086/examples/minimal/index.html?debug=none&diag=0&seed=41`.
+**qa:action:** runner вносить `space:'pigment'` через engine Stroke API.
+**qa:inspect:** `source-minimal.png`, `result.json` → `source-minimal`, `#status`.
+**qa:expected:** engine малює, materialDelta>0, errors=[], 19 shader requests
+(поточний engine manifest). App color policy або registry не потрібні.
+
+### QA-C6. Неповний registry — явний init error без fallback
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:51086/dist/index.html?debug=none&diag=0`.
+**qa:action:** runner init-script перехоплює registry assignment і видаляє
+`fluid-engine/shaders/splat.vert` до loadShaderTrees.
+**qa:inspect:** `#shader-load-error`, `error-registry.png`, `result.json` → `error-registry`.
+**qa:expected:** `Missing/empty bundled shader: fluid-engine/shaders/splat.vert`,
+shaderRequests=0, pageErrors=[]; engine не створено. Не прихований XHR repair.
+
+### QA-C7. Source HTTP 404 не стає GLSL
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:51086/index.html?debug=none&diag=0`.
+**qa:action:** runner повертає HTTP 404 HTML для `fluid-engine/shaders/splat.vert`.
+**qa:inspect:** `#shader-load-error`, `error-http404.png`, `result.json` → `error-http404`.
+**qa:expected:** `Shader load failed: fluid-engine/shaders/splat.vert: HTTP 404`;
+engine не створено, pageErrors=[], жодної компіляції HTML.
+
+### QA-C8. Source network error доставляється до UI
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:51086/index.html?debug=none&diag=0`.
+**qa:action:** runner route.abort('failed') для `fluid-engine/shaders/splat.vert`.
+**qa:inspect:** `#shader-load-error`, `error-network.png`, JSON → `error-network`.
+**qa:expected:** `Shader load failed: fluid-engine/shaders/splat.vert: network error`;
+engine не створено, pageErrors=[], ініціалізація не зависає.
+
+### QA-C9. HTML fallback з HTTP 200 теж відхиляється
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:51086/index.html?debug=none&diag=0`.
+**qa:action:** runner повертає status 200/content-type text/html для `splat.vert`.
+**qa:inspect:** `error-html200.png`, `#shader-load-error`, JSON → `error-html200`.
+**qa:expected:** `Shader load failed: fluid-engine/shaders/splat.vert: HTML response, expected shader text`;
+engine не створено, pageErrors=[].
+
+### QA-C10. Minimal показує помилку файлового loader
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:51086/examples/minimal/index.html?debug=none&diag=0`.
+**qa:action:** runner повертає HTTP 404 для engine `splat.vert`.
+**qa:inspect:** `#status`, `error-minimal404.png`, JSON → `error-minimal404`.
+**qa:expected:** `Shader load failed: ../../fluid-engine/shaders/splat.vert: HTTP 404`;
+minimal host/engine не створено, pageErrors=[].
+
+### QA-C11. Справжній dev watch перебудовує shader text
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:50095/index.html?debug=none&diag=0&seed=41`
+(цей dev stand запускає runner через gulp serve, NODE_ENV=development, PORT=0).
+**qa:action:** runner тимчасово додає у `app/shaders/shadow.frag` comment
+marker, чекає його в bundle, відновлює файл і чекає точної рівності bundle
+початковому; після всіх watch checks відкриває сторінку й малює.
+**qa:inspect:** `dev-watch.log`, JSON → `shaderWatch`/`dev`, `dev-bundle.png`.
+**qa:expected:** bundleContainsMarker=true; dev materialDelta>0,
+shaderRequests=0. Restored bundle exact=true, жодної постійної shader правки.
+
+### QA-C12. Зміна manifest регенерує registry і bundle
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:50095/index.html?debug=none&diag=0&seed=41`.
+**qa:action:** runner тимчасово додає наявний `shaders/picker.vert` у
+APP_SHADERS в `common.js`, чекає `app/shaders/picker.vert` у generated registry
+та bundle, відновлює common.js і чекає точної рівності початковому dev bundle.
+**qa:inspect:** `dev-watch.log`, JSON → `manifestWatch` і `devRestoreBundleExact`.
+**qa:expected:** bundleContainsKey=true, addedPhysicalKey=`app/shaders/picker.vert`,
+devRestoreBundleExact=true; manifest/source відновлено, порти 50095/51086 вільні.
+
+### QA-C13. Guard: build negatives та once-only loader
+
+**qa:mode:** cli
+**qa:open:** `D:/work/fluid-paint/fluid-paint`.
+**qa:action:** `npm run test:shader-bundle`.
+**qa:inspect:** Temp finish `05-test-shader-bundle.stdout.log`/`.stderr.log`;
+actual Gulp fixtures: `C:/Users/cergi/AppData/Local/Temp/fluid-2-C-build-missing-G8z3Em/`,
+`fluid-2-C-build-empty-JrEJhS/`, `fluid-2-C-build-collision-dsavOG/` у тому самому
+Temp корені — кожен має stdout.log, stderr.log, result.json.
+**qa:expected:** 25/25 PASS; actual missing/empty/collision gulp build exit
+nonzero, точний шлях у error, bundle не створено. Unit підтверджують physical
+і logical collision, exact source text, registry completeness/no fallback,
+empty lists, повторні/late callbacks, 404/500/status0, blank/HTML, network,
+abort/timeout. Browser 30-second timeout/abort окремо не відтворювали;
+ці гілки покриті unit, не позначати browser PASS.
+
+### QA-C14. Повний SDLC regression gate
+
+**qa:mode:** cli
+**qa:open:** корінь репозиторію.
+**qa:action:** послідовно виконати `npm run lint:shaders`, `npm run test:color`,
+`npm run test:color-adapter`, `npm run test:timing`, `npm run test:shader-bundle`,
+`npm run test:tilecraft`, `npm run build`, `npm run test:shader-bundle:gpu`,
+`npm run test:color-adapter:gpu`, `npm run test:paint-palette:gpu`,
+`npm run test:live-gpu`, `npm run test:tilecraft:gpu`, `npm run test:story-ui`,
+`npm run test:bake`, `npm run test:fluid-control`, `npm run build`.
+**qa:inspect:** Temp finish `commands.json`, окремі stdout/stderr кожної команди.
+**qa:expected:** 16 exit 0; color 42/42, adapter 6/6, shader 25/25; чинні
+GPU/Bake/story/control regression PASS, фінальний dist — production build.
+Не підсумовувати незалежні assertion scripts у вигаданий total tests.
+Physical GPU/mobile visual acceptance з A/B лишаються coverage debt;
+C прийнята власником через `handoff:next` 2026-10-14; deploy не виконано.
+
+### Closing journal C — 2026-10-14
+
+- Свіжі lint, shader unit 25/25, production build PASS. C browser/watch
+  rerun PASS: `C:/Users/cergi/AppData/Local/Temp/fluid-2-C-EeUP4P/result.json`;
+  WebGL1/2: 0 shader requests, resize GL errors 0, Save PNG 5173 bytes.
+  Source/errors, shader/manifest watch, exact dev restore PASS. Cleanup
+  63897/52845 bind-back PASS. Повний SDLC результат вище історичний.
+- Перший closing attempt `fluid-2-C-5GcOoL` — timeout manifest bundle rebuild
+  після registry rebuild; повтор без кодування PASS. Причину не встановлено;
+  intermittent watch/probe failure лишається debt, не прихований PASS.
+- Physical GPU/mobile та browser abort/timeout coverage debt збережено.
+- Якщо сервер роздає корінь repo (команда у преамбулі), bundle review URL:
+  `http://127.0.0.1:62865/dist/index.html?webgl=2&debug=none&diag=0&seed=41`;
+  повторити з webgl=1. Для `npm run dev` dist уже є коренем, тому `/index.html`.
+  Network після очищення та reload: bundle.js, без окремих source JS
+  і без .frag/.vert requests. На сервері власника обидва HTML та bundle
+  перевірено HTTP; root /index.html був source, /dist/index.html — bundle.
+
 ## Фаза B — прийнята й закрита 2026-10-13
 
 **Відтворення:** у корені `npm run test:paint-palette:gpu`. Runner сам запускає

@@ -24,6 +24,8 @@
     "clean": "gulp clean",
     "lint:shaders": "node debug/lint-shaders.js",
     "test:color": "node debug/color-parity-test.js",
+    "test:shader-bundle": "node --test debug/shader-bundle-test.js",
+    "test:shader-bundle:gpu": "node debug/shader-bundle-gpu-test.js",
     "test:color-adapter": "node --test debug/paint-color-adapter-test.js",
     "test:color-adapter:gpu": "node debug/paint-color-adapter-gpu-test.js",
     "test:paint-palette:gpu": "node debug/paint-palette-gpu-test.js",

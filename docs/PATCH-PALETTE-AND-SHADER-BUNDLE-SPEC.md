@@ -1,8 +1,11 @@
 # PATCH: незалежна палітра Natural / Digital та шейдери в bundle
 
 Дата: 2026-10-13. Статус: A і B прийняті й закриті через `handoff:next`; eval B PASS: адаптер, реальний
-Paint integration P1 та GPU-проби реалізовано; shader bundling C ще не
-реалізовано. Уточнення HEX/White/Black закрито власником через `handoff:next`.
+Paint integration P1 та GPU-проби реалізовано; shader bundling C реалізовано,
+eval PASS; C прийнята власником через `handoff:next` і закрита 2026-10-14.
+Physical GPU/mobile coverage debt та intermittent closing watch/probe timeout
+збережено у HANDOFF/QA.
+Уточнення HEX/White/Black закрито власником через `handoff:next`.
 
 ## 1. Мета та межі
 
