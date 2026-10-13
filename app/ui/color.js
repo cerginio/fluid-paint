@@ -49,7 +49,7 @@ class ColorControl {
    */
   constructor({
     element, hexElement, alphaElement, modelElement, whiteElement, blackElement,
-    getHSVA, onChange, onAdhocChange, isAdditive,
+    getHSVA, onChange, onAdhocChange, onExactRgbChange, isAdditive, getExactRgb,
   }) {
     this.element = element;
     this.hexElement = hexElement;
@@ -58,7 +58,9 @@ class ColorControl {
     this.getHSVA = getHSVA;
     this.onChange = onChange || (() => {});
     this.onAdhocChange = onAdhocChange || (() => {});
+    this.onExactRgbChange = onExactRgbChange || (() => {});
     this.isAdditive = isAdditive || (() => false);
+    this.getExactRgb = getExactRgb || (() => null);
     this.whiteElement = whiteElement;
     this.blackElement = blackElement;
     this.adhocColor = null;
@@ -114,9 +116,10 @@ class ColorControl {
       // White/black replace only the colour channels. Moving iro's alpha
       // slider must therefore retain the ad-hoc choice, while changing H/S/V
       // returns to the saved colour-space selection.
+      const exactAlphaOnly = !!this.getExactRgb() && this._sameBaseColor(color);
       const adhocAlphaOnly = !!this.adhocColor && this._sameBaseColor(color);
       if (!adhocAlphaOnly) this._setAdhocColor(null);
-      this._readFromWidget(color, adhocAlphaOnly);
+      this._readFromWidget(color, adhocAlphaOnly || exactAlphaOnly);
     });
 
     this._whiteHandler = () => this._setAdhocColor('white');
@@ -170,10 +173,9 @@ class ColorControl {
   }
 
   /**
-   * Called when the Natural/Digital toggle moves. The two models composite
-   * differently AND display differently (`rybToRgb`'s `#ifdef RGB` branch), so
-   * the swatches have to change with them or the widget goes back to describing
-   * a colour the paint is not using.
+   * Called when the Natural/Digital palette toggle moves. Palette swatches
+   * describe future paint; the canvas renderer remains fixed to RGB.
+   * Explicit HEX and endpoint selections retain their exact base RGB.
    */
   setAdditive() {
     /*
@@ -197,8 +199,14 @@ class ColorControl {
   _pigmentHex() {
     if (this.adhocColor === 'black') return '#000000';
     if (this.adhocColor === 'white') return '#FFFFFF';
+    const exactRgb = this.getExactRgb();
+    if (exactRgb) return this._rgbToHex(exactRgb);
     const hsva = this.getHSVA();
     const rgb = hsvToPigmentRgb(hsva[0], hsva[1], hsva[2], this.isAdditive());
+    return this._rgbToHex(rgb);
+  }
+
+  _rgbToHex(rgb) {
     const channel = (value) => Math.round(Math.max(0, Math.min(1, value)) * 255)
       .toString(16).padStart(2, '0');
     return ('#' + channel(rgb[0]) + channel(rgb[1]) + channel(rgb[2])).toUpperCase();
@@ -288,6 +296,7 @@ class ColorControl {
       hsva[0] = hsv.h / DEGREES;
       hsva[1] = hsv.s / PERCENT;
       hsva[2] = hsv.v / PERCENT;
+      this.onExactRgbChange(null);
     }
     hsva[3] = color.alpha;
 
@@ -303,6 +312,7 @@ class ColorControl {
    */
   setHSVA(hsva) {
     this._setAdhocColor(null);
+    this.onExactRgbChange(null);
     this.applying = true;
     try {
       this.picker.color.set({
@@ -325,6 +335,16 @@ class ColorControl {
       throw new TypeError('Ad-hoc paint color must be white, black, or null.');
     }
     this._setAdhocColor(color);
+  }
+
+  setExactRgb(rgb) {
+    if (rgb !== null && (!Array.isArray(rgb) || rgb.length !== 3 ||
+        rgb.some((channel) => typeof channel !== 'number' || !Number.isFinite(channel)))) {
+      throw new TypeError('Exact RGB must be null or three finite channels.');
+    }
+    if (rgb) this._setAdhocColor(null);
+    this.onExactRgbChange(rgb ? rgb.slice() : null);
+    this._updateReadout();
   }
 
   /** Release the observer. Nothing in this app tears the panel down today, but

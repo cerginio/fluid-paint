@@ -64,6 +64,7 @@ test-fast:
 
 test-browser:
 	$(NPM) run test:color-adapter:gpu
+	$(NPM) run test:paint-palette:gpu
 	$(NPM) run test:live-gpu
 	$(NPM) run test:tilecraft:gpu
 	$(NPM) run test:story-ui

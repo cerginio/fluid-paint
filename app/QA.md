@@ -1,7 +1,7 @@
 # QA: fluid-2
 
-Сценарії накопичувальні; нові фази додаються згори. Production Paint у фазі A
-ще використовує старий матеріал. Deploy не виконується.
+Сценарії накопичувальні; нові фази додаються згори. Production Paint у B
+використовує encoded RGB; старий контракт у секції A — історичний. Deploy не виконується.
 
 ## Локальний запуск і докази
 
@@ -19,6 +19,157 @@ Stdout: `C:/Users/cergi/AppData/Local/Temp/fluid-2-A-final-gpu.log`.
 Це локальні тимчасові докази, не committed fixtures. Повторний запуск створює
 власний temp-каталог. Після eval сервер зупинено, порт звільнено.
 На цій машині 3000 повернув EACCES, 8087 зайнятий; чужий сервер не чіпали.
+
+## Фаза B — прийнята й закрита 2026-10-13
+
+**Відтворення:** у корені `npm run test:paint-palette:gpu`. Runner сам запускає
+source server на вільному порту, Chromium/SwiftShader, усі наведені нижче
+операції та справжні screenshots; закриває browser/server і перевіряє bind-back.
+Фактичний URL цього прогону: `http://127.0.0.1:52290/index.html?debug=none&diag=0&seed=41`.
+Це записана адреса, **не залишений сервер**. При повторі порт друкується у JSON.
+Для власного ручного стенду використати незмінну команду source server вище;
+її порт 62865 замінює записаний 52290 у URL. Зовнішній інтернет не потрібен.
+
+Докази B: `C:/Users/cergi/AppData/Local/Temp/fluid-2-B-ZRvNIZ/`:
+`result.json`, `paint-palette-main.png`, `paint-palette-active.png`,
+`paint-palette-hex.png`, `paint-palette-story.png`, `minimal-legacy.png`,
+`paint-export.png`. Логи та exit codes повного прогону; додатковий фінальний rerun із відкритою
+Player-панеллю — `test-paint-palette-gpu-final.log` (exit 0). Усі інші команди:
+`C:/Users/cergi/AppData/Local/Temp/fluid-2-B-finish/commands.json` і сусідні `.log`.
+Browser-сценарії нижче виконано production methods/debug API, з реальними
+UI clicks там, де селектори названі. Це не physical-device або ручний pointer PASS.
+Скриншоти доповнюють числові probes, не замінюють human acceptance.
+
+### QA-B1. Старий матеріал не перефарбовується
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:52290/index.html?debug=none&diag=0&seed=41`.
+**qa:action:** runner вносить мазок через `engine.beginStroke` з
+`painter._strokeColor()`, викликає `setPaletteMode('digital')`, потім `'natural'`.
+**qa:inspect:** `result.json` → `frozen`; окремо `active` для Natural/Digital/mixed.
+**qa:expected:** frozen raw/export delta 0; кожен із трьох initial materials
+також має frozen raw/export delta 0. Фіксований renderer RGB (`1`), палітра
+змінюється без Clear/Bake/replay. Покрито `test:paint-palette:gpu`.
+
+### QA-B2. Активна симуляція не залежить від палітри
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:52290/index.html?debug=none&diag=0&seed=41`.
+**qa:action:** `npm run test:paint-palette:gpu`; runner відновлює один initial
+material snapshot, скидає dynamics і задає fixture velocity `[2,1]`; виконує
+контрольний та switched run по 30 однакових steps без RAF між ними.
+**qa:inspect:** `active` у JSON і `paint-palette-active.png`.
+**qa:expected:** три пари Natural/Digital/mixed: raw/export delta 0,
+`steps:30`, `movedRawDelta > 2`. Однаковий backend/precision, допуск 0.
+Не використовувати знімки двох довільно синхронізованих live сторінок.
+
+### QA-B3. Точний HEX, readout та обидва previews
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:52290/index.html?debug=none&diag=0&seed=41`.
+**qa:action:** `__painter.setPaintColor('#123456')`; відкрити панель `#panel-grip`;
+клікнути `#models > div` з текстом Digital, потім Natural. Для alpha runner
+виконує `__painter.colorControl.picker.color.alpha = .25`.
+**qa:inspect:** `#paint-color-hex`, `#paint-color-alpha`; `uiApi.previews` і
+`paint-palette-hex.png` (поточна Natural/RYB-палітра, не модель полотна).
+**qa:expected:** HEX `#123456`, alpha `40` у обох палітрах. Production marker
+та viewer draw arguments точно `[18/255,52/255,86/255]`, як `_paintRgb()`;
+спільний adapter кодує їх `[1-g,1-r,1-b]`. Palette gradients не є exact HEX override.
+
+### QA-B4. Endpoints/alpha зберігаються, H/S/V замінює вибір
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:52290/index.html?debug=none&diag=0&seed=41`.
+**qa:action:** клікнути `#paint-color-white`, потім `#paint-color-black`;
+runner перевіряє обидва endpoints після palette switches/alpha.
+Для HEX runner окремо задає `picker.color.hue=90`, `.saturation=60`, `.value=80`.
+**qa:inspect:** readout і `endpoints`, `uiApi.hsvReplacement` у JSON.
+**qa:expected:** White `#FFFFFF` / channels `[0,0,0]`, Black `#000000` /
+channels `[1,1,1]`; alpha не змінює RGB. Кожна зміна H/S/V скидає exact override.
+
+### QA-B5. Колір ручного мазка фіксований на початку
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:52290/index.html?debug=none&diag=0&seed=41`.
+**qa:action:** runner викликає ручний producer `_beginPaintStroke(1,'mouse')`
+для `#123456`, потім змінює палітру/вибраний HEX на `#F97316` і викликає strokeTo.
+**qa:inspect:** `uiApi.frozenStroke`, actual engine active stroke color.
+**qa:expected:** active color лишається encoded `#123456`; наступний payload
+бере новий вибір. Перевірено manual producer, не synthetic pointer gesture.
+
+### QA-B6. Перекриття, Undo/Redo і resize
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:52290/index.html?debug=none&diag=0&seed=41`.
+**qa:action:** runner зберігає pre-stroke snapshot, додає overlapping Digital
+мазок, перемикає Natural, виконує `undo()`, `redo()`, resize preview та `_commitResize()`.
+**qa:inspect:** `history` і `historyResize` у JSON.
+**qa:expected:** overlap material delta >0; undo/redo delta 0 щодо відповідних
+станів; palette зберігає snapshot index. Resize preview `{model:1,resizing:true}`;
+після resize raw/export delta від palette switch 0.
+
+### QA-B7. PNG-фон, export і Bake не залежать від палітри
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:52290/index.html?debug=none&diag=0&seed=41`.
+**qa:action:** runner генерує green/white PNG File, завантажує через
+`loadBackgroundImage`, перемикає палітру, виконує `bakeToBackground()` і
+`exportPngBlob()` до/після наступного перемикання.
+**qa:inspect:** `backgroundBake`, `png`, `paint-palette-main.png`, `paint-export.png`.
+**qa:expected:** background switch delta 0, Bake rendered delta 0, wet
+materialMagnitude 0, hasBackground true. PNG blobs ідентичні; MIME image/png,
+експорт використовує RGB (`models:[1,1]`). Natural mixing не є старим pigment mixing.
+
+### QA-B8. Story HEX, restart/replay та control API
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:52290/index.html?debug=none&diag=0&seed=41`.
+**qa:action:** runner створює `FluidControlApi` у `fluid-rescript`, активує
+transfer і виконує `setPaintColor` для HEX/White/Black. Окремо завантажує
+одну polygon story з `#3B82F6`, play/restart у Natural, повторює у Digital.
+**qa:inspect:** `uiApi.pass`, `story`, `#story-color-model`, `paint-palette-story.png`.
+**qa:expected:** обидва PASS. Чотири story payloads мають точні channels
+`[1-130/255,1-59/255,1-246/255]`; play і restart завершуються `completed`.
+Після completed зміна story color model відхиляється; select disabled.
+Перед відкриттям extension runner обирає `toolPanel.selectExtensionTab('player')`,
+потім клікає `#panel-extension-toggle` і `#story-player-tab`; це не запускає
+зовнішній Demo catalog fetch, який не входить до B.
+Чинний `test:story-ui` додатково перевіряє live/pause/manual takeover/registry/mobile.
+
+### QA-B9. Guard, GPU decode та сумісний другий host
+
+**qa:mode:** cli
+**qa:open:** shell у корені; browser source `http://127.0.0.1:52290/examples/minimal/index.html`.
+**qa:action:** виконані `npm run test:color`, `npm run lint:shaders`,
+`npm run test:tilecraft`, `npm run test:story-ui`, `npm run test:fluid-control`,
+`npm run build`, `npm run test:color-adapter`, `npm run test:paint-palette:gpu`,
+`npm run test:color-adapter:gpu`, `npm run test:bake`, `npm run test:tilecraft:gpu`,
+`npm run test:timing`, `npm run test:live-gpu`, фінальний `npm run build`.
+**qa:inspect:** commands.json/stdout/exit codes; `minimal` і `minimal-legacy.png`;
+adapter GPU `C:/Users/cergi/AppData/Local/Temp/fluid-2-A-KGmio0/result.json`.
+**qa:expected:** усі 14 виконань exit 0; color 42/42, adapter 6/6; adapter GPU
+4 режими ×17 decode =68 checks ≤1 byte, 12 deterministic pairs delta 0.
+Minimal реально малює з legacy channels: render model 0, material magnitude >0,
+app adapter відсутній. Engine/standalone player defaults не мігровано глобально.
+
+### Межі B та журнал
+
+- Власник прийняв B через `handoff:next` 2026-10-13; B закрита.
+  Closing rerun: guard B, Paint probe, Bake і tilecraft GPU PASS; color 42/42,
+  adapter 6/6. Нові Paint JSON/PNG: `C:/Users/cergi/AppData/Local/Temp/fluid-2-B-MuagKi/`;
+  3 пари ×30 steps, frozen/active raw/export delta 0. Фізичний coverage debt збережено.
+  C не почато, deploy не виконувався; vendored/зовнішні файли й physics не змінено.
+- Snapshot source audit знайшов лише in-memory history/story baseline textures,
+  story JSON та PNG import/export; persistent material restore не знайдено.
+  Це обмежений audit цього repo, не гарантія для невідомих зовнішніх hosts.
+- Реальний Paint probe — desktop SwiftShader; A decode matrix додатково
+  WebGL1/2 × float/half-float. Physical GPU/mobile visual review не виконано.
+- Тимчасові невдалі спроби виправили метод тесту: initial stroke geometry
+  двох повторних runs відрізнялась; тепер одна snapshot fixture, допуск 0.
+  Minimal URL виправлено на явний index.html для файлового test server.
+- 2026-10-13, B: guard/probe/full npm-equivalent PASS. Порти 52290/49155
+  звільнено й перевірено; чужі процеси не зупиняли. Історичні докази A нижче
+  не підмінено свіжими результатами B.
 
 ## Фаза A — прийнята й закрита 2026-10-13
 

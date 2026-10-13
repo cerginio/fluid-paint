@@ -137,6 +137,13 @@ Splat натомість може змішувати свій вихід із de
 
 ## 4. Чому Natural / Digital змінює вже намальоване
 
+**Оновлення fluid-2 B, 2026-10-13:** цей розділ описує поведінку до патчу
+незалежної палітри. У поточному Fluid Paint застосунку Natural / Digital більше
+не перемикає renderer для вже намальованого material: app завжди рендерить
+через `FluidEngine.COLOR_MODEL.RGB`, а `paletteMode` впливає тільки на RGB
+майбутніх мазків. Старий опис нижче лишається корисним для розуміння engine-
+сумісності та інших хостів, які продовжують передавати RYB/RGB renderer mode.
+
 Кнопки в `paint.js` змінюють `colorModel` і ставлять `needsRedraw = true`.
 `PaintingRenderer._screenProgram()` вибирає варіант `painting.frag`.
 

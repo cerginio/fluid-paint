@@ -4,7 +4,9 @@
 План і defaults закомічені в `a0ea507`. Фаза A прийнята власником і
 закрита командою `handoff:next` 2026-10-13; її код і документи входять
 у closing commit цієї фази.
-Фази B–C не розпочато.
+Фаза A закомічена в `df381ba`. Фаза B прийнята власником і закрита
+командою `handoff:next` 2026-10-13; код і closure-документи входять
+у closing commit B. Фаза C не розпочата.
 Спека: [PATCH-PALETTE-AND-SHADER-BUNDLE-SPEC.md](../docs/PATCH-PALETTE-AND-SHADER-BUNDLE-SPEC.md).
 Тема локальна для цього репозиторію; зовнішній Tilecraft та vendored
 transport/model/bridge не змінювати.
@@ -14,19 +16,20 @@ transport/model/bridge не змінювати.
 brush size `12`. Ці зміни в `paint-setup.js` / `paint.js` не є виконанням
 фаз A–C; engine defaults інших хостів лишаються чинними.
 
-> **Далі:** фаза B — наскрізна інтеграція незалежної палітри за §3.2–3.5 і §5 P1 спеки. Рішення щодо HEX/White/Black закриті нижче; B не починати без окремої команди.
+> **Далі:** фаза C — шейдери в bundle, source loader та dev watch за §4 і §5 P2 спеки.
+> B прийнята й закрита; C не починати без окремого дозволу. Deploy поза scope.
 
 ## Що зроблено і працює
 
 | Файл | Стан |
 | --- | --- |
 | `docs/PATCH-PALETTE-AND-SHADER-BUNDLE-SPEC.md` | Контракт двох патчів, межі, сумісність і приймання. |
-| `paint.js`, `app/ui/color.js`, `app/ui/ryb.js` | Наявне ручне малювання і палітри; глобальний colorModel досі перефарбовує весь матеріал. |
-| `app/story-playback-controller.js`, `app/fluid-control-api.js`, `fluid-engine/tilecraft-stroke-player.js` | Чинні entry points кольору; ще не інтегровані зі спільним RGB-полотном. |
+| `paint.js`, `app/ui/color.js`, `app/ui/ryb.js` | B: `paletteMode`, точний RGB override, shared `_paintRgb()` для мазка й обох previews; screen/resize/export/Bake завжди RGB. |
+| `app/story-playback-controller.js`, `app/fluid-control-api.js`, `fluid-engine/tilecraft-stroke-player.js` | B: story/control HEX точні; story інжектує shared adapter. Standalone player лишається legacy-pigment за замовчуванням. |
 | `gulpfile.js`, `common.js`, `fluid-engine/gl/wrappedgl.js` | Чинна збірка копіює шейдери; runtime завантажує їх окремими XHR. |
 | `AGENTS.md` | Тему зареєстровано з цим HANDOFF. |
 
-Чинний код тут описано за попереднім розбором, не як результат нового eval.
+Таблицю оновлено за реалізацією та свіжим eval B; shader bundling лишається C.
 На момент створення плану в дереві вже була зміна
 `.claude/skills/handoff/SKILL.md`; власник явно замовив включити її в коміт.
 Перед фазою звірити актуальний Git-стан; не відкидати чужі зміни.
@@ -57,6 +60,58 @@ brush size `12`. Ці зміни в `paint-setup.js` / `paint.js` не є вик
 - A прийнята й закрита власником. Наступна реалізація — B; policy HEX і
   White/Black зафіксована в спеці. Snapshot discovery — задача агента B,
   не owner-рішення й не gate входу. Фізичне GPU-покриття лишається неперевіреним.
+
+## Фаза B — прийнята й закрита 2026-10-13
+
+- Усі producers застосунку використовують encoded RGB; engine API/defaults
+  інших хостів не змінено. Story отримує `encodeRgb` callback спільного
+  `PaintColorAdapter`; dependency-free player має сумісний fallback.
+- Виправлено пропущений exact HEX у brush center marker/brush viewer: обидва
+  production draw paths і `_strokeColor()` беруть один `_paintRgb()`.
+  Прибрано старе попередження story UI про перефарбовування матеріалу.
+- Світлий/темний endpoint і HEX переживають перемикання та alpha; H/S/V
+  замінює override. Engine копіює color при beginStroke; чинний мазок не
+  змінюється. Palette setter не змінює textures, history або dry PNG.
+- Свіжий guard: color 42/42, adapter 6/6, shader lint, tilecraft, story UI,
+  fluid-control, build — PASS. Повний npm-еквівалент `make verify` також PASS:
+  timing, live GPU, tilecraft GPU, Bake, adapter GPU, Paint palette GPU, build.
+  `commands.json` містить 14 виконань (13 різних команд; build двічі), exit 0.
+  Додатковий фінальний Paint rerun із відкритою Player-панеллю теж exit 0:
+  `test-paint-palette-gpu-final.log` у тому самому каталозі.
+  Не підсумовувати assertion scripts як вигадану загальну кількість tests.
+- Реальний Paint: 3 deterministic пари Natural/Digital/mixed × 30 steps;
+  frozen та active raw/export delta **0**. Ідентичний initial material
+  snapshot + clear dynamics + fixture velocity `[2,1]` на одному engine,
+  синхронно без RAF між runs. Material movement > 2; це не фізичний GPU PASS.
+  Старий незавершений probe порівнював різні engine instances з допуском;
+  його замінено exact same-initial-state методом, не розширено допуск.
+- Undo/Redo delta 0; overlap змінює матеріал; palette не змінює history index.
+  Resize preview RGB; після resize switch raw/export delta 0. Реальний PNG
+  load, background switch і Bake delta 0; wet magnitude після Bake 0.
+  PNG blobs до/після switch ідентичні. Story natural/digital play+restart:
+  4 payloads з точним `#3B82F6`; completed restrictions збережені.
+  Minimal source host малює legacy pigment, render model 0, app adapter відсутній.
+- Snapshot discovery: пошук storage та snapshot entry points у JS застосунку
+  й engine знайшов тільки in-memory Undo ring/story baseline GPU textures;
+  file load — story JSON або PNG, export — PNG. Persisted material reader не
+  знайдено, міграцію не вигадували. Це source audit цього repo, не доказ
+  відсутності історичних даних/зовнішніх невідомих hosts. Майбутній формат
+  потребує `materialFormat`; old pigment texture не можна мовчки імпортувати.
+- Докази Paint: `C:/Users/cergi/AppData/Local/Temp/fluid-2-B-ZRvNIZ/result.json`
+  та `paint-palette-main.png`, `paint-palette-active.png`, `paint-palette-hex.png`,
+  `paint-palette-story.png`, `minimal-legacy.png`, `paint-export.png` поруч.
+  Свіжий adapter GPU: `C:/Users/cergi/AppData/Local/Temp/fluid-2-A-KGmio0/`
+  (4 режими, 68 decode checks ≤1 byte, 12 pairs delta 0, source/build smoke).
+  Stdout/stderr/exit codes: `C:/Users/cergi/AppData/Local/Temp/fluid-2-B-finish/`.
+- QA-B1…B9 у [QA.md](./QA.md). Сервери probes закриті, порти 52290/49155
+  перевірено bind-back; чужі сервери не зупиняли. Артефакти тільки у Temp.
+  Physical GPU/mobile visual acceptance не перевірено; власник прийняв B
+  через `handoff:next` зі збереженням цього coverage debt. Компроміс Natural
+  mixing з §3.1 збережено. Deploy/C не виконували.
+- Closing rerun батьківського агента: усі guard B, Paint probe, Bake і
+  tilecraft GPU — PASS; color 42/42, adapter 6/6. Paint JSON/PNG:
+  `C:/Users/cergi/AppData/Local/Temp/fluid-2-B-MuagKi/`; 3 пари ×30 steps,
+  frozen/active raw/export delta 0. Перед commit index порожній.
 
 ## Головні виміряні факти
 
@@ -102,7 +157,7 @@ brush size `12`. Ці зміни в `paint-setup.js` / `paint.js` не є вик
    Закриття: адаптер і GPU-проба працюють; жоден production producer не
    записує новий формат під старий renderer. Додати фактичні докази в QA.
 
-2. **Фаза B — наскрізна інтеграція незалежної палітри.**
+~~2. **Фаза B — наскрізна інтеграція незалежної палітри.**~~ — **ЗАКРИТО 2026-10-13**, прийнято власником.
 
    Залежить від A. Контракт: весь застосунок використовує один формат
    полотна, а Natural / Digital змінює тільки палітру майбутніх мазків.
@@ -130,13 +185,8 @@ brush size `12`. Ці зміни в `paint-setup.js` / `paint.js` не є вик
    `npm run test:tilecraft:gpu` та browser-перевірка HEX/API. Перевірити
    `examples/minimal` зі старим контрактом engine.
 
-   Чернетка QA-B1:
-   **qa:open:** `http://localhost:3000/` після `npm run dev`.
-   **qa:action:** намалювати мазок у Natural і вибрати Digital.
-   **qa:inspect:** попередній мазок та палітра в панелі.
-   **qa:expected:** палітра змінилася, колір старого мазка лишився тим самим.
-   Додаткові окремі сценарії: зворотне перемикання, новий мазок, Undo/Redo,
-   export/Bake, story HEX та control API. Створити й виконати їх до review.
+   Виконані QA-B1…B9: exact Paint GPU, readout/previews, history/resize,
+   PNG/Bake, story/API та minimal compatibility — див. QA.md і докази вище.
 
    Закриття: усі §5 P1 виконано; export pixels ідентичні до/після перемикання
    без simulation steps, а в активній симуляції збігаються два
@@ -189,8 +239,9 @@ Owner-питань для входу в B немає. Рішення за уто
   на відповідний точний endpoint. Alpha сама по собі RGB не змінює.
 - **Snapshots:** політика закрита — старий формат не трактувати мовчки як
   новий. Агент у B перевіряє міжсесійні entry points; якщо вони є, версіонує
-  або мігрує за §3.4. Наявність такого шляху ще не встановлена; це технічна
-  перевірка, не рішення власника і не привід блокувати початок B.
+  або мігрує за §3.4. Scoped source audit B не знайшов persisted material
+  reader; знайдено in-memory history/story textures, story JSON і PNG.
+  Це не гарантія для невідомих зовнішніх hosts; докази й межі наведено вище.
 - **Loader C:** агент обирає error callback або Promise за сумісністю
   чинних callers; точна реалізація має забезпечити §4.2. Обидва способи
   дозволені контрактом, owner-gate не потрібен. API реєстру — деталь C.
@@ -205,7 +256,7 @@ Owner-питань для входу в B немає. Рішення за уто
 На фазуванні жодні eval, сервери, runtime-правки або commit не запускалися.
 
 `app/QA.md` створено у A: QA-A1…A8 мають перевірені URL/команди та результати.
-Чернетки B/C нижче лишаються планом, не виконаними сценаріями.
+QA-B1…B9 виконано у B; чернетка C лишається планом, не виконаним сценарієм.
 Нові секції наступних фаз вставляти згори; сервери, запущені агентом,
 зупиняти перед review. Рядок автодеплою не додавати: deploy поза scope.
 

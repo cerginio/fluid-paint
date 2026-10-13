@@ -25,7 +25,7 @@
     return Object.assign(new Error(message), { code, details });
   }
 
-  function pigmentToHsva([r, g, b, alpha = 1]) {
+  function rgbToHsva([r, g, b, alpha = 1]) {
     const max = Math.max(r, g, b), min = Math.min(r, g, b), delta = max - min;
     let hue = 0;
     if (delta) {
@@ -37,15 +37,12 @@
     return [hue, max ? delta / max : 0, max, alpha];
   }
 
-  // A palette hex is a requested DISPLAY colour. Natural Fluid paint stores
-  // pigment loads, so treating the RGB channels as pigment (the old path)
-  // produces a different visible colour after the RYB cube is rendered.
   function hexToPaintHsva(hex) {
-    const converter = root.TilecraftStrokePlayer;
-    if (!converter?.hexToPigment) {
-      throw controlError('PAINT_COLOR_CONVERTER_UNAVAILABLE', 'RGB-to-pigment conversion is unavailable');
+    if (typeof hex !== 'string' || !/^#[0-9a-f]{6}$/i.test(hex)) {
+      throw controlError('INVALID_PAINT_COLOR', 'Paint color must be #RRGGBB');
     }
-    return pigmentToHsva(converter.hexToPigment(hex));
+    const rgb = [1, 3, 5].map((offset) => parseInt(hex.slice(offset, offset + 2), 16) / 255);
+    return rgbToHsva(rgb);
   }
 
   class FluidControlApi {
@@ -142,7 +139,7 @@
         if (!this.palette.includes(value)) {
           throw controlError('PAINT_COLOR_NOT_ALLOWED', 'Paint color is not in the session palette', { value });
         }
-        result = this.painter.setPaintColor(value.startsWith('#') ? hexToPaintHsva(value) : value);
+        result = this.painter.setPaintColor(value);
       }
       else if (command === 'setPaintSize') result = this.painter.setPaintSize(Number(value));
       else if (command === 'clearPaint') result = await this.painter.clear();

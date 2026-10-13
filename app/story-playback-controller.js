@@ -217,11 +217,7 @@ class StoryPlaybackController {
 
   _applyColorModel() {
     const digital = this.colorModel === 'digital';
-    this.painter.colorModel = digital ? FluidEngine.COLOR_MODEL.RGB : FluidEngine.COLOR_MODEL.RYB;
-    this.painter.modelButtons?.setIndex(digital ? 1 : 0);
-    this.painter.colorControl?.setAdditive();
-    this.painter.toolPanel?.paintHueStripe(digital);
-    this.painter.needsRedraw = true;
+    this.painter.setPaletteMode?.(digital ? 'digital' : 'natural');
   }
 
   async play() {
@@ -423,6 +419,8 @@ class StoryPlaybackController {
         coordinateScale: 1,
         blackPigment: this.painter.blackPigment,
         colorModel: this.colorModel,
+        canvasColorFormat: 'encoded-rgb',
+        encodeRgb: (rgb) => PaintColorAdapter.encodeRgb(rgb),
         alpha: this.painter._strokeColor().alpha,
         mapPoint: (tile) => ({
           x: target.left + tile.x,
@@ -445,6 +443,8 @@ class StoryPlaybackController {
       coordinateScale: scale,
       blackPigment: this.painter.blackPigment,
       colorModel: this.colorModel,
+      canvasColorFormat: 'encoded-rgb',
+      encodeRgb: (rgb) => PaintColorAdapter.encodeRgb(rgb),
       alpha: this.painter._strokeColor().alpha,
       mapPoint: (tile) => ({
         x: offsetX + (tile.x - bounds.left) * scale,

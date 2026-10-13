@@ -688,6 +688,8 @@ class TilecraftStrokePlayer {
       resolutionScale: options.resolutionScale === undefined ? 1 : options.resolutionScale,
       alpha: options.alpha === undefined ? 0.04 : options.alpha,
       colorModel: options.colorModel === 'digital' ? 'digital' : 'natural',
+      canvasColorFormat: options.canvasColorFormat === 'encoded-rgb' ? 'encoded-rgb' : 'legacy-pigment',
+      encodeRgb: options.encodeRgb,
       pressureForSize: options.pressureForSize || ((size, maximum) => maximum > 0 ? size / maximum : 1),
       // Tilecraft's polyline-lcr renderer narrows strokes on canvases below
       // its 3000px reference size.  This must be the destination canvas size,
@@ -1001,7 +1003,9 @@ class TilecraftStrokePlayer {
   }
 
   _color(hex, layer, context, tile = null) {
-    const rgba = TilecraftStrokePlayer.hexToPigment(hex, context.blackPigment, context.colorModel);
+    const rgba = context.canvasColorFormat === 'encoded-rgb'
+      ? TilecraftStrokePlayer.hexToEncodedRgb(hex, context.encodeRgb)
+      : TilecraftStrokePlayer.hexToPigment(hex, context.blackPigment, context.colorModel);
     const layerOpacity = layer.opacity === undefined ? 1 : layer.opacity / 255;
     const tileOpacity = Number.isFinite(tile?.a) ? Math.max(0, Math.min(255, tile.a)) / 255 : 1;
     return {
@@ -1031,6 +1035,15 @@ class TilecraftStrokePlayer {
     return [...(colorModel === 'digital'
       ? [1 - rgb[1], 1 - rgb[0], 1 - rgb[2]]
       : TilecraftStrokePlayer.rgbToPigment(rgb, blackPigment)), alpha];
+  }
+
+  /** #RRGGBB[A] -> encoded RGB material for hosts that render with COLOR_MODEL.RGB. */
+  static hexToEncodedRgb(hex, encodeRgb = (rgb) => [1 - rgb[1], 1 - rgb[0], 1 - rgb[2]]) {
+    const match = /^#([\da-f]{6})([\da-f]{2})?$/i.exec(hex || '');
+    if (!match) throw new TypeError(`Tilecraft colour must be #RRGGBB or #RRGGBBAA, got ${hex}.`);
+    const rgb = [0, 2, 4].map((offset) => parseInt(match[1].slice(offset, offset + 2), 16) / 255);
+    const alpha = match[2] === undefined ? 1 : parseInt(match[2], 16) / 255;
+    return [...encodeRgb(rgb), alpha];
   }
 
   static _canvasSizeRatio(canvasSize) {

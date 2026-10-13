@@ -214,12 +214,13 @@ class Paint {
         // so zoom is absolute and cannot compound across RAF batches.
         this.pinchStartSpan = null;
         this.pinchStartViewScale = null;
-        // FluidEngine.COLOR_MODEL, not the app's own enum (Phase 9 finding 2).
-        // The value is handed straight to renderToTexture(), and the renderer's
-        // test is an equality -- anything that is not exactly RGB falls silently
-        // through to RYB. Reading the name from the engine that consumes it is
-        // what makes that impossible to get wrong.
-        this.colorModel = FluidEngine.COLOR_MODEL.RYB;
+        // The material texture stores visible RGB encoded through
+        // PaintColorAdapter. Natural/Digital is a palette choice for future
+        // strokes only; the renderer stays fixed to RGB so existing material is
+        // never reinterpreted.
+        this.colorModel = FluidEngine.COLOR_MODEL.RGB;
+        this.paletteMode = 'natural';
+        this.exactPaintRgb = null;
 
         this.needsRedraw = true; // whether we need to redraw the painting
 
@@ -339,24 +340,10 @@ class Paint {
             (index) => {
                 if (this.storyPlaybackController?.plan &&
                     !['empty', 'ready', 'file-error'].includes(this.storyPlaybackController.state)) {
-                    this.modelButtons.setIndex(this.colorModel === FluidEngine.COLOR_MODEL.RGB ? 1 : 0);
+                    this.modelButtons.setIndex(this.paletteMode === 'digital' ? 1 : 0);
                     return;
                 }
-                if (index === 0) {
-                    this.colorModel = FluidEngine.COLOR_MODEL.RYB;
-                } else if (index === 1) {
-                    this.colorModel = FluidEngine.COLOR_MODEL.RGB;
-                }
-                // The picker draws its swatches in whichever model is painting,
-                // so the widget has to be told the model moved -- otherwise it
-                // keeps describing colours the brush is no longer making.
-                if (this.colorControl) this.colorControl.setAdditive();
-                if (this.toolPanel) {
-                    this.toolPanel.paintHueStripe(
-                        this.colorModel === FluidEngine.COLOR_MODEL.RGB
-                    );
-                }
-                this.needsRedraw = true;
+                this.setPaletteMode(index === 1 ? 'digital' : 'natural');
             }
         );
 
@@ -387,7 +374,8 @@ class Paint {
                 // Read live rather than captured: the toggle flips this after
                 // the control is built, and a snapshot would freeze the picker
                 // in whichever model happened to be selected at startup.
-                isAdditive: () => this.colorModel === FluidEngine.COLOR_MODEL.RGB,
+                isAdditive: () => this.paletteMode === 'digital',
+                getExactRgb: () => this.exactPaintRgb,
                 onChange: () => {
                     // The compact bar's hue stripe shows the same hue, so it has
                     // to follow the wheel or the two disagree the moment the
@@ -396,8 +384,13 @@ class Paint {
                     if (this.toolPanel) this.toolPanel.setHue(this.brushColorHSVA[0]);
                     this.needsRedraw = true;
                 },
+                onExactRgbChange: (rgb) => {
+                    this.exactPaintRgb = rgb ? rgb.slice() : null;
+                    this.needsRedraw = true;
+                },
                 onAdhocChange: (color) => {
                     this.adhocPaintColor = color;
+                    if (color) this.exactPaintRgb = null;
                     this.needsRedraw = true;
                 },
             })
@@ -704,6 +697,10 @@ class Paint {
                     // the stripe cannot silently reset a colour the user mixed
                     // in the full picker.
                     this.brushColorHSVA[0] = hue;
+                    this.adhocPaintColor = null;
+                    this.exactPaintRgb = null;
+                    this.colorControl?.setAdhocColor(null);
+                    this.colorControl?.setExactRgb(null);
                     this.needsRedraw = true;
                 },
                 onLayoutChange: () => this._syncPanelState(),
@@ -719,7 +716,7 @@ class Paint {
             // Repaint the stripe in pigment (Phase 10). Its CSS gradient is RGB
             // and names hues the brush does not paint; see app/layout.css.
             this.toolPanel.paintHueStripe(
-                this.colorModel === FluidEngine.COLOR_MODEL.RGB
+                this.paletteMode === 'digital'
             );
         }
 
@@ -914,7 +911,7 @@ class Paint {
                 targetWidth: this.canvas.width,
                 targetHeight: this.canvas.height,
                 resolutionScale: this.resolutionScale,
-                colorModel: this.colorModel,
+                colorModel: FluidEngine.COLOR_MODEL.RGB,
                 resizing: this.interactionState === InteractionMode.RESIZING,
             });
         }
@@ -993,13 +990,7 @@ class Paint {
 
             if (this.brushCenterMarker !== null) {
                 const centerScreen = this.viewport.worldToScreen(this.mouseX, this.mouseY);
-                const hsva = this.brushColorHSVA;
-                const pigmentColor = this.adhocPaintColor === 'black' ? [0, 0, 0]
-                    : this.adhocPaintColor === 'white' ? [1, 1, 1]
-                        : hsvToPigmentRgb(
-                            hsva[0], hsva[1], hsva[2],
-                            this.colorModel === FluidEngine.COLOR_MODEL.RGB
-                        );
+                const pigmentColor = this._paintRgb();
                 this.brushCenterMarker.draw(
                     centerScreen.x,
                     centerScreen.y,
@@ -1075,13 +1066,7 @@ class Paint {
             // will BE, so it goes through hsvToPigmentRgb() -- the same
             // contract the picker and the splat use. See
             // docs/COLOR-PICKER-PAINT-PARITY-SPEC.md.
-            const hsva = this.brushColorHSVA;
-            const rgb = this.adhocPaintColor === 'black' ? [0, 0, 0]
-                : this.adhocPaintColor === 'white' ? [1, 1, 1]
-                    : hsvToPigmentRgb(
-                        hsva[0], hsva[1], hsva[2],
-                        this.colorModel === FluidEngine.COLOR_MODEL.RGB
-                    );
+            const rgb = this._paintRgb();
 
             this.brushViewer.draw(this.brushX, this.brushY, this.engine.getBristleGeometry(), rgb);
         }
@@ -1161,7 +1146,7 @@ class Paint {
             width: saveWidth,
             height: saveHeight,
             resolutionScale: this.resolutionScale,
-            colorModel: this.colorModel,
+            colorModel: FluidEngine.COLOR_MODEL.RGB,
         });
         const saveCanvas = this._pixelsToCanvas(savePixels, saveWidth, saveHeight);
         return new Promise((resolve, reject) => saveCanvas.toBlob((blob) => {
@@ -1495,31 +1480,33 @@ class Paint {
     }
 
     /**
-     * The engine's pigment payload for the current brush colour.
+     * Base RGB shared by both brush previews and the engine payload.
      *
-     * Colour conversion stays here, in the host: the engine takes pigment
-     * coordinates and refuses anything else, so an RGB triple can no longer
-     * reach the simulation by looking plausible. The alpha curve is the app's
-     * own bristle-count rule, unchanged from the pre-9a splat path.
+     * `space:'pigment'` is retained for the public Stroke API, but this app's
+     * material contract stores encoded RGB and always renders through the RGB
+     * branch. Natural/Digital now chooses future stroke RGB only.
      */
+    _paintRgb() {
+        return this.adhocPaintColor === 'black' ? [0, 0, 0]
+            : this.adhocPaintColor === 'white' ? [1, 1, 1]
+                : this.exactPaintRgb
+                    ? this.exactPaintRgb
+                    : PaintColorAdapter.paletteRgb(
+                        this.brushColorHSVA[0],
+                        this.brushColorHSVA[1],
+                        this.brushColorHSVA[2],
+                        this.paletteMode
+                    );
+    }
+
     _strokeColor() {
-        const channels = this.adhocPaintColor === 'black' ? [1, 1, 1]
-            : this.adhocPaintColor === 'white' ? [0, 0, 0]
-                : hsvToRyb(
-                    this.brushColorHSVA[0],
-                    this.brushColorHSVA[1],
-                    this.brushColorHSVA[2]
-                );
+        const rgb = this._paintRgb();
         const bristleT =
             (this.engine.bristleCount - MIN_BRISTLE_COUNT) /
             (MAX_BRISTLE_COUNT - MIN_BRISTLE_COUNT);
         const minAlpha = mix(THIN_MIN_ALPHA, THICK_MIN_ALPHA, bristleT);
         const maxAlpha = mix(THIN_MAX_ALPHA, THICK_MAX_ALPHA, bristleT);
-        return {
-            space: 'pigment',
-            channels: [channels[0], channels[1], channels[2]],
-            alpha: mix(minAlpha, maxAlpha, this.brushColorHSVA[3]),
-        };
+        return PaintColorAdapter.strokeColor(rgb, mix(minAlpha, maxAlpha, this.brushColorHSVA[3]));
     }
 
     /** Start the named stroke for a press that is actually painting. */
@@ -1978,7 +1965,7 @@ class Paint {
                 width,
                 height,
                 resolutionScale: this.resolutionScale,
-                colorModel: this.colorModel,
+                colorModel: FluidEngine.COLOR_MODEL.RGB,
             });
             const bakedCanvas = this._pixelsToCanvas(pixels, width, height);
 
@@ -2016,16 +2003,58 @@ class Paint {
         this.needsRedraw = true;
     }
 
+    setPaletteMode(mode) {
+        if (mode !== 'natural' && mode !== 'digital') {
+            throw new TypeError('Palette mode must be natural or digital.');
+        }
+        if (this.paletteMode === mode) return false;
+        this.paletteMode = mode;
+        this.modelButtons?.setIndex(mode === 'digital' ? 1 : 0);
+        this.colorControl?.setAdditive();
+        this.toolPanel?.paintHueStripe(mode === 'digital');
+        this.needsRedraw = true;
+        return true;
+    }
+
+    _rgbToHsva(rgb, alpha = this.brushColorHSVA[3]) {
+        const [r, g, b] = rgb;
+        const max = Math.max(r, g, b);
+        const min = Math.min(r, g, b);
+        const delta = max - min;
+        let hue = 0;
+        if (delta) {
+            if (max === r) hue = ((g - b) / delta) % 6;
+            else if (max === g) hue = (b - r) / delta + 2;
+            else hue = (r - g) / delta + 4;
+            hue = ((hue / 6) + 1) % 1;
+        }
+        return [hue, max ? delta / max : 0, max, alpha];
+    }
+
     setPaintColor(value) {
         if (value === 'white' || value === 'black') {
             this.adhocPaintColor = value;
+            this.exactPaintRgb = null;
             this.colorControl?.setAdhocColor(value);
             this.needsRedraw = true;
             return value;
         }
+        const hex = typeof value === 'string' ? value : value?.hex;
+        if (hex !== undefined) {
+            const rgb = PaintColorAdapter.hexRgb(hex);
+            const normalized = this._rgbToHsva(rgb);
+            this.brushColorHSVA.splice(0, 4, ...normalized);
+            this.adhocPaintColor = null;
+            this.exactPaintRgb = rgb.slice();
+            this.colorControl?.setHSVA(normalized);
+            this.colorControl?.setExactRgb(rgb);
+            this.toolPanel?.setHue(normalized[0]);
+            this.needsRedraw = true;
+            return hex.toUpperCase();
+        }
         const hsva = Array.isArray(value) ? value : value?.hsva;
         if (!Array.isArray(hsva) || hsva.length !== 4 || hsva.some((part) => !Number.isFinite(part))) {
-            throw new TypeError('Paint color must be white, black, or an HSVA array.');
+            throw new TypeError('Paint color must be white, black, #RRGGBB, or an HSVA array.');
         }
         const normalized = [
             ((hsva[0] % 1) + 1) % 1,
@@ -2035,6 +2064,7 @@ class Paint {
         ];
         this.brushColorHSVA.splice(0, 4, ...normalized);
         this.adhocPaintColor = null;
+        this.exactPaintRgb = null;
         this.colorControl?.setHSVA(normalized);
         this.toolPanel?.setHue(normalized[0]);
         this.needsRedraw = true;

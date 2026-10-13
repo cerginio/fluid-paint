@@ -1,7 +1,6 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const TilecraftStrokePlayer = require('../fluid-engine/tilecraft-stroke-player.js');
 const { FluidControlApi, hexToPaintHsva } = require('../app/fluid-control-api.js');
 
 function hsvToChannels([h, s, v]) {
@@ -86,17 +85,11 @@ function hsvToChannels([h, s, v]) {
   await api.execute({ transferId: 'rescript-1', command: 'setPaintColor', value: 'black' });
   await api.execute({ transferId: 'rescript-1', command: 'setPaintColor', value: customHex });
   const customHsva = calls.at(-1)[1];
-  const pigment = hsvToChannels(customHsva);
-  const expectedPigment = TilecraftStrokePlayer.hexToPigment(customHex).slice(0, 3);
-  assert.ok(pigment.every((channel, index) => Math.abs(channel - expectedPigment[index]) < 1e-12),
-    'custom RGB palette colour reaches the engine as the inverted pigment load');
-  const renderedRgb = TilecraftStrokePlayer.rybToRgb(pigment);
+  assert.equal(customHsva, customHex, 'custom RGB palette colour is passed as exact display HEX');
   const requestedRgb = [0x3b, 0x82, 0xf6].map((channel) => channel / 255);
-  const squaredError = (actual) => actual.reduce(
-    (sum, channel, index) => sum + (channel - requestedRgb[index]) ** 2, 0);
-  assert.ok(squaredError(renderedRgb) < squaredError(TilecraftStrokePlayer.rybToRgb(requestedRgb)),
-    'inverted pigment is a closer display match than treating RGB channels as RYB');
-  assert.deepEqual(hexToPaintHsva(customHex), customHsva);
+  assert.ok(hsvToChannels(hexToPaintHsva(customHex)).every(
+    (channel, index) => Math.abs(channel - requestedRgb[index]) < 1e-12
+  ), 'HEX helper reports display RGB, not Natural inverse pigment');
   await assert.rejects(api.execute({ transferId: 'rescript-1', command: 'setPaintColor', value: '#ffffff' }), {
     code: 'PAINT_COLOR_NOT_ALLOWED',
   });

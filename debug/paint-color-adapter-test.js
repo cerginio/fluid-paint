@@ -74,11 +74,12 @@ test('invalid inputs fail explicitly rather than silently clamp or repair', () =
   }
 });
 
-test('adapter loads in source and bundle but production producers do not call it in phase A', () => {
+test('adapter loads in source and phase B production producers use it', () => {
   assert.match(fs.readFileSync(path.join(root, 'index.html'), 'utf8'), /src="app\/paint-color-adapter.js"/);
   assert.match(fs.readFileSync(path.join(root, 'gulpfile.js'), 'utf8'), /'app\/paint-color-adapter.js'/);
-  for (const file of ['paint.js', 'app/story-playback-controller.js', 'app/fluid-control-api.js',
-    'fluid-engine/tilecraft-stroke-player.js']) {
-    assert.doesNotMatch(fs.readFileSync(path.join(root, file), 'utf8'), /PaintColorAdapter/);
-  }
+  assert.match(fs.readFileSync(path.join(root, 'paint.js'), 'utf8'), /PaintColorAdapter\.strokeColor/);
+  assert.match(fs.readFileSync(path.join(root, 'app/story-playback-controller.js'), 'utf8'),
+    /canvasColorFormat: 'encoded-rgb'/);
+  assert.match(fs.readFileSync(path.join(root, 'fluid-engine/tilecraft-stroke-player.js'), 'utf8'),
+    /hexToEncodedRgb/);
 });

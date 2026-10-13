@@ -1,8 +1,8 @@
 # PATCH: незалежна палітра Natural / Digital та шейдери в bundle
 
-Дата: 2026-10-13. Статус: фаза A (ізольований адаптер і GPU-проба) прийнята;
-production integration B та shader bundling C ще не реалізовано. Уточнення
-HEX/White/Black закрито власником через `handoff:next`.
+Дата: 2026-10-13. Статус: A і B прийняті й закриті через `handoff:next`; eval B PASS: адаптер, реальний
+Paint integration P1 та GPU-проби реалізовано; shader bundling C ще не
+реалізовано. Уточнення HEX/White/Black закрито власником через `handoff:next`.
 
 ## 1. Мета та межі
 
@@ -75,6 +75,14 @@ Digital — через `hsvToPigmentRgb(..., true)`. Зберегти чинни
 старого пігментного змішування разом з повним Digital-діапазоном потребує
 окремої специфікації матеріалу. Не заявляти таку сумісність у цьому патчі.
 
+**Реалізація B:** застосунок Fluid Paint завжди передає
+`FluidEngine.COLOR_MODEL.RGB` у screen render, export і Bake. `paletteMode`
+є окремим станом UI/Story і впливає тільки на RGB наступного мазка.
+`space:'pigment'` у payload лишається сумісним API-іменем, але канали містять
+закодований RGB `[1-g, 1-r, 1-b]`. `TilecraftStrokePlayer` зберігає стару
+поведінку за замовчуванням; Fluid Paint вмикає `canvasColorFormat:
+'encoded-rgb'` для story replay.
+
 ### 3.2 Стан застосунку
 
 - Додати окремий `paletteMode: 'natural' | 'digital'`, початково `natural`.
@@ -141,6 +149,12 @@ Digital — через `hsvToPigmentRgb(..., true)`. Зберегти чинни
   версіонувати або явно мігрувати. Звичайний PNG не потребує міграції.
   Пошук цього шляху — технічна задача агента B; політика вже визначена,
   окремого рішення власника для початку B не потрібно.
+
+Пошук B не знайшов міжсесійного відновлення material snapshots у застосунку:
+є лише runtime undo/story baseline textures у пам'яті та PNG background/export.
+Тому немає старого persisted material формату, який можна було б мовчки
+переінтерпретувати; майбутній persistent document format має отримати явний
+`materialFormat`.
 
 ### 3.5 Файли реалізації
 

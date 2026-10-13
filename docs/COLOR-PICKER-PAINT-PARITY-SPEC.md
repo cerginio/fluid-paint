@@ -1,12 +1,15 @@
 # Colour picker and paint parity repair
 
-Status: implementation specification; not implemented.
+Status: implemented through the fluid-2 B RGB-canvas contract for Fluid Paint.
+The older Natural/Digital pigment-renderer behavior is retained only as engine
+compatibility for hosts that do not opt into encoded RGB material.
 
 ## Outcome and scope
 
 Make the colour disc, its handles, all colour sliders, the compact hue strip,
-and the brush preview describe the pigment that the current paint engine will
-deposit. Preserve the existing painting and mixing behaviour.
+and the brush preview describe the visible RGB that the Fluid Paint app will
+deposit into its fixed RGB material canvas. Preserve the existing palette
+selection appearance, but not the old Natural pigment-mixing semantics.
 
 This specification supersedes the Phase 10c handoff's assertion that display
 and paint can use different saturation/value mappings and still agree. The

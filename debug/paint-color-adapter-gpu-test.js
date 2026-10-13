@@ -77,7 +77,7 @@ const server = http.createServer((request, response) => {
       assert.deepEqual(errors, []);
       assert.deepEqual(consoleErrors, []);
       assert.equal(smoke.adapter, 'object'); assert.equal(smoke.canDeposit, true);
-      assert.equal(smoke.colorModel, 0); assert.equal(smoke.glError, 0);
+      assert.equal(smoke.colorModel, 1); assert.equal(smoke.glError, 0);
       await page.screenshot({ path: path.join(output, entry.startsWith('dist') ? 'production.png' : 'source.png') });
       results.push({ entry, smoke });
       await page.close();

@@ -63,6 +63,9 @@ assert.throws(() => TilecraftStrokePlayer.hexToPigment('#bad'), /#RRGGBB/);
 assert.deepEqual(TilecraftStrokePlayer.hexToPigment('#ff0000', true, 'digital'), [1, 0, 1, 1]);
 assert.deepEqual(TilecraftStrokePlayer.hexToPigment('#00ff00', true, 'digital'), [0, 1, 1, 1]);
 assert.deepEqual(TilecraftStrokePlayer.hexToPigment('#0000ff80', true, 'digital'), [1, 1, 0, 128 / 255]);
+assert.deepEqual(TilecraftStrokePlayer.hexToEncodedRgb('#3b82f680'),
+  [1 - 0x82 / 255, 1 - 0x3b / 255, 1 - 0xf6 / 255, 128 / 255],
+  'encoded RGB material preserves requested display HEX for RGB renderer hosts');
 const triangle = { layers: [{ visible: true, tileShape: 'polygon', polygonSize: 3,
   gridSize: 12, opacity: 128, tiles: [{ x: 10, y: 10, c: '#ff0000', a: 64, sa: Math.PI / 6 }] }] };
 const trianglePlayer = new TilecraftStrokePlayer(engine);
@@ -81,6 +84,14 @@ new TilecraftStrokePlayer({ beginStroke(options) { triangleCalls.push(options); 
   strokeTo() {}, endStroke() {} }).replay(triangle, triangleOptions);
 assert.deepEqual(triangleCalls[0].brushShape, trianglePlan.operations[0].brushShape);
 assert.deepEqual(triangleCalls[0].color, trianglePlan.operations[0].color);
+let encodedRgbCalls = 0;
+const injectedPlan = trianglePlayer.compile(triangle, { ...triangleOptions, canvasColorFormat: 'encoded-rgb',
+  encodeRgb: (rgb) => { encodedRgbCalls++; assert.deepEqual(rgb, [1, 0, 0]); return [0.2, 0.3, 0.4]; } });
+assert.equal(encodedRgbCalls, 1, 'encoded host uses its shared adapter');
+assert.deepEqual(injectedPlan.operations[0].color.channels, [0.2, 0.3, 0.4]);
+const encodedPlan = trianglePlayer.compile(triangle, { ...triangleOptions, canvasColorFormat: 'encoded-rgb' });
+assert.deepEqual(encodedPlan.operations[0].color.channels, [1, 0, 1],
+  'encoded RGB opt-in keeps red exact under the fixed RGB renderer');
 for (const sides of [3, 4, 6, 8]) {
   const shape = TilecraftStrokePlayer.brushShape('polygon', { polygonSize: sides });
   assert.equal(shape.sides, sides);
