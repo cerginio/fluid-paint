@@ -4,6 +4,7 @@ const fs = require('fs/promises');
 const http = require('http');
 const path = require('path');
 const { writeShaderRegistry } = require('./debug/shader-bundle-build');
+const { finalizeRelease } = require('./debug/pwa-release-build');
 const registryFile = 'dist/.build/shader-registry.js';
 
 const plumber = require('gulp-plumber');
@@ -251,6 +252,7 @@ function startServer(done) {
     done();
   });
 
+  if (isProd) return; // Exact prebuilt production serving, never partial rewrites.
   watch(paths.html, html);
   watch(paths.css, styles);
   watch(paths.static, staticFiles);
@@ -263,7 +265,8 @@ function startServer(done) {
 const build = series(
   clean,
   shaderRegistry,
-  parallel(html, styles, shaders, scripts, staticFiles)
+  parallel(html, styles, shaders, scripts, staticFiles),
+  async function release() { if (isProd) await finalizeRelease(__dirname); }
 );
 
 exports.clean = clean;

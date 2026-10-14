@@ -8,7 +8,10 @@ const root = path.resolve(__dirname, '..');
 const dist = path.join(root, 'dist');
 const origin = 'https://fluid.storytilecraft.space';
 const read = (name) => fs.readFileSync(path.join(dist, name), 'utf8');
-const manifest = () => JSON.parse(read('manifest.webmanifest'));
+const map = JSON.parse(read('release.json')).assetMap;
+const built = (source) => map[source] || source;
+const sourceOf = (output) => Object.keys(map).find(key => map[key] === output) || output;
+const manifest = () => JSON.parse(read(built('manifest.webmanifest')));
 function local(value, base = `${origin}/index.html`) {
   assert.ok(value && !/^(?:[a-z][\w+.-]*:|\/\/)/i.test(value), `Nonlocal reference: ${value}`);
   const url = new URL(value, base);
@@ -69,18 +72,19 @@ test('any and maskable icons are true 192/512 PNGs copied byte-for-byte', () => 
     const icon = icons.find((i) => i.purpose === purpose && i.sizes === `${size}x${size}`);
     assert.ok(icon); assert.equal(icon.type, 'image/png');
     const file = local(icon.src); png(file,size);
-    assert.deepEqual(fs.readFileSync(file),fs.readFileSync(path.join(root,icon.src)));
+    assert.deepEqual(fs.readFileSync(file),fs.readFileSync(path.join(root,sourceOf(icon.src))));
   }
 });
 test('HTML links manifest, theme color, true favicon and 180px apple touch icon', () => {
   const html = read('index.html');
-  assert.match(html, /<link[^>]*rel="manifest"[^>]*href="manifest.webmanifest"/);
+  assert.ok(html.includes(`href="${built('manifest.webmanifest')}"`));
   assert.match(html, /<meta[^>]*name="theme-color"[^>]*content="#202024"/);
-  assert.match(html, /<link[^>]*rel="apple-touch-icon"[^>]*sizes="180x180"[^>]*href="assets\/icons\/apple-touch-icon.png"/);
-  png(local('assets/icons/apple-touch-icon.png'),180); png(local('favicon-64x64.png'),64);
+  assert.match(html, /<link[^>]*rel="apple-touch-icon"[^>]*sizes="180x180"/);
+  assert.ok(html.includes(`href="${built('assets/icons/apple-touch-icon.png')}"`));
+  png(local(built('assets/icons/apple-touch-icon.png')),180); png(local(built('favicon-64x64.png')),64);
 });
 test('Open Sans 400/600/700 normal use local valid woff2, swap and valid subset ranges', () => {
-  const css = postcss.parse(read('app/layout.css'));
+  const css = postcss.parse(read(built('app/layout.css')));
   const faces = [];
   css.walkAtRules('font-face', (rule) => {
     const d = {}; rule.walkDecls((decl) => { d[decl.prop] = decl.value; }); faces.push(d);
@@ -96,7 +100,7 @@ test('Open Sans 400/600/700 normal use local valid woff2, swap and valid subset 
       const file = local(ref, `${origin}/app/layout.css`);
       const bytes = fs.readFileSync(file);
       assert.equal(bytes.toString('ascii',0,4),'wOF2'); assert.equal(bytes.readUInt32BE(8),bytes.length);
-      assert.deepEqual(bytes,fs.readFileSync(path.join(root,path.relative(dist,file))));
+      assert.deepEqual(bytes,fs.readFileSync(path.join(root,sourceOf(path.relative(dist,file).replaceAll('\\','/')))));
       for (const range of face['unicode-range'].split(',')) {
         const match = range.match(/^U\+([\dA-F]+)(?:-([\dA-F]+)|\?+)?$/i); assert.ok(match);
         if (match[2]) assert.ok(parseInt(match[1],16)<=parseInt(match[2],16));
@@ -112,7 +116,7 @@ test('master remains the directed 733px source, not an upscaled favicon', () => 
   assert.equal(createHash('sha256').update(fs.readFileSync(path.join(root,'assets/icons/master-733.png'))).digest('hex'),
     '725ac9836dd734c49a7753777316cc273a5bfc50a8f632ddc61c2baf937b9003');
 });
-test('phase 1 does not register or ship a service worker', () => {
+test('phases 1-2 do not register or ship a service worker', () => {
   assert.ok(!fs.existsSync(path.join(dist,'sw.js')));
-  assert.doesNotMatch(read('bundle.js')+read('index.html'), /serviceWorker\s*\.\s*register\s*\(/);
+  assert.doesNotMatch(read(built('bundle.js'))+read('index.html'), /serviceWorker\s*\.\s*register\s*\(/);
 });

@@ -1,7 +1,9 @@
 # Handoff: Fluid PWA — offline shell та надійні оновлення
 
 Стан на 2026-10-14. **Фаза 1 прийнята власником командою `handoff:next` і закрита.**
-Реалізація підготовлена до closing commit поверх `3e341fc`; deploy не виконано.
+Фаза 1 закомічена в `67b9726`. **Фаза 2 прийнята власником командою
+`handoff:next` 2026-10-14 і закрита; closing commit поверх `67b9726`.**
+Production deploy не виконано.
 На вході `git status --short --untracked-files=all` був порожній; сторонніх
 правок не змінено. Фазування зі [спеки](./PWA-OFFLINE-UPDATE-SPEC.md)
 (ревізія 2), historical baseline `55ed4a4`. Production origin
@@ -27,9 +29,97 @@ harness для service worker — окрема spike-фаза **перед** SW 
 hashed assets і release identity йдуть **до** SW (фаза 2), щоб перший же SW
 мав чесну identity й atomic install і не переписувався потім.
 
-> **Далі:** фаза 2 — release identity, hashed assets і precache inventory.
-> До реалізації підтвердити відсутність зовнішніх прямих споживачів
-> `/bundle.js` і `/app/layout.css`. Production deploy не авторизований.
+> **Далі:** фаза 3 — QA harness для service worker (spike), після дозволу почати.
+> Власник дозволив реалізацію фази 2 («Починай фазу 2») після повідомлення
+> про видалення `/bundle.js` і `/app/layout.css`: це дозвіл міграції naming,
+> **не незалежне підтвердження audit зовнішніх прямих споживачів**.
+> SW/harness фази 3 і production deploy не авторизовані.
+
+## Фаза 2 — прийнята й закрита
+
+Production finalizer `debug/pwa-release-build.js` виконується після всіх Gulp
+streams: binary fonts/icons/favicon → SHA-256 names; JS → hash; CSS після
+переписування font URLs → hash; manifest після icon URLs → hash; HTML після
+всіх references. Імена мають **повний 64-hex content SHA-256** перед extension.
+Source/dev лишаються з фіксованими paths. Production `startServer` не має
+watchers: служить точний prebuilt dist, не переписує частину release.
+
+`dist/precache-inventory.json`: `schemaVersion:1`, `releaseId`, encoding,
+19 required entries (`path`, `sha256`, `size`): HTML, JS, CSS, manifest,
+9 WOFF2, 5 app icons, favicon. `dist/release.json`: той самий releaseId,
+diagnostic gitSha/buildTime і `assetMap` source→hashed output. Обидва JSON
+виключені з identity; SW відсутній. Shader дерева лишаються compatibility
+network-only output, не inventory. LICENSE/font license/upstream metadata
+не є required shell; master і scratch `.build` прибрані з production dist.
+Build чистить лише власний `dist`; тести stale output не видаляють нічого поза ним.
+
+**Canonical encoding v1:** entries перетворюються на `[absolute ASCII URL path,
+lowercase SHA-256]` pairs; lexicographic unsigned UTF-8 byte ordering за path;
+`JSON.stringify(pairs)` → UTF-8, без BOM, пробілів і trailing newline.
+Дозволені `/[A-Za-z0-9._/-]+` paths, без `//`, `.`/`..` сегментів, query,
+backslash, Unicode чи duplicates; SHA рівно 64 lowercase hex. `releaseId` =
+SHA-256 цих байтів. `size`, formatting inventory JSON, gitSha і buildTime
+не входять. Canonical empty list golden digest і exact nonempty bytes,
+reversed input, invalid paths/hash, path/content sensitivity — asserted tests.
+
+### Історичний eval реалізації 2026-10-14 (Node 24.19.0, npm 11.17.0, Windows x64)
+
+- **Build:** `npm run build` PASS; окремий logged production Gulp build PASS.
+- **Guard:** `npm run test:pwa-release` / його exact Node equivalent:
+  **4 passed / 0 failed** — два реальні production builds однакові, зміна
+  HTML у isolated source fixture змінює identity, stale file/directory зникають,
+  усі HTML/CSS/manifest references inventory-resolved, всі bytes/hashes/name
+  digests перевірені. `test:pwa-assets`: **7/0**, `test:shader-bundle`: **25/0**.
+  Shader negative-build fixture тепер копіює новий build helper, тому failure
+  досі доводить shader contract, не випадковий missing require.
+- **Probe:** `PWA_QA_PORT=3000 npm run test:pwa-release:browser`: **2 cases PASS**,
+  реальний Chromium 153.0.8010.12 / SwiftShader, WebGL1 та WebGL2. Два реальні
+  builds, кожен відкрито на одному origin; pointer draw, preview/commit resize
+  180×130 → 196×142, viewport resize, UI Bake, справжній PNG download/import,
+  retained story JSON import (`ready`). Bake rendered max delta = 0, wet material
+  = 0, Undo/Redo false, GL/page errors = 0. PNG 196×142; кожен із 19 inventory
+  URL HTTP 200 + byte SHA readback. Hashed 404 = 0, shader XHR = 0.
+- **Phase-1 regression probe:** `PWA_QA_PORT=3000 npm run test:pwa-assets:browser`:
+  **2 viewport PASS**, 9 faces loaded на кожному, MIME і manifest перевірені,
+  0 Google requests/manifest/page errors/same-origin failures. Guard не послаблено:
+  byte-for-byte provenance, icon sizes, font subsets/swap і no-SW збережені.
+- **Full:** `make verify` не запускався; scope-specific guard+probe вище — не
+  full-suite і не physical-device acceptance. Makefile реєструє PWA checks у
+  fast/browser tiers; `docs/SDLC.md` описує production схему.
+
+Release ID двох browser builds:
+`064492d543fbcc5cfe53f48c23de5f44338dc998384f807e52b6376c25aec890`.
+Evidence (абсолютні шляхи; не generated repo files):
+
+- `C:/Users/cergi/AppData/Local/Temp/fluid-pwa/phase2-RREa45/result.json`
+  — metadata, builds/cases/HTTP readback/cleanup; поруч HAR, trace, build/server
+  logs, inventory/release snapshots, 14 справжніх PNG (12 screenshots + 2 exports).
+- `C:/Users/cergi/AppData/Local/Temp/fluid-pwa/phase1-1791976458083-44816/result.json`
+  — fresh phase-1 compatibility probe, HAR/trace/6 PNG.
+- `C:/Users/cergi/AppData/Local/Temp/fluid-pwa-phase2-guard-ONChpQ/result.json`
+  — exact commands, environment/revision/dirty scope і окремі build/guard logs.
+- `C:/Users/cergi/AppData/Local/Temp/fluid-pwa-phase2-change-xYWmvD/result.json`
+  — change-sensitive isolated source fixture + build.log; власний fixture dist
+  видалено. Невдалий scratch `fluid-pwa-phase2-guard-SnQAyC` (неправильний
+  npm-cli locator) не acceptance; повторено через справжні Node entrypoints.
+
+Обидва власні Gulp servers завершені, port=3000, `portFree=true` після bind-back.
+Перший probe на 52406 також завершився й підтвердив bind-back. Чужих процесів
+не зупиняли. `dist` ignored, no generated evidence у repo. Власник прийняв фазу 2
+командою `handoff:next` 2026-10-14. Обмеження: resize painting — existing debug preview/commit API,
+не edge-pointer gesture; draw/Bake/export/import — реальний UI. Story playback,
+offline/install/update, persistent SW harness, Android/iOS, CDN headers/deploy
+не перевірені й лишаються майбутніми фазами. Physics/palette/vendor без правок.
+
+**Новий інваріант фази 2:** кожен built HTML/CSS/manifest reference належить
+inventory цього release; `releaseId` визначають тільки canonical paths+bytes.
+Механізм — `debug/pwa-release-build.js`; guard — `debug/pwa-release-test.js`.
+
+Closing check 2026-10-14: production build PASS; release guard **4/0**, assets
+**7/0**, shader compatibility **25/0** — свіжі, окремі suites. Виконано через
+прямі Node entrypoints після timeout npm shell invocation (той timeout не PASS).
+Browser PASS/evidence вище повторно прочитано; проби не перезапускались, це
+історичне покриття без змін production code після них. Межі NOT TESTED збережено.
 
 ## Що зроблено і працює
 
@@ -100,7 +190,7 @@ Closing check 2026-10-14: `npm run build` PASS, `npm run test:pwa-assets`
 
 ~~1. **Фаза 1 — локальні assets і нуль зовнішніх залежностей.**~~
    **ЗАКРИТО: прийнято власником 2026-10-14 (`handoff:next`).** Див.
-   [QA.md](./QA.md) і факти вище. Наступні фази не починались.
+   [QA.md](./QA.md) і історичні факти фази 1 вище. Фаза 2 закрита; 3–10 не починались.
    Контракт: self-hosted Open Sans woff2 400/600/700 з `@font-face` у
    `app/layout.css`, Google Fonts посилання зняте з `index.html`; icon master
    (vector або ≥512px) і згенеровані з нього 192/512 maskable та apple touch;
@@ -118,7 +208,9 @@ Closing check 2026-10-14: `npm run build` PASS, `npm run test:pwa-assets`
    Manifest парситься без помилок і показує іконки.
    Новий інваріант: built output не має зовнішніх network-залежностей.
 
-2. **Фаза 2 — release identity, hashed assets і precache inventory.**
+~~2. **Фаза 2 — release identity, hashed assets і precache inventory.**~~
+   **ЗАКРИТО: прийнято власником 2026-10-14 (`handoff:next`).** Історичні
+   eval/evidence вище; сценарії QA-2A–2G виконано до review.
    Контракт: build видає hash-named JS/CSS/font/icon assets, HTML посилається
    лише на assets свого release, `releaseId` = digest канонічного inventory
    (paths + SHA-256), git SHA і build time — діагностичні поля; SW-файл і
@@ -302,7 +394,8 @@ Closing check 2026-10-14: `npm run build` PASS, `npm run test:pwa-assets`
 - **Зміна схеми імен assets.** Фаза 2 прибирає фіксовані `/bundle.js` і
   `/app/layout.css` з production. У репозиторних документах прямих зовнішніх
   посилань на ці URL немає (embedded host відкриває сторінку, не bundle), але
-  власник має підтвердити, що жоден зовнішній споживач не лінкує їх напряму.
+  власник дозволив міграцію «Починай фазу 2» після повідомлення про ці URL.
+  Це не незалежний зовнішній consumer audit; deploy все ще окремо заборонений.
 - **Дозвіл на production deploy** — окремий крок власника після фази 10;
   спека його цим документом не дає.
 - **Фізичні пристрої для фази 10** — потрібні реальні Android Chrome та iOS

@@ -1,5 +1,5 @@
 'use strict';
-// Phase 1 only: real Chromium, exact built dist, real gulp MIME serving.
+// Phase-1 regression: real Chromium, exact phase-2 built dist, real gulp MIME.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -10,6 +10,7 @@ const { chromium } = require('playwright');
 const { acquireBrowserLock } = require('./browser-lock');
 acquireBrowserLock('Fluid PWA phase 1 assets');
 const root = path.resolve(__dirname,'..');
+const assetMap = JSON.parse(fs.readFileSync(path.join(root,'dist/release.json'),'utf8')).assetMap;
 const evidence = path.resolve(process.env.PWA_EVIDENCE_DIR || path.join(os.tmpdir(), 'fluid-pwa', `phase1-${Date.now()}-${process.pid}`));
 assert.ok(!evidence.startsWith(root + path.sep), 'Evidence must live outside repository');
 fs.mkdirSync(evidence,{recursive:true});
@@ -83,12 +84,15 @@ async function main() {
   }
   result.mime=[];
   for(const [file,type] of [['manifest.webmanifest','application/manifest+json'],['assets/icons/icon-512.png','image/png'],['.pwa-mime-probe.svg','image/svg+xml'],['assets/fonts/open-sans/open-sans-latin-400-normal.woff2','font/woff2']]) {
-    const response=await context.request.get(`${base}/${file}`); assert.equal(response.status(),200);
+    const response=await context.request.get(`${base}/${assetMap[file] || file}`); assert.equal(response.status(),200);
     assert.equal(response.headers()['content-type'].split(';')[0],type);result.mime.push({file,status:response.status(),contentType:response.headers()['content-type']});
   }
   assert.equal(result.requests.filter((r)=>/fonts\.(googleapis|gstatic)\.com/.test(r.url)).length,0);
   assert.deepEqual(result.responses.filter((r)=>r.url.startsWith(base)&&r.status>=400),[], 'No failed same-origin assets');
   assert.deepEqual(result.requestFailures.filter((r)=>r.url.startsWith(base)),[], 'No failed same-origin requests');
+  result.command='npm run test:pwa-assets:browser';
+  result.environment={node:process.version,platform:process.platform,arch:process.arch,serverCommand:`NODE_ENV=production PORT=${process.env.PWA_QA_PORT||'0'} node node_modules/gulp/bin/gulp.js startServer`};
+  result.inputs={releaseId:JSON.parse(fs.readFileSync(path.join(root,'dist/release.json'),'utf8')).releaseId,assetMap};
   result.status='PASS';
 }
 (async()=>{
@@ -99,7 +103,7 @@ async function main() {
     if(server && server.exitCode===null){const exited=new Promise((resolve)=>server.once('exit',resolve));server.kill();await exited;}
     if(fs.existsSync(svgFile)) fs.unlinkSync(svgFile);
     if(port){await free(port);result.portFree=true;}
-    result.finishedAt=new Date().toISOString();fs.writeFileSync(path.join(evidence,'server.log'),serverLog);
+    result.finishedAt=new Date().toISOString();result.exitCode=process.exitCode||0;fs.writeFileSync(path.join(evidence,'server.log'),serverLog);
     fs.writeFileSync(path.join(evidence,'result.json'),JSON.stringify(result,null,2));
     console.log(JSON.stringify({status:result.status,pages:result.pages.length,googleFontRequests:result.requests.filter((r)=>/fonts\.(googleapis|gstatic)\.com/.test(r.url)).length,port:result.port,portFree:result.portFree,evidence,error:result.error},null,2));
   }

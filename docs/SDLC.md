@@ -98,20 +98,54 @@ make build
 
 The production build always cleans and recreates `dist/`. Gulp:
 
-- concatenates JavaScript in declared dependency order into minified
-  `dist/bundle.js`;
+- concatenates JavaScript in declared dependency order, minifies it, then emits
+  `dist/bundle.<full-content-sha256>.js` in production (fixed `bundle.js` in dev);
 - evaluates the existing engine/app manifests with the build-only helper
-  `debug/shader-bundle-build.js`, writes `dist/.build/shader-registry.js`, and
+  `debug/shader-bundle-build.js`, temporarily writes `dist/.build/shader-registry.js`, and
   prepends that generated registry before all application scripts. There is
   no separately maintained shader inventory. Physical keys retain both trees
   (`fluid-engine/shaders/...`, `app/shaders/...`), while the loader preserves
   engine logical keys (`shaders/...`). GLSL strings retain their exact text,
   including newlines, directives and comments; GLSL is not minified;
 - processes `app/layout.css` with Autoprefixer and cssnano;
-- minifies `index.html`, replaces local script tags with `bundle.js`, and copies
-  it to `dist/`;
+- minifies `index.html`, replaces local script tags with the release bundle, and
+  rewrites stylesheet/manifest/font/icon references to content-hashed paths;
 - preserves the `app/shaders/` and `fluid-engine/shaders/` directory layouts;
 - copies `LICENSE`.
+
+Production finalization (`debug/pwa-release-build.js`) runs after all build
+streams complete. Binary WOFF2/PNG and JS are hashed first, then rewritten CSS
+and manifest, then HTML. Every hashed filename uses the full lowercase SHA-256
+of its final bytes. `release.json` contains `releaseId`, diagnostic `gitSha` and
+`buildTime`, and `assetMap` (source path → output path); `precache-inventory.json`
+contains the release's required shell files with absolute URL `path`, `sha256`
+and byte `size`. The current shell has 19 entries. Neither metadata JSON nor
+shader compatibility trees, licenses/upstream authoring notices, or icon master
+are required precache entries. The master and temporary `.build` are removed
+from production output. No service worker or caching is introduced in phase 2.
+
+Identity encoding `utf8-json-path-sha256-pairs-v1`: sort unique absolute ASCII
+URL paths by unsigned UTF-8 bytes, encode `[path, lowercase SHA-256]` pairs via
+compact JSON, UTF-8 without BOM or trailing newline, then SHA-256 the result.
+Sizes, metadata formatting, git SHA and build time do not affect identity.
+`npm run test:pwa-release` asserts exact canonical bytes/invalid inputs, two real
+clean production builds, every referenced asset/hash, stale-output removal and
+an isolated changed-input build. `npm run test:pwa-assets` retains phase-1
+provenance/manifest/font/no-SW guards under hashed naming.
+
+Production no longer publishes `/bundle.js` or `/app/layout.css`; dev/source
+retain them. Owner authorized this migration for phase 2; an independent audit
+of external direct consumers is not claimed. Production `startServer` serves
+the exact prebuilt dist without watchers. Use
+`PORT=3000 NODE_ENV=production node node_modules/gulp/bin/gulp.js startServer`
+for review and Ctrl+C afterward. `npm run test:pwa-release:browser` rebuilds
+twice, opens both artifacts on one origin and exercises WebGL1/2 draw/resize,
+Bake, actual PNG download and local PNG/story import. It writes metadata, HAR,
+trace, snapshots and PNGs to a unique external Temp run and proves its owned
+server port can be rebound. `test:pwa-assets:browser` remains the desktop/mobile
+typography/MIME regression probe. Never run dist-mutating tests concurrently.
+See [Fluid PWA handoff](spec/fluid-pwa/HANDOFF.md) and
+[QA](spec/fluid-pwa/QA.md) for acceptance, evidence and explicit future scope.
 
 Registry generation runs after clean and before scripts. Missing/unreadable,
 blank shaders or duplicate physical/logical keys fail the build with the path.
@@ -161,6 +195,8 @@ Run `make test-fast` for the normal inner loop. It executes:
 | `npm run test:timing` | Stroke timing across frame rates, overload, resume, taps, and endpoints |
 | `npm run test:shader-bundle` | Manifest equality, exact text, missing/empty/collision build failures, registry-first/no fallback, empty-list and exactly-once completion, HTTP/network/abort/timeout/HTML errors; actual Gulp negative builds in Temp fixtures |
 | `npm run test:tilecraft` | Story stroke mapping, pacing, navigation, stacking, and cancellation |
+| `npm run test:pwa-release` | Real production build determinism, canonical identity, hashed reference/hash inventory, stale output removal, changed-input identity |
+| `npm run test:pwa-assets` | Self-hosted manifest/icons/fonts, preserved bytes/subsets/licenses and no-SW guard on built production output |
 
 These tests do not require a browser and return a non-zero exit status on a
 failure.
@@ -179,6 +215,8 @@ the repository's browser lock prevents competing Chromium GPU runs.
 | `npm run test:tilecraft:gpu` | Accelerated story playback through the real GPU path |
 | `npm run test:story-ui` | Story import, controls, navigation, registry, and mobile layout |
 | `npm run test:bake` | GPU-backed bake behavior |
+| `npm run test:pwa-release:browser` | Two real production artifacts; WebGL1/2 pointer draw, API painting resize, viewport resize, UI Bake/PNG download/local import; every inventory HTTP/hash readback; owned-server cleanup |
+| `npm run test:pwa-assets:browser` | Production desktop/mobile fonts/layout/manifest/MIME regression; external unique evidence and port bind-back |
 
 Use `make test` for both the fast and browser tiers. Use `make verify` as the
 pre-review and pre-release gate; it runs all of those tests and then creates a

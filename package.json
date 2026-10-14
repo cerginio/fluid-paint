@@ -26,6 +26,8 @@
     "test:color": "node debug/color-parity-test.js",
     "test:pwa-assets": "node --test debug/pwa-assets-test.js",
     "test:pwa-assets:browser": "node debug/pwa-assets-browser-test.js",
+    "test:pwa-release": "node --test debug/pwa-release-test.js",
+    "test:pwa-release:browser": "node debug/pwa-release-browser-test.js",
     "test:shader-bundle": "node --test debug/shader-bundle-test.js",
     "test:shader-bundle:gpu": "node debug/shader-bundle-gpu-test.js",
     "test:color-adapter": "node --test debug/paint-color-adapter-test.js",

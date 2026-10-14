@@ -62,6 +62,8 @@ test-fast:
 	$(NPM) run test:timing
 	$(NPM) run test:shader-bundle
 	$(NPM) run test:tilecraft
+	$(NPM) run test:pwa-release
+	$(NPM) run test:pwa-assets
 
 test-browser:
 	$(NPM) run test:shader-bundle:gpu
@@ -71,6 +73,8 @@ test-browser:
 	$(NPM) run test:tilecraft:gpu
 	$(NPM) run test:story-ui
 	$(NPM) run test:bake
+	$(NPM) run test:pwa-release:browser
+	$(NPM) run test:pwa-assets:browser
 
 test:
 	$(MAKE) test-fast
