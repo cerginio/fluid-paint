@@ -3,6 +3,8 @@
 Стан на 2026-10-14. **Фаза 1 прийнята власником командою `handoff:next` і закрита.**
 Фаза 1 закомічена в `67b9726`. **Фаза 2 прийнята власником командою
 `handoff:next` 2026-10-14 і закрита; closing commit поверх `67b9726`.**
+**Фаза 3 прийнята власником командою `handoff:next` 2026-10-14 і закрита;
+код і closure-документи входять у closing commit поверх `ff429d4`.**
 Production deploy не виконано.
 На вході `git status --short --untracked-files=all` був порожній; сторонніх
 правок не змінено. Фазування зі [спеки](./PWA-OFFLINE-UPDATE-SPEC.md)
@@ -29,11 +31,79 @@ harness для service worker — окрема spike-фаза **перед** SW 
 hashed assets і release identity йдуть **до** SW (фаза 2), щоб перший же SW
 мав чесну identity й atomic install і не переписувався потім.
 
-> **Далі:** фаза 3 — QA harness для service worker (spike), після дозволу почати.
-> Власник дозволив реалізацію фази 2 («Починай фазу 2») після повідомлення
-> про видалення `/bundle.js` і `/app/layout.css`: це дозвіл міграції naming,
-> **не незалежне підтвердження audit зовнішніх прямих споживачів**.
-> SW/harness фази 3 і production deploy не авторизовані.
+> **Далі:** фаза 4 — SW: install, перевірений precache, fetch routing,
+> після окремого дозволу почати. Фаза 3 прийнята й закрита;
+> [QA-3A–3G](./QA.md), [PHASE3-REPORT.md](./PHASE3-REPORT.md).
+> Фаза 4 і production deploy ще не авторизовані.
+> Історичний дозвіл фази 2 на naming migration не є незалежним external-consumer audit.
+
+## Фаза 3 — прийнята й закрита
+
+Прийнято власником через `handoff:next` 2026-10-14; deploy не виконано. Нові `debug/pwa-sw-harness.js`,
+`pwa-sw-fixture.js`, `pwa-sw-selftest.js`, `pwa-sw-harness-test.js` і три
+package scripts. Production app/engine/Gulp/Netlify не змінено, `dist/sw.js`
+відсутній. API, commands та exact artifacts — [PHASE3-REPORT.md](./PHASE3-REPORT.md).
+
+Disposable `/sw.js` існує тільки як overlay власного HTTP server, scope
+`/__pwa_fixture/`; real install fetch кешує HTML і 29-byte server text.
+Reusable persistent Playwright harness: всі tabs і browser закриваються;
+новий процес запускає той самий profile, offline встановлено **до першого
+navigation**. CacheStorage читається з browser із size/SHA-256; active/waiting
+message protocol має UUID, unrelated-ID filter і bounded timeout. Waiting
+стан очікується до `installed`, не registration/update success. Production-like
+server читає незмінний prebuilt dist, MIME правильні, `/sw.js` і обидва metadata
+no-store, HTML no-cache, immutable лише для full SHA-named assets, 404 без SPA fallback.
+
+Історичний eval реалізації 2026-10-14, Node 24.19.0 / Chromium 153.0.8010.12:
+
+- `npm run build`: PASS, exit 0.
+- `npm run test:pwa-sw -- …`: Node guard **5 passed / 0 failed**;
+  actual fixture browser selftest **8 cases PASS / 0 failed**.
+- `npm run pwa:sw:review -- … --resume`: **8 cases PASS / 0 failed**;
+  другий окремий Node process на тому самому profile/origin читає попередню
+  v2 і exact cache snapshot до registration, не чистий profile.
+- `npm run test:pwa-assets`: retained **7 passed / 0 failed**, no-production-SW
+  guard не послаблено. Full `make verify` не запускався.
+- У кожному browser invocation: 2 runs, 2 real offline cold starts,
+  4 closed/disconnected persistent browser processes, 0 page errors;
+  19 inventory HTTP/SHA/MIME/header readbacks і 3 metadata/SW no-store responses.
+  Active v1/waiting v2 у першому; active v2/waiting v3 у другому. `IGNORE` timeout
+  250ms → expected failure, фактично 260ms/266ms; наступний STATUS успішний.
+  Natural activation після close; offline cached byte `fromServiceWorker=true`.
+  Final cache snapshots: перший 2 caches/4 entries; другий 3/6 (fixture only).
+
+Evidence **поза repo**:
+`C:/Users/cergi/AppData/Local/Temp/fluid-pwa-phase3-final-JSzEQD/`:
+`result.json` має точні commands/exit codes і stdout/stderr logs; browser
+`guard-selftest/result.json`, `probe-resume-review/result.json`; shared `profile/`;
+`verified-summary.json`, `independent-bind-back.json`. У acceptance pair:
+**8 real PNG, 8 traces, 8 HAR**, по 4 кожного на invocation; `server.json` і
+`browser.json` у кожному. Обидва власні servers stopped, port=3000,
+`portFree=true` після bind-back; незалежний bind-back також PASS. Review stand
+не залишено, чужих процесів не зупиняли. QA-3A–3G виконано до review.
+
+Незалежний parent rerun: guard **5/0**, first/resume browser **8/0 кожен**,
+retained assets **7/0**; новий profile/origin port 62805, усі browser/server
+cleanup та bind-back PASS. Evidence:
+`C:/Users/cergi/AppData/Local/Temp/fluid-pwa-phase3-parent-9JsNbW/`;
+commands/results і visual inspection — [PHASE3-REPORT.md](./PHASE3-REPORT.md).
+Це повторні suites, не додаткові унікальні tests.
+
+Межі: production SW/app offline, readiness/install/update UX, partial install
+negative matrix, cap/rollback, CDN/deploy, Android/iOS/standalone, OS reboot та
+storage eviction — NOT TESTED / наступні фази. Fixture caches навмисно
+збережені, це не production retention policy. Scratch timing race waiting-state
+виправлено bounded polling; failed scratch runs не є acceptance.
+
+**Новий інваріант фази 3:** second process/profile restart не може видавати
+чистий профіль за persistent proof; offline cold navigation має SW response
+після browser close, а protocol failure має deadline. Механізм/guard/probe —
+`debug/pwa-sw-selftest.js`; static/server guard — `pwa-sw-harness-test.js`.
+
+Closing check фази 3 (2026-10-14): production build PASS; harness guard **5/0**,
+retained assets **7/0** — свіжі окремі suites. Browser first/resume **8/0 кожен**
+вище — історичні, result.json повторно прочитано, без перезапуску проб.
+Port 3000 незалежно bind-back PASS; межі NOT TESTED збережено.
 
 ## Фаза 2 — прийнята й закрита
 
@@ -190,7 +260,8 @@ Closing check 2026-10-14: `npm run build` PASS, `npm run test:pwa-assets`
 
 ~~1. **Фаза 1 — локальні assets і нуль зовнішніх залежностей.**~~
    **ЗАКРИТО: прийнято власником 2026-10-14 (`handoff:next`).** Див.
-   [QA.md](./QA.md) і історичні факти фази 1 вище. Фаза 2 закрита; 3–10 не починались.
+   [QA.md](./QA.md) і історичні факти фази 1 вище. Історично після фази 1 наступною була фаза 2; тепер 1–2 закриті,
+   тепер фаза 3 також закрита, 4–10 не починались.
    Контракт: self-hosted Open Sans woff2 400/600/700 з `@font-face` у
    `app/layout.css`, Google Fonts посилання зняте з `index.html`; icon master
    (vector або ≥512px) і згенеровані з нього 192/512 maskable та apple touch;
@@ -224,7 +295,9 @@ Closing check 2026-10-14: `npm run build` PASS, `npm run test:pwa-assets`
    на hashed шляхах.
    Новий інваріант: усі посилання built HTML належать inventory цього release.
 
-3. **Фаза 3 — QA harness для service worker (spike).**
+~~3. **Фаза 3 — QA harness для service worker (spike).**~~
+   **ЗАКРИТО: прийнято власником 2026-10-14 (`handoff:next`).** Історичні eval/evidence
+   вище; [QA-3A–3G](./QA.md), [report](./PHASE3-REPORT.md).
    Контракт: браузерний harness у `debug/` із persistent Playwright profile
    і production-like serving (правильні content types, `no-store` для
    `/sw.js` і metadata), що вміє: зареєструвати **викидний** SW, закрити всі

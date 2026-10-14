@@ -35,6 +35,118 @@ PWA_QA_PORT=3000 npm run test:pwa-release:browser
 Phase-2 runner сам робить два production builds; evidence — автоматичний unique
 `phase2-…`. Не запускати guards/probes паралельно із сервером (працюють з dist).
 
+## Фаза 3 — persistent SW harness (2026-10-14, прийнята)
+
+**Прийнято власником через `handoff:next` 2026-10-14, закрито.** Deploy не виконано. Це викидна fixture, не production SW/app.
+Усі QA-3A–3G покриті real Playwright eval; людина перевіряє читабельність
+скриншотів і межі результату. [Компактний звіт](./PHASE3-REPORT.md).
+
+### Запуск фази 3
+
+Попередній ручний Gulp server має бути зупинений. Порт 3000 не займати чужим
+процесом; якщо зайнятий, вибрати інший **однаковий для обох commands**.
+Інтернет не потрібний за наявності Playwright/Chromium; це localhost secure
+context. Evidence та profile — лише дочірні каталоги `os.tmpdir()`, не repo.
+`--review` відкриває справжній headed Chromium і сам закриває його після тесту;
+сервер не лишається для ручних кліків. Стала сторінка review — real PNG files.
+
+З кореня repo, Git Bash, один термінал; `PWA_PHASE3` лишити в цьому shell:
+
+```sh
+PWA_PHASE3="$(node -e 'const fs=require("fs"),os=require("os"),path=require("path");console.log(fs.mkdtempSync(path.join(os.tmpdir(),"fluid-pwa-phase3-review-")))')"
+npm run build
+npm run test:pwa-sw -- --port 3000 --profile "$PWA_PHASE3/profile" --evidence "$PWA_PHASE3/guard-selftest"
+npm run pwa:sw:review -- --port 3000 --profile "$PWA_PHASE3/profile" --evidence "$PWA_PHASE3/probe-resume-review" --resume
+npm run test:pwa-assets
+```
+
+Перший command створює fixture v1, другий **окремий Node process** бачить її
+v2/cache без registration і переходить до v3. Повторний review на цьому
+профілі запускати тільки з `--resume` і новим `--evidence`; не видаляти кеші
+для «зеленого» результату. `--resume` без валідного marker чи зі зміненим port
+відхиляється. Default `npm run test:pwa-sw:browser` має власний новий profile
+і dynamic port. Для швидкого selftest можна запускати без headed review.
+Якщо shell npm wrapper не працює, exact Node entrypoint цього checkout:
+`node 'C:/Program Files/nodejs/node_modules/npm/bin/npm-cli.js'` замість `npm`.
+Саме через цей npm entrypoint виконано всі scripts у final eval.
+
+Історичні окремі результати реалізації: build PASS; guards **5/0**, browser selftest **8/0**;
+separate-process resume probe **8/0**; retained assets **7/0**. Не сумувати suites.
+Chromium 153.0.8010.12, Node 24.19.0. Обидва server stop/bind-back PASS,
+0 page errors; negative timeout 250ms фактично 260ms/266ms у final pair.
+
+Evidence root поточного eval:
+`C:/Users/cergi/AppData/Local/Temp/fluid-pwa-phase3-final-JSzEQD/`.
+Тут `result.json` із exact commands/exit codes та stdout/stderr logs;
+`guard-selftest/result.json`, `probe-resume-review/result.json`,
+`verified-summary.json`, `independent-bind-back.json`. У кожному browser
+підкаталозі 4 PNG, 4 traces, 4 HAR, `server.json`, `browser.json`.
+Разом pair має 8 PNG / 8 traces / 8 HAR. Шляхи нижче з `$PWA_PHASE3` — для
+вашого нового запуску; для вже виконаного eval замінити його цим root.
+
+Parent незалежно повторив guard **5/0**, два browser invocations **8/0 кожен**
+і retained assets **7/0** на новому shared profile/origin port 62805.
+Додаткове evidence: `C:/Users/cergi/AppData/Local/Temp/fluid-pwa-phase3-parent-9JsNbW/`
+(`verification.json`, `first/result.json`, `resume/result.json`, logs/PNG/trace/HAR).
+Cleanup/bind-back PASS; screenshot waiting v2/v3 переглянуто parent.
+Це повторне підтвердження, не додатковий унікальний test count.
+
+### QA-3A. Guard і disposable control
+
+**qa:mode:** cli
+**qa:open:** термінал у `D:/work/fluid-paint/fluid-paint`; fixture URL під час runner — `http://127.0.0.1:3000/__pwa_fixture/`.
+**qa:action:** виконати build та перший `npm run test:pwa-sw -- …` із recipe вище, на новому profile.
+**qa:inspect:** stdout та `$PWA_PHASE3/guard-selftest/run1-online.png`; поля `runs[0].state`, `runs[0].active` у `result.json`.
+**qa:expected:** Node guards 5 passed/0 failed; browser cases=8, status=PASS, exitCode=0; active.version=`v1`, state.active=`activated`, controller=`http://127.0.0.1:3000/sw.js`, scope=`http://127.0.0.1:3000/__pwa_fixture/`, updateViaCache=`none`. PNG показує «Fluid PWA phase 3 — fixture only», не painting app. Покрито пробою.
+
+### QA-3B. Другий Node process бачить попередній profile
+
+**qa:mode:** cli
+**qa:open:** той самий термінал, `PWA_PHASE3` і profile після QA-3A.
+**qa:action:** виконати `npm run pwa:sw:review -- … --resume` із recipe, не очищати site data/profile.
+**qa:inspect:** `$PWA_PHASE3/probe-resume-review/result.json`, `persistedFromPreviousInvocation` та `run1-online.png`.
+**qa:expected:** 8 cases PASS; resume=true, baseline=`v2`; до registration controller уже існує, active=`v2`, два caches/four entries byte-for-byte дорівнюють final cold snapshot QA-3A. Profile і origin ті самі; це не чистий профіль. Після probe збережено v3, три fixture caches/six entries. Покрито separate-process probe.
+
+### QA-3C. Offline cold navigation після повного закриття
+
+**qa:mode:** cli
+**qa:open:** `$PWA_PHASE3/guard-selftest/run1-cold-offline.png` та `run2-cold-offline.png`; underlying URLs — `http://127.0.0.1:3000/__pwa_fixture/?cold=run1-cold-offline` і `http://127.0.0.1:3000/__pwa_fixture/?cold=run2-cold-offline`.
+**qa:action:** відкрити обидва real PNG, прочитати `coldStarts` і `cleanup.contextClosures` у result того самого runner.
+**qa:inspect:** стале `offline: true`, active version, cached-byte текст, fromServiceWorker і browserDisconnected у JSON.
+**qa:expected:** два coldStarts; offlineBeforeNavigation=true до першого navigation; response HTTP 200/fromServiceWorker=true; byte рівно `fluid-pwa-phase3-cached-byte\n` (29 bytes, SHA у звіті); versions v1/v2, усі попередні contexts мають browserDisconnected=true і закриті tabs. Не лише reload/live offline toggle. Покрито пробою; OS reboot не заявляється.
+
+### QA-3D. Active/waiting request-ID protocol
+
+**qa:mode:** cli
+**qa:open:** `$PWA_PHASE3/guard-selftest/run2-waiting.png`, відповідний result.json.
+**qa:action:** відкрити PNG, знайти case `active v1 / waiting v2 request IDs ignore unrelated replies`.
+**qa:inspect:** `states.active`, `states.waiting`, два `replies` з target/version/requestId; у headed probe аналогічно v2/v3.
+**qa:expected:** active=`activated`, waiting=`installed`; active reply v1, waiting reply v2, різні UUID і elapsedMs<2000; injected unrelated request-ID reply `WRONG` не прийнято. Fixture не робить skipWaiting/clients.claim; після close natural activation. Покрито concurrent real MessageChannel requests.
+
+### QA-3E. Негативний bounded timeout
+
+**qa:mode:** cli
+**qa:open:** `$PWA_PHASE3/guard-selftest/result.json` і `run2-waiting.png`.
+**qa:action:** знайти `negativeTimeout` і наступний `protocol` STATUS reply для waiting worker.
+**qa:inspect:** expectedFailure, timeoutMs, elapsedMs, error і наступна version.
+**qa:expected:** IGNORE не відповідає: expectedFailure=true, timeoutMs=250, error містить `SW_REQUEST_TIMEOUT waiting IGNORE` та UUID; 200≤elapsedMs<3000 (final eval 260ms). Наступний STATUS v2 успішний; тест PASS саме за очікувану відмову, не замаскований network failure. Покрито пробою.
+
+### QA-3F. Cache bytes і production-like headers
+
+**qa:mode:** cli
+**qa:open:** `$PWA_PHASE3/guard-selftest/result.json` і `server.json`.
+**qa:action:** прочитати `http`, `coldStarts[1].caches`, logs 404; виконати `npm run test:pwa-assets` з recipe.
+**qa:inspect:** 19 inventory responses і 3 SW/metadata responses; byte entry URL/status/MIME/size/SHA; retained guard summary.
+**qa:expected:** усі 19 production entries status=200, hashVerified=true і правильний MIME; hash-named assets immutable, HTML no-cache; `/sw.js`, `/release.json`, `/precache-inventory.json` no-store. Unknown JS має 404, не HTML fallback. Cache byte status=200, text/plain, 29 bytes, SHA `fdcb9c1acae2c9c5d0d836c55057415afdbc0b731f94f5a1e69dbf0cce8bf237`; retained assets 7/0 і production `dist/sw.js` відсутній. 405 перевіряє Node server guard, не browser log. Покрито guard+probe.
+
+### QA-3G. Cleanup та bind-back
+
+**qa:mode:** cli
+**qa:open:** термінал у корені repo після обох runners; їхні result.json.
+**qa:action:** виконати `node -e 'require("./debug/pwa-sw-harness").bindBack(3000).then(()=>console.log("portFree=true"))'`.
+**qa:inspect:** stdout/exit code, `cleanup` у двох result.json; профіль лишається зовні, servers не відповідають.
+**qa:expected:** stdout `portFree=true`, exit 0; serverStopped=true/portFree=true, contextsClosed=4 у кожному invocation, кожен browserDisconnected=true. Чужі процеси не зупиняти; fixture server не залишено. Команду й independent bind-back виконано до review.
+
 ## Фаза 2 — release identity та hashed assets (2026-10-14, прийнята)
 
 Історичний eval реалізації: build PASS; guard: release **4/0**, phase-1 assets **7/0**, shader bundle
@@ -194,10 +306,11 @@ webmanifest/png/svg/woff2; SVG — тимчасовий probe-файл, приб
 ## Межі й не перевірене
 
 - Фаза 2 додає hashed assets та precache inventory, **не precache cache**.
-  SW, offline readiness/cold start, install/update UX, persistent SW harness,
+  Фаза 3 доводить persistent SW harness/offline cold start тільки викидної
+  fixture. Production SW/readiness, app offline cold start, install/update UX,
   hosting headers і deployment ще не реалізовані. Manifest/inventory — build
-  groundwork, не offline acceptance. Фаза 1 не додавала hashing (історичний факт).
-- Android/iOS standalone, фізичні пристрої та offline cold start — NOT TESTED,
+  groundwork, не app offline acceptance. Фаза 1 не додавала hashing (історичний факт).
+- Android/iOS standalone, фізичні пристрої та production app offline cold start — NOT TESTED,
   це майбутні фази. Ширина 320px — desktop Chromium viewport, не телефон.
 - Відкриття + ініціює чинний запит Demo index до CDN (2 запити у пробі).
   Це optional app data, не HTML/CSS/manifest dependency; CORS/demo playback
@@ -210,6 +323,13 @@ webmanifest/png/svg/woff2; SVG — тимчасовий probe-файл, приб
 
 ## Журнал фаз
 
+- 2026-10-14 — фаза 3 **прийнята власником через `handoff:next` і закрита**.
+  Код/документи входять у closing commit поверх `ff429d4`; deploy не виконано.
+  Свіжий closing build PASS, harness guard 5/0, retained assets 7/0.
+  Browser evidence вище повторно прочитано: історичні first/resume 8/0 кожен,
+  проби не перезапускались. Port 3000 незалежно bind-back PASS.
+  Межі NOT TESTED збережено. Далі фаза 4 після дозволу почати.
+
 - 2026-10-14 — фаза 2 прийнята власником (`handoff:next`) і закрита.
   Closing build PASS; свіжі guards release 4/0, assets 7/0, shader 25/0
   через прямі Node entrypoints (npm shell invocation завершився timeout, не PASS).
@@ -217,9 +337,9 @@ webmanifest/png/svg/woff2; SVG — тимчасовий probe-файл, приб
   повторно прочитано, без перезапуску проб. Межі NOT TESTED збережено.
   Guard 4/0 + regression assets 7/0 + shader 25/0; browser 2 WebGL cases PASS,
   phase-1 regression 2 viewport PASS. Evidence вище, servers cleaned up.
-  Далі фаза 3 — SW harness spike після дозволу почати; фаза 3 не починалась.
+  Історичний next-work тоді: фаза 3; тепер вона також закрита.
   Фаза 2 включена в closing commit; production deploy не виконано.
 - 2026-10-14 — фаза 1 прийнята власником (`handoff:next`) і закрита;
   closing build PASS, guard 7 passed / 0 failed. Browser evidence вище
   збережено; фізичні Android/iOS NOT TESTED. Deploy не виконано.
-  Історичний next-work тоді: фаза 2; тепер вона закрита, 3–10 не починались.
+  Історичний next-work тоді: фаза 2; тепер 1–3 закриті, 4–10 не починались.
