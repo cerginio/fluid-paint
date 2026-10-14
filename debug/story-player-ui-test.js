@@ -43,8 +43,15 @@ const server = http.createServer((request, response) => {
         sizeSlider: painter.brushSizeSlider.getValue(),
         barSizeSlider: painter.barSizeSlider.getValue(),
       };
-    }), { fluidity: 0.7, fluiditySlider: 0.7, bristles: 12, bristlesLabel: '12',
-      size: 12, sizeSlider: 12, barSizeSlider: 12 }, 'startup defaults agree with the engine and UI');
+    }), await page.evaluate(() => ({
+      fluidity: INITIAL_FLUIDITY,
+      fluiditySlider: INITIAL_FLUIDITY,
+      bristles: INITIAL_BRISTLE_COUNT,
+      bristlesLabel: String(INITIAL_BRISTLE_COUNT),
+      size: INITIAL_BRUSH_SCALE,
+      sizeSlider: INITIAL_BRUSH_SCALE,
+      barSizeSlider: INITIAL_BRUSH_SCALE,
+    })), 'configured startup defaults agree with the engine and UI');
     assert.equal(await page.evaluate(() => window.__painter.storyPlaybackController.speed), 1,
       'story playback defaults to 1x');
 

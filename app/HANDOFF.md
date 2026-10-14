@@ -18,9 +18,34 @@ transport/model/bridge не змінювати.
 brush size `12`. Ці зміни в `paint-setup.js` / `paint.js` не є виконанням
 фаз A–C; engine defaults інших хостів лишаються чинними.
 
-> **Далі:** фази A–C завершено й прийнято. Нової фази не призначено;
-> чекати наступного завдання власника. Physical GPU/mobile coverage debt
-> збережено; deploy поза scope.
+> **Далі:** A–C та release follow-up завершено й прийнято власником.
+> Production: https://fluid.storytilecraft.space/?webgl=2&debug=none&diag=0&seed=41
+> C: `d636098`; release follow-up прийнято через `handoff:next` 2026-10-14.
+> Нової фази не призначено; чекати наступного завдання.
+> Попереднє обмеження deploy поза scope стосувалось A–C; цей deploy
+> явно дозволено власником окремо. Physical GPU/mobile debt збережено.
+
+## Release / production QA — 2026-10-14
+
+- Власник дозволив виправлення тесту та production deploy для QA.
+- `debug/story-player-ui-test.js` звіряє engine/UI з `INITIAL_*` конфігом,
+  без hardcoded brush size 12. Production default 32 уже в `c2a537d`.
+- Повний npm-еквівалент `make verify` PASS, включно зі story UI та Bake;
+  color 42/42, adapter 6/6, shader unit 25/25. Фінальний production build PASS.
+- Netlify site `79a5d98c-0ff5-47fd-b048-64d714854ff9`;
+  deploy `6acf2dc4387e01034f6d18d8`, production https://fluid.storytilecraft.space.
+  Immutable URL: https://6acf2dc4387e01034f6d18d8--fluid-paint.netlify.app.
+- Readback production index.html/bundle.js/app/layout.css: HTTP 200,
+  побайтно рівні локальному verified dist. Browser smoke: engine ready,
+  brush size 32, registry present, 0 shader requests, pageerrors [].
+  Screenshot/result: `C:/Users/cergi/AppData/Local/Temp/fluid-prod-qa-vCqdcH/`.
+- Це startup smoke на SwiftShader, не production draw/resize/Save або
+  physical GPU PASS. Повні draw/resize/Save перевірки пройшли локально.
+- Release follow-up прийнято власником через `handoff:next` 2026-10-14;
+  A–C не перевідкривали. Closing rerun `npm run test:story-ui` PASS,
+  `git diff --check` PASS. Повний gate і production smoke вище — результати
+  перед deploy; зараз їх повторно не запускали. Retained coverage debt
+  не перетворено на physical GPU або production draw/resize/Save PASS.
 
 ## Що зроблено і працює
 

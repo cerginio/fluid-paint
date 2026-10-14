@@ -20,6 +20,39 @@ Stdout: `C:/Users/cergi/AppData/Local/Temp/fluid-2-A-final-gpu.log`.
 власний temp-каталог. Після eval сервер зупинено, порт звільнено.
 На цій машині 3000 повернув EACCES, 8087 зайнятий; чужий сервер не чіпали.
 
+## Release / production QA — 2026-10-14
+
+- Власник дозволив виправлення тесту та production deploy для QA.
+- `debug/story-player-ui-test.js` звіряє engine/UI з `INITIAL_*` конфігом,
+  без hardcoded brush size 12. Production default 32 уже в `c2a537d`.
+- Повний npm-еквівалент `make verify` PASS, включно зі story UI та Bake;
+  color 42/42, adapter 6/6, shader unit 25/25. Фінальний production build PASS.
+- Netlify site `79a5d98c-0ff5-47fd-b048-64d714854ff9`;
+  deploy `6acf2dc4387e01034f6d18d8`, production https://fluid.storytilecraft.space.
+  Immutable URL: https://6acf2dc4387e01034f6d18d8--fluid-paint.netlify.app.
+- Readback production index.html/bundle.js/app/layout.css: HTTP 200,
+  побайтно рівні локальному verified dist. Browser smoke: engine ready,
+  brush size 32, registry present, 0 shader requests, pageerrors [].
+  Screenshot/result: `C:/Users/cergi/AppData/Local/Temp/fluid-prod-qa-vCqdcH/`.
+- Це startup smoke на SwiftShader, не production draw/resize/Save або
+  physical GPU PASS. Повні draw/resize/Save перевірки пройшли локально.
+- Release follow-up прийнято власником через `handoff:next` 2026-10-14;
+  A–C не перевідкривали. Closing rerun `npm run test:story-ui` PASS,
+  `git diff --check` PASS. Повний gate і production smoke вище — результати
+  перед deploy; зараз їх повторно не запускали. Retained coverage debt
+  не перетворено на physical GPU або production draw/resize/Save PASS.
+
+### QA-Release1. Production bundle і базові дії
+
+**qa:open:** https://fluid.storytilecraft.space/?webgl=2&debug=none&diag=0&seed=41
+**qa:action:** Network: вимкнути Preserve log, увімкнути Disable cache,
+очистити список, reload. Намалювати мазок; змінити розмір полотна;
+відкрити панель і Save As…; повторити з webgl=1.
+**qa:inspect:** Network, полотно після resize, завантажений PNG.
+**qa:expected:** bundle.js замість окремих source JS; 0 .frag/.vert requests;
+brush size 32; матеріал видно після resize і в PNG; без init error.
+Startup/WebGL2 перевірено на prod; решта дій — human QA, не заявлений prod PASS.
+
 ## Фаза C — прийнята й закрита (2026-10-14)
 
 **Відтворення:** `npm run test:shader-bundle:gpu` у корені репозиторію.
