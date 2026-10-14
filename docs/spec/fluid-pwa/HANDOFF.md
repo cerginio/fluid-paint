@@ -1,9 +1,11 @@
 # Handoff: Fluid PWA — offline shell та надійні оновлення
 
-Стан на 2026-10-14. Тема `fluid-pwa` нова: коду ще немає, фазування складено
-зі [спеки](./PWA-OFFLINE-UPDATE-SPEC.md) (ревізія 2) командою
-`spec-to-handoff`. Baseline `55ed4a4`. Production origin
-`https://fluid.storytilecraft.space`.
+Стан на 2026-10-14. **Фаза 1 прийнята власником командою `handoff:next` і закрита.**
+Реалізація підготовлена до closing commit поверх `3e341fc`; deploy не виконано.
+На вході `git status --short --untracked-files=all` був порожній; сторонніх
+правок не змінено. Фазування зі [спеки](./PWA-OFFLINE-UPDATE-SPEC.md)
+(ревізія 2), historical baseline `55ed4a4`. Production origin
+`https://fluid.storytilecraft.space`; production не змінено.
 
 | Що | Де | Репозиторій |
 | --- | --- | --- |
@@ -25,12 +27,29 @@ harness для service worker — окрема spike-фаза **перед** SW 
 hashed assets і release identity йдуть **до** SW (фаза 2), щоб перший же SW
 мав чесну identity й atomic install і не переписувався потім.
 
-> **Далі:** фаза 1 — локальні assets і нуль зовнішніх залежностей.
+> **Далі:** фаза 2 — release identity, hashed assets і precache inventory.
+> До реалізації підтвердити відсутність зовнішніх прямих споживачів
+> `/bundle.js` і `/app/layout.css`. Production deploy не авторизований.
 
 ## Що зроблено і працює
 
-Коду теми ще немає. Наявний стан, на який фази спираються (перевірено
-2026-10-14 на `55ed4a4`):
+Прийнята реалізація фази 1 (closing commit):
+
+| Файл | Стан |
+| --- | --- |
+| `index.html` | Google Fonts знято; manifest, theme-color, apple touch; favicon sizes виправлено на 64. Footer attribution лишився текстом без зовнішніх anchors. |
+| `app/layout.css` | 9 self-hosted normal Open Sans faces: Latin/Latin-ext/Cyrillic × 400/600/700; swap, чинний fallback stack. Layout rules не змінено. |
+| `assets/fonts/open-sans/` | 9 справжніх WOFF2, verbatim SIL OFL 1.1 LICENSE та upstream metadata. |
+| `assets/icons/`, `debug/generate-pwa-icons.py` | Retained 733px master, 192/512 any і maskable, 180 apple touch; opaque background і safe circle; відтворюваний Pillow recipe. |
+| `assets/PROVENANCE.md` | Owner-directed icon source/hash, pinned Fontsource 5.3.0 archive/integrity, attribution, recipe. |
+| `manifest.webmanifest` | Fluid Paint, stable id `/`, explicit scope `/`, clean start_url `/`, standalone, colors, explicit any/maskable entries; без Android related apps. |
+| `gulpfile.js` | Binary-safe static copy зі збереженням paths; static watcher; MIME webmanifest/png/svg/woff2; `startServer` task для точного prebuilt dist. |
+| `debug/pwa-assets-test.js`, `package.json` | `npm run test:pwa-assets`: built-output guard. |
+| `debug/pwa-assets-browser-test.js`, `package.json` | `npm run test:pwa-assets:browser`: real Chromium + production dist + gulp MIME; унікальні external evidence, cleanup і port bind proof. |
+| `docs/spec/fluid-pwa/QA.md` | Виконувані українські кроки review, 8 сценаріїв, факти й чесні межі. |
+
+Історичний стан до реалізації (перевірено 2026-10-14 на `55ed4a4`;
+нижня таблиця — baseline, не поточний стан):
 
 | Файл | Стан |
 | --- | --- |
@@ -44,12 +63,44 @@ hashed assets і release identity йдуть **до** SW (фаза 2), щоб п
 
 ## Головні виміряні факти
 
-Порожньо: тема ще не має жодної реалізованої фази. Факти з'являються тут у
-міру закриття фаз, як у решті тем репозиторію.
+Історичний eval реалізації фази 1 на working tree `3e341fc` (2026-10-14):
+
+- `python debug/generate-pwa-icons.py`: 5 іконок; foreground radius 272px ≤
+  293.2px safe circle у 733px master. Source SHA-256 зафіксовано у provenance.
+- `npm run build`: PASS, production dist зібрано; generated dist ignored.
+- `npm run test:pwa-assets`: **7 passed / 0 failed**. HTML/CSS/manifest local
+  references існують; identity, sizes, PNG/WOFF2 signatures, byte-preserving
+  copy, static faces/swap/valid unicode ranges і відсутність SW перевірено.
+- `PWA_QA_PORT=3000 npm run test:pwa-assets:browser`: **PASS на 2 viewport**
+  (1280×900 і 320×900), Chromium 153.0.8010.12 / SwiftShader. 9 faces loaded
+  на кожному; 0 Google font requests, 0 manifest parse errors, 0 page errors,
+  0 failed same-origin assets. Слайдер клікнуто, File/Player/State переключено.
+  На 320px main panel 296px (x=12), extension 304px (x=8); controls у viewport.
+- Actual HTTP 200/MIME: webmanifest `application/manifest+json`, png `image/png`,
+  svg `image/svg+xml`, woff2 `font/woff2`. Probe SVG видалено після запуску.
+- Evidence: `C:/Users/cergi/AppData/Local/Temp/fluid-pwa/phase1-1791974679450-60396/`
+  (`result.json`, `network.har`, `trace.zip`, `server.log`, 6 PNG).
+- Власні review servers зупинено; порти 53256 (перший successful probe) і 3000
+  (остаточний probe) звільнені й перевірені bind-операцією; 3000 також повторно
+  перевірено незалежною командою. `git diff --check`: PASS.
+
+**Новий інваріант фази 1:** built HTML/CSS/manifest не має зовнішніх network
+references; fonts/icons/shell self-hosted. Guard — `debug/pwa-assets-test.js`.
+Це не заборона optional runtime Demo data: відкриття + дало 2 запити до CDN
+index; demo/CORS/playback не є acceptance фази 1. SW/offline/install/update,
+фізичні Android/iOS та production headers/deploy — NOT TESTED / майбутні фази.
+Ширина 320px — Chromium viewport, не фізичний телефон. Mobile extension
+накладається на основну панель за чинним layout; opacity/UX не змінено.
+Жодного engine/palette/vendored коду не змінено. Власник прийняв фазу 1
+командою `handoff:next`; перелічені NOT TESTED межі збережені.
+Closing check 2026-10-14: `npm run build` PASS, `npm run test:pwa-assets`
+7 passed / 0 failed. Browser evidence вище збережено без повторного запуску.
 
 ## НЕЗАКРИТЕ — почни звідси
 
-1. **Фаза 1 — локальні assets і нуль зовнішніх залежностей.**
+~~1. **Фаза 1 — локальні assets і нуль зовнішніх залежностей.**~~
+   **ЗАКРИТО: прийнято власником 2026-10-14 (`handoff:next`).** Див.
+   [QA.md](./QA.md) і факти вище. Наступні фази не починались.
    Контракт: self-hosted Open Sans woff2 400/600/700 з `@font-face` у
    `app/layout.css`, Google Fonts посилання зняте з `index.html`; icon master
    (vector або ≥512px) і згенеровані з нього 192/512 maskable та apple touch;
@@ -236,10 +287,13 @@ hashed assets і release identity йдуть **до** SW (фаза 2), щоб п
 
 ## Відкриті питання й зовнішні передумови
 
-- **Icon master.** Джерела немає: у репо лише `favicon-64x64.png` (64px),
-  апскейл до 512 неприйнятний. Власник надає
-  vector/≥512px арт чи фаза 1 малює власний мінімальний знак — рішення
-  потрібне до початку фази 1.
+- **Icon master — рішення закрите власником 2026-10-14.** Вказано існуючі
+  assets у `D:/work/js-games/ua-dream/tilecraft/images/icons/` і manifest у
+  `tilecraft/manifest.webmanifest`. Інспектовано 733/512px арт; master взято
+  з `icon-733-maskable.png` (733×733), byte-for-byte retained тут. Не upscale.
+  Provenance і recipe — `assets/PROVENANCE.md`. Арт owner-directed, нової
+  ліцензії на нього не вигадано; manifest адаптовано до Fluid Paint, без
+  StoryTilecraft/Android identity. Це не відкрита передумова фази 1.
 - **CORS allowlist демо-CDN.** `cdn.storytilecraft.cc` і r2.dev віддають
   `Access-Control-Allow-Origin: https://fluid.storytilecraft.space`. Чи
   додавати preview-origin Netlify в allowlist (потрібен доступ до

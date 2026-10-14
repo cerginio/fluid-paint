@@ -95,7 +95,8 @@ const paths = {
   engineShaders: 'fluid-engine/shaders/**/*.{glsl,frag,vert}',
   appShaders: 'app/shaders/**/*.{glsl,frag,vert}',
   html: 'index.html',
-  static: ['LICENSE', 'favicon-64x64.png']
+  static: ['LICENSE', 'favicon-64x64.png', 'manifest.webmanifest',
+    'assets/fonts/open-sans/**/*', 'assets/icons/*.png']
 };
 
 // Clean dist using Node's fs.rm so we avoid extra deps
@@ -191,7 +192,7 @@ function html() {
 function staticFiles() {
   // encoding:false обов'язковий — gulp 5 інакше читає файл як UTF-8 і псує
   // будь-який бінарник: у PNG байт 0x89 стає efbfbd, і іконка не відкривається.
-  return src(paths.static, { allowEmpty: true, encoding: false })
+  return src(paths.static, { allowEmpty: false, encoding: false, base: '.' })
     .pipe(dest(paths.dist));
 }
 
@@ -217,6 +218,10 @@ function startServer(done) {
     '.html': 'text/html; charset=utf-8',
     '.js': 'text/javascript; charset=utf-8',
     '.json': 'application/json; charset=utf-8',
+    '.webmanifest': 'application/manifest+json; charset=utf-8',
+    '.png': 'image/png',
+    '.svg': 'image/svg+xml',
+    '.woff2': 'font/woff2',
     '.frag': 'text/plain; charset=utf-8',
     '.vert': 'text/plain; charset=utf-8'
   };
@@ -248,6 +253,7 @@ function startServer(done) {
 
   watch(paths.html, html);
   watch(paths.css, styles);
+  watch(paths.static, staticFiles);
   // One watcher serializes manifest/shader/JS rebuilds; no competing writes
   // of registry and bundle. Manifests already belong to paths.js.
   watch([...paths.js, paths.engineShaders, paths.appShaders],
@@ -267,6 +273,8 @@ exports.styles = styles;
 exports.shaders = shaders;
 exports.html = html;
 exports.build = build;
+// Probe serves the exact prebuilt artifact without rebuilding it.
+exports.startServer = startServer;
 exports.serve = series(build, startServer);
 exports.dev = series(build, startServer);
 exports.default = build;
