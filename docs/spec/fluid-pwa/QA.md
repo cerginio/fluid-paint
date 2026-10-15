@@ -35,6 +35,115 @@ PWA_QA_PORT=3000 npm run test:pwa-release:browser
 Phase-2 runner сам робить два production builds; evidence — автоматичний unique
 `phase2-…`. Не запускати guards/probes паралельно із сервером (працюють з dist).
 
+## Фаза 6 — headers / detection (прийнята й закрита)
+
+**Прийнято власником через `handoff:next` 2026-10-15; фазу 6 закрито.**
+Фази 1–6 прийняті; closing commit поверх `5d876c7`, deploy не виконано.
+Далі фаза 7 після окремого дозволу. [PHASE6-REPORT.md](./PHASE6-REPORT.md).
+Преамбулу перевірено: рядка `**Деплой:**` немає; production prohibition має пріоритет.
+
+Запуск із кореня checkout: `node debug/pwa-phase6-eval.js`. Runner сам робить
+послідовні builds/guards/probes, закриває own browsers/servers та пише evidence
+у новий external Temp. Не запускати паралельно з іншими dist writers.
+Для ручного single-build review придатні команди преамбули; exact V1/V2/404
+матрицю відтворює runner, не звичайний Gulp server. Stand автора зупинений.
+
+Свіжий evidence `$E` =
+`C:/Users/cergi/AppData/Local/Temp/fluid-pwa-phase6-final-Bxucp5`;
+`$R = $E/detection-browser`, historical actual URL `$U` =
+`http://127.0.0.1:56608/?webgl=2&debug=none&diag=0&seed=41`.
+Цей порт тепер звільнений; screenshots/result — стійкий review artifact.
+Root result: **20 top-level commands exit 0**, runner PASS/exit 0.
+Guard suites: detection **15/0**, readiness **11/0**, worker **10/0**, release
+**4/0**, assets **7/0**, harness **5/0**, shader **25/0**, demo **8/0**, palette
+**6/0**; control API PASS. Browser: detection **7/0**, readiness **13/0**,
+production **10/0**, assets **2 viewport**, release **2 WebGL**, fixture **8 cases**.
+Різні suites/рівні не сумувати. Усі нові кроки виконано actual probe до review.
+
+
+Closing check 2026-10-15: production build PASS; свіжі окремі guards detection
+**15/0**, readiness **11/0**, worker **10/0**, release **4/0**, assets **7/0**,
+harness **5/0**. Збережені browser results повторно прочитано без перезапуску:
+detection **7 cases**, readiness **13 cases**, production **10 cases**, assets
+**2 viewport**, release **2 WebGL**, fixture **8 cases** — історичні PASS.
+Evidence readback PASS до closure edits: 20 command codes, 99 media artifacts,
+всі final/scratch порти bind-back PASS. Всі NOT TESTED межі збережено.
+
+### QA-6A. Headers та scheduler guards
+
+**qa:mode:** cli
+**qa:open:** термінал у `D:/work/fluid-paint/fluid-paint`.
+**qa:action:** `node debug/pwa-phase6-eval.js` (ручні servers перед цим зупинити).
+**qa:inspect:** root result, detection.stdout.log, netlify.toml та generated dist/_headers.
+**qa:expected:** PASS/exit 0; окремі counts вище. no-store для SW/двох metadata, no-cache для HTML; immutable лише exact full-SHA inventory paths, не fixed names. Startup/foreground/online/manual/timer, throttle 60000ms, coalescing, hidden stop, completion timer rearm, stale/duplicate/failed worker guards PASS. 15 хвилин перевірено injected clock, не wall-clock device QA. Local HTTP readback не є live Netlify acceptance.
+
+### QA-6B. Active V1 / identity UI
+
+**qa:mode:** browser
+**qa:open:** `$U` після fresh online install та explicit QA reload; `$R/v1-ready.png`.
+**qa:action:** натиснути summary «Offline / встановлення» внизу ліворуч.
+**qa:inspect:** offline status, active identity, last-check time/result; `$R/result.json` identities.
+**qa:expected:** pinned V1 ready, повний 64-hex active releaseId; updateViaCache=none. Час не «ще не було». Progress під час checking/downloading indeterminate, без byte/% claims; у стійкому стані hidden. Registration сама по собі ready не дає (retained readiness probe).
+
+### QA-6C. Failed required JS install
+
+**qa:mode:** cli
+**qa:open:** `$R/result.json`, `$R/server.json`, `$R/failed-install.png`.
+**qa:action:** виконати runner QA-6A та знайти case actual required JS 404 redundant install.
+**qa:inspect:** failed UI, waiting=null, actual active STATUS та 404 server entry.
+**qa:expected:** «Не вдалося перевірити / підготувати оновлення», не «Оновлення готове»; V1 активна. Це actual production SW/404, не лише mock. Retained production probe додатково покриває network cut і cold offline V1 після failed upgrades.
+
+### QA-6D. V2 waiting та «Пізніше»
+
+**qa:mode:** browser
+**qa:open:** та сама `$U`, server тепер віддає frozen V2; `$R/v2-waiting.png`, `$R/later-v1.png`.
+**qa:action:** натиснути «Перевірити оновлення», дочекатися «Оновлення готове», натиснути «Пізніше».
+**qa:inspect:** active/waiting identities та стійкий статус.
+**qa:expected:** active V1 `32c318ca80267327a6faa8b679730b046d44b26883166583636ddd7075c35b77`, waiting complete V2 `329d9fdc34cd3fbe0c2b4a5ce775bb5464da2d06d86a01fc6a354f09d2bb3d46`; після click «Оновлення відкладено». V1 URL/title не reload, V2 installed/waiting. «Оновити»/activation навмисно ще немає — фаза 7.
+
+### QA-6E. Waiting існує до UI bootstrap
+
+**qa:mode:** browser
+**qa:open:** `$U&existingWaiting=1` у другій вкладці при відкритій V1; `$R/existing-waiting-bootstrap.png`.
+**qa:action:** відкрити другу вкладку й summary, не робити ручного update.
+**qa:inspect:** active/waiting IDs і title; fromServiceWorker у result.
+**qa:expected:** старий pinned V1 HTML, title Fluid Paint; V2 already-waiting виявлено без нового updatefound. Actual SW response, не bootstrap mock. Повторні events не скидають Later для тієї самої identity (guard).
+
+### QA-6F. Mobile width та повні identities
+
+**qa:mode:** browser
+**qa:open:** друга вкладка QA-6E, viewport 320×900; `$R/320-waiting.png`.
+**qa:action:** залишити summary відкритим після QA-6E, змінити viewport на 320×900.
+**qa:inspect:** обидва довгі releaseId та bounds панелі.
+**qa:expected:** x=12, width=296, horizontal overflow=false; IDs переносяться, обидві кнопки доступні, вертикальний internal scroll дозволений. Warning видимий і collapsed. Це Chromium viewport, не фізичний телефон; expanded disclosure можна згорнути перед drawing.
+
+### QA-6G. Offline check не означає no-update
+
+**qa:mode:** browser
+**qa:open:** перша `$U` після «Пізніше»; `$R/offline-check-failed.png`.
+**qa:action:** вимкнути мережу контексту, натиснути «Перевірити оновлення».
+**qa:inspect:** last-check result та actual waiting STATUS у result.
+**qa:expected:** failed і «Це не означає, що оновлень немає», не no-update. V2 complete waiting збережено. Chromium може resolve update() з existing candidate offline; все одно робимо attempt, але не називаємо його online success. Late STATUS не стирає failed (guard).
+
+### QA-6H. Later лишає V1 працездатною, без mixed assets
+
+**qa:mode:** browser
+**qa:open:** та сама offline `$U`; `$R/later-v1-drawing.png`, `$R/later-v1-export.png`.
+**qa:action:** згорнути PWA disclosure, підготувати полотно recipe QA-2B, провести pointer stroke; panel grip → Save As… .
+**qa:inspect:** синій artwork, actual PNG та cache-snapshot/result loaded scripts.
+**qa:expected:** drawn.magnitude>0, GL error=0, download.failure=null, PNG 180×130; active V1 / waiting V2 незмінні. Scripts лише з V1 inventory, обидва complete cache inventories SHA-exact, no reload/title/URL change. Retained production/regression окремо виконує WebGL1/2 resize/Bake/import/story subset playback і embedded security без force clicks.
+
+### Межі фази 6 та cleanup
+
+Physical Android/iOS/Safari/A2HS/standalone, native GPU/OS reboot, 15-minute
+wall-clock/suspended lifecycle, native install dialog, browser quota/eviction/
+MIME/hash faults, full large-story completed playback, live Netlify/CDN headers,
+CORS/demo downloads, full make verify — NOT TESTED. Safe activation/reload,
+retention/cap/rollback та offline demos не реалізовано. Own browsers disconnected,
+servers stopped; final ports 61749/52260/54432/49202/59812/64177/56608 окремим
+process bind-back PASS. Root command/log містить exact bind command. Чужих
+процесів не зупиняли, review stand не залишено. Phase6 прийнята й закрита.
+
 ## Фаза 5 — readiness / install UX (прийнята, закрита)
 
 **Прийнято власником через `handoff:next` 2026-10-15, закрито.**
@@ -587,7 +696,8 @@ webmanifest/png/svg/woff2; SVG — тимчасовий probe-файл, приб
 - Історично фаза 2 додала inventory без CacheStorage; фаза 3 — лише fixture.
   Фаза 4 тепер реалізує production SW/app offline cold start, див. QA-4/report.
   Фаза 5 прийнята: readiness/install UX (див. QA-5);
-  update UX, hosting headers/deployment ще не реалізовані.
+  фаза 6 прийнята: detection/Later та hosting header definitions.
+  Safe activation/reload і live Netlify/CDN/deployment acceptance ще не виконані.
   Фаза 1 не додавала hashing (історичний факт); no-SW expectations фаз 1–3
   superseded фазою 4, fixture byte-preservation guard збережено.
 - Android/iOS standalone та фізичні пристрої — NOT TESTED, майбутні фази.
@@ -603,6 +713,11 @@ webmanifest/png/svg/woff2; SVG — тимчасовий probe-файл, приб
 - Icon master owner-directed; нової ліцензії на чужий арт не вигадано.
 
 ## Журнал фаз
+
+- 2026-10-15 — фаза 6 **прийнята власником через `handoff:next`, закрита**.
+  Closing commit поверх `5d876c7`; deploy не виконано. Історичний final eval —
+  QA-6 та PHASE6-REPORT; 20 commands exit 0. Свіжі closing guards наведено у QA-6.
+  Далі фаза 7 після окремого дозволу; всі NOT TESTED межі збережено.
 
 - 2026-10-15 — фаза 5 **прийнята власником через `handoff:next`, закрита**.
   Closing commit поверх `feba360`; deploy не виконано.

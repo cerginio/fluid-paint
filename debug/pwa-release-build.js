@@ -66,6 +66,10 @@ async function finalizeRelease(root, dist = path.join(root,'dist')) {
   let gitSha = null;
   try { gitSha = execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim(); } catch { /* diagnostics may be unavailable in source archives */ }
   await fs.writeFile(path.join(dist,'release.json'),JSON.stringify({schemaVersion:1,releaseId,gitSha,buildTime:new Date().toISOString(),assetMap},null,2)+'\n');
+  // Netlify path patterns are not regexes. Emit exact hash paths rather than
+  // a wildcard that could give fixed/non-hashed files a year-long lifetime.
+  await fs.writeFile(path.join(dist,'_headers'),Object.values(assetMap).map(file =>
+    `/${file}\n  Cache-Control: public, max-age=31536000, immutable\n`).join('\n'));
   const worker = require(path.join(root, 'app/pwa-worker.js')).fluidPwaWorker;
   await fs.writeFile(path.join(dist,'sw.js'),`'use strict';\n(${worker.toString()})(${JSON.stringify(inventory)});\n`);
   return inventory;

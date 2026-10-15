@@ -31,14 +31,77 @@ harness для service worker — окрема spike-фаза **перед** SW 
 hashed assets і release identity йдуть **до** SW (фаза 2), щоб перший же SW
 мав чесну identity й atomic install і не переписувався потім.
 
-> **Далі:** фаза 6 — headers і detection state machine, після окремого дозволу почати.
+> **Далі:** фаза 7 — безпечна активація і захист роботи, після окремого дозволу почати.
+> **Фаза 6 прийнята власником через `handoff:next` 2026-10-15 і закрита.**
 > **Фаза 5 прийнята власником через `handoff:next` 2026-10-15 і закрита.**
 > [QA-5A–5I](./QA.md), [PHASE5-REPORT.md](./PHASE5-REPORT.md).
 > **Фаза 4 прийнята власником через `handoff:next` 2026-10-15 і закрита** у `feba360`.
-> Фази 1–5 прийняті; 6–10 не починались. Closing commit поверх `feba360`; deploy не виконано.
+> Фази 1–6 прийняті; closing commit поверх `5d876c7`, 7–10 не починались.
+> Deploy не виконано. Фазу 7 не починати без окремого дозволу.
 > Production deploy окремо заборонено; naming migration не є external-consumer audit.
 
-## Фаза 5 — прийнята й закрита
+## Фаза 6 — прийнята й закрита
+
+Прийнято власником через `handoff:next` 2026-10-15; closing commit поверх
+`5d876c7`. Deploy не виконано. Далі фаза 7 після окремого дозволу.
+Реалізація, історичний final eval та browser evidence — нижче.
+
+`app/pwa-register.js`: detection factory із existing waiting до bootstrap,
+updatefound/statechange/controllerchange/redundant, dedup/epoch/object guards та
+active/waiting STATUS identity з request UUID/2000ms timeout. Startup,
+foreground, online, manual та visible 15-minute registration.update(); auto
+throttle 60000ms, concurrent coalescing, hidden stop, rearm після actual check
+completion. Pinned-shell readiness/embedded exclusions/genuine install UX збережені.
+UI: повні active/waiting IDs, last-check result/time, indeterminate progress,
+чесний offline/failed result; «Пізніше» не activate/reload. Phase7 machinery немає.
+
+`netlify.toml`: no-store SW+metadata, no-cache HTML. Immutable тільки **exact
+generated SHA paths у dist/_headers**, створені release finalizer; не широкий
+glob і не pseudo-regex у Netlify TOML. Fixed names ніколи не immutable.
+Live CDN headers NOT TESTED (production deploy заборонено), локальний actual
+HTTP readback не видається за Netlify validation. Naming/physics/palette/vendor незмінні.
+
+`node debug/pwa-phase6-eval.js`: final PASS / exit 0, **20 top-level commands
+exit 0**. Окремі guards passed/failed: detection **15/0**, readiness **11/0**,
+worker **10/0**, release **4/0**, assets **7/0**, harness **5/0**, shader **25/0**,
+demo **8/0**, palette **6/0**; control API PASS. Browser окремо: detection **7/0**,
+readiness **13/0**, production **10/0**, assets **2 viewport**, release **2 WebGL**,
+fixture **8 cases**. Не сумувати рівні/suites. Chromium 153.0.8010.12 / SwiftShader.
+
+Два actual production builds на одному persistent localhost origin: V1 active,
+V2 verified complete waiting. Actual JS404 -> redundant/failed; retry готовий.
+Друга вкладка з already-waiting до UI bootstrap показує pinned V1 + V2 waiting.
+«Пізніше» + offline check failure лишають V1 usable: actual stroke/PNG export,
+no reload, loaded scripts V1-only, обидва inventories cache SHA-exact.
+320px geometry/wrapping PASS. Retained regression cold offline/WebGL1/2/Bake/
+local import/playback subset/embedded та install UX PASS.
+
+Evidence поза repo:
+`C:/Users/cergi/AppData/Local/Temp/fluid-pwa-phase6-final-Bxucp5/`.
+Root result.json має exact commands/codes/logs; detection-browser має frozen
+v1/v2/source/profile, result/cache/server/browser JSON, 9 PNG, HAR та trace ZIP.
+Own browsers disconnected, servers stopped; independent bind-back final ports
+61749/52260/54432/49202/59812/64177/56608 PASS. Review stand не залишено.
+Повний source tracing, історичні failed attempts і межі — [report](./PHASE6-REPORT.md).
+
+Нові інваріанти: offline failure не стирається local STATUS; довга in-flight
+перевірка не втрачає майбутній timer; immutable definitions лише full-SHA
+inventory paths. Guard — pwa-detection-test.js (clock injected, не 15min wall-clock),
+probe — pwa-detection-browser-test.js. NOT TESTED: physical Android/iOS/Safari/
+A2HS/standalone, native GPU/OS reboot/install dialog, suspended/mobile wall-clock,
+quota/eviction/browser MIME/hash faults, full large-story playback, live CDN/
+CORS/demo downloads, full make verify. Фази 7–10 не реалізовані.
+
+
+Closing check 2026-10-15: production build PASS; свіжі окремі guards detection
+**15/0**, readiness **11/0**, worker **10/0**, release **4/0**, assets **7/0**,
+harness **5/0**. Збережені browser results повторно прочитано без перезапуску:
+detection **7 cases**, readiness **13 cases**, production **10 cases**, assets
+**2 viewport**, release **2 WebGL**, fixture **8 cases** — історичні PASS.
+Evidence readback PASS до closure edits: 20 command codes, 99 media artifacts,
+всі final/scratch порти bind-back PASS. Всі NOT TESTED межі збережено.
+
+## Фаза 5 — прийнята й закрита (історичний запис)
 
 Прийнято власником через `handoff:next` 2026-10-15; closing commit поверх
 `feba360`, deploy не виконано. [QA-5A–5I](./QA.md). Фаза 6 потребує окремого дозволу.
@@ -486,7 +549,10 @@ Closing check 2026-10-14: `npm run build` PASS, `npm run test:pwa-assets`
    чесно повідомляє втрату, а не показує готовність; на iOS-пристрої (або
    мобільному Safari preview) видно інструкцію A2HS, не кнопку установки.
 
-6. **Фаза 6 — headers і detection state machine.**
+~~6. **Фаза 6 — headers і detection state machine.**~~
+   **ЗАКРИТО: прийнято власником 2026-10-15 (`handoff:next`).**
+   Свіжий final eval і hosting exact-path уточнення — [PHASE6-REPORT.md](./PHASE6-REPORT.md).
+   [QA-6A–6H](./QA.md); далі фаза 7 після окремого дозволу.
    Контракт: нова секція `[[headers]]` у `netlify.toml` (`no-store` для
    `/sw.js` і metadata, `no-cache` для app HTML, `immutable` лише для hashed
    шляхів нової схеми); реєстрація з `updateViaCache: 'none'`; обробка

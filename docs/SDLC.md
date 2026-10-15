@@ -147,6 +147,17 @@ typography/MIME regression probe. Never run dist-mutating tests concurrently.
 See [Fluid PWA handoff](spec/fluid-pwa/HANDOFF.md) and
 [QA](spec/fluid-pwa/QA.md) for acceptance, evidence and explicit future scope.
 
+Phase 6 detection is production-only and never activates/reloads the app.
+`node debug/pwa-phase6-eval.js` serially runs its scheduler/headers guards,
+actual V1/V2 waiting/Later probe and retained production/readiness regressions.
+Evidence is external Temp; all owned servers/browsers are closed and ports
+rebound. The 15-minute scheduler uses an injected clock in guards, not a claim
+of physical background-device coverage. Netlify TOML defines no-store for SW
+and metadata and no-cache for app HTML. The finalizer generates `dist/_headers`
+with exact full-SHA asset paths for immutable caching: do not replace this with
+a wildcard that could match fixed/non-hashed names. No deployment is authorized
+by these local checks; live CDN headers still require separately permitted QA.
+
 Registry generation runs after clean and before scripts. Missing/unreadable,
 blank shaders or duplicate physical/logical keys fail the build with the path.
 The generated file is ignored with `dist/`; never hand-edit or commit it.
