@@ -1148,34 +1148,57 @@ class Paint {
             this.storyPlaybackController.state === 'paused';
     }
 
+    // No complete persistent dirty/checkpoint API exists. Unknown is never clean.
+    getUpdateSafety() {
+        const c = this.storyPlaybackController;
+        return {
+            dirty: 'unknown',
+            active: !!(this._updateOperations || this.manualStrokeActive || this.engine.strokeActive ||
+                this._manualInputPending || this.interactionState !== InteractionMode.NONE ||
+                !c || c.backgroundLoading || c._runPromise || ['loading', 'playing', 'paused'].includes(c.state)),
+            operations: this._updateOperations || 0,
+            playback: c?.state || 'unknown',
+        };
+    }
+
     async exportPngBlob() {
-        const saveWidth = this.paintingRectangle.width;
-        const saveHeight = this.paintingRectangle.height;
-        const savePixels = this.engine.exportPixels({
-            width: saveWidth,
-            height: saveHeight,
-            resolutionScale: this.resolutionScale,
-            colorModel: FluidEngine.COLOR_MODEL.RGB,
-        });
-        const saveCanvas = this._pixelsToCanvas(savePixels, saveWidth, saveHeight);
-        return new Promise((resolve, reject) => saveCanvas.toBlob((blob) => {
-            if (blob) resolve(blob);
-            else reject(new Error('Fluid Paint could not encode the PNG export.'));
-        }, 'image/png'));
+        if (this.updateApplying) throw new Error('Update applying');
+        this._updateOperations = (this._updateOperations || 0) + 1;
+        try {
+            const saveWidth = this.paintingRectangle.width;
+            const saveHeight = this.paintingRectangle.height;
+            const savePixels = this.engine.exportPixels({
+                width: saveWidth,
+                height: saveHeight,
+                resolutionScale: this.resolutionScale,
+                colorModel: FluidEngine.COLOR_MODEL.RGB,
+            });
+            const saveCanvas = this._pixelsToCanvas(savePixels, saveWidth, saveHeight);
+            return await new Promise((resolve, reject) => saveCanvas.toBlob((blob) => {
+                if (blob) resolve(blob);
+                else reject(new Error('Fluid Paint could not encode the PNG export.'));
+            }, 'image/png'));
+
+        } finally { this._updateOperations--; }
     }
 
     async save(name = 'painting.png') {
-        const blob = await this.exportPngBlob();
-        const url = URL.createObjectURL(blob);
-        const anchor = document.createElement('a');
-        anchor.href = url;
-        anchor.download = name;
-        anchor.hidden = true;
-        document.body.appendChild(anchor);
-        anchor.click();
-        anchor.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 0);
-        return blob;
+        if (this.updateApplying) throw new Error('Update applying');
+        this._updateOperations = (this._updateOperations || 0) + 1;
+        try {
+            const blob = await this.exportPngBlob();
+            const url = URL.createObjectURL(blob);
+            const anchor = document.createElement('a');
+            anchor.href = url;
+            anchor.download = name;
+            anchor.hidden = true;
+            document.body.appendChild(anchor);
+            anchor.click();
+            anchor.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 0);
+            return blob;
+
+        } finally { this._updateOperations--; }
     }
 
     _pixelsToCanvas(pixels, width, height) {
@@ -1191,10 +1214,15 @@ class Paint {
     }
 
     async loadBackgroundImage(file) {
-        const decoded = await this.decodeBackground(file, file?.name);
-        this.engine.setBackgroundImage(decoded.source);
-        this.needsRedraw = true;
-        return decoded.summary;
+        if (this.updateApplying) throw new Error('Update applying');
+        this._updateOperations = (this._updateOperations || 0) + 1;
+        try {
+            const decoded = await this.decodeBackground(file, file?.name);
+            this.engine.setBackgroundImage(decoded.source);
+            this.needsRedraw = true;
+            return decoded.summary;
+
+        } finally { this._updateOperations--; }
     }
 
     /**
@@ -1203,55 +1231,60 @@ class Paint {
      * staging step; the caller commits it only after the entire scene is ready.
      */
     async decodeBackground(blob, name = 'background.png', meta = {}) {
-        if (!(blob instanceof Blob) || (blob.type && blob.type !== 'image/png') &&
-            !/\.png$/i.test(name || '')) {
-            throw new TypeError('Choose a PNG background image.');
-        }
-        if (blob.size > 25 * 1024 * 1024) {
-            throw new RangeError('This PNG exceeds the 25 MB local limit.');
-        }
-
-        const objectUrl = URL.createObjectURL(blob);
-        const image = new Image();
+        if (this.updateApplying) throw new Error('Update applying');
+        this._updateOperations = (this._updateOperations || 0) + 1;
         try {
-            image.decoding = 'async';
-            await new Promise((resolve, reject) => {
-                image.onload = resolve;
-                image.onerror = () => reject(new TypeError('This PNG could not be decoded.'));
-                image.src = objectUrl;
-            });
+            if (!(blob instanceof Blob) || (blob.type && blob.type !== 'image/png') &&
+                !/\.png$/i.test(name || '')) {
+                throw new TypeError('Choose a PNG background image.');
+            }
+            if (blob.size > 25 * 1024 * 1024) {
+                throw new RangeError('This PNG exceeds the 25 MB local limit.');
+            }
 
-            const width = Math.max(1, Math.round(this.paintingRectangle.width));
-            const height = Math.max(1, Math.round(this.paintingRectangle.height));
-            const backgroundCanvas = document.createElement('canvas');
-            backgroundCanvas.width = width;
-            backgroundCanvas.height = height;
-            const context = backgroundCanvas.getContext('2d', { alpha: false });
-            context.fillStyle = '#fff';
-            context.fillRect(0, 0, width, height);
-            const scale = Math.min(width / image.naturalWidth, height / image.naturalHeight);
-            const drawWidth = image.naturalWidth * scale;
-            const drawHeight = image.naturalHeight * scale;
-            context.drawImage(
-                image,
-                (width - drawWidth) / 2,
-                (height - drawHeight) / 2,
-                drawWidth,
-                drawHeight
-            );
-            return {
-                source: backgroundCanvas,
-                summary: {
-                    fileName: name || 'background.png',
-                    byteSize: blob.size || 0,
-                    sourceWidth: image.naturalWidth,
-                    sourceHeight: image.naturalHeight,
-                    transferId: meta.transferId || null,
-                },
-            };
-        } finally {
-            URL.revokeObjectURL(objectUrl);
-        }
+            const objectUrl = URL.createObjectURL(blob);
+            const image = new Image();
+            try {
+                image.decoding = 'async';
+                await new Promise((resolve, reject) => {
+                    image.onload = resolve;
+                    image.onerror = () => reject(new TypeError('This PNG could not be decoded.'));
+                    image.src = objectUrl;
+                });
+
+                const width = Math.max(1, Math.round(this.paintingRectangle.width));
+                const height = Math.max(1, Math.round(this.paintingRectangle.height));
+                const backgroundCanvas = document.createElement('canvas');
+                backgroundCanvas.width = width;
+                backgroundCanvas.height = height;
+                const context = backgroundCanvas.getContext('2d', { alpha: false });
+                context.fillStyle = '#fff';
+                context.fillRect(0, 0, width, height);
+                const scale = Math.min(width / image.naturalWidth, height / image.naturalHeight);
+                const drawWidth = image.naturalWidth * scale;
+                const drawHeight = image.naturalHeight * scale;
+                context.drawImage(
+                    image,
+                    (width - drawWidth) / 2,
+                    (height - drawHeight) / 2,
+                    drawWidth,
+                    drawHeight
+                );
+                return {
+                    source: backgroundCanvas,
+                    summary: {
+                        fileName: name || 'background.png',
+                        byteSize: blob.size || 0,
+                        sourceWidth: image.naturalWidth,
+                        sourceHeight: image.naturalHeight,
+                        transferId: meta.transferId || null,
+                    },
+                };
+            } finally {
+                URL.revokeObjectURL(objectUrl);
+            }
+
+        } finally { this._updateOperations--; }
     }
 
     clearBackgroundImage() {
@@ -1960,50 +1993,55 @@ class Paint {
 
     // --- Editing & history ---
     async bakeToBackground() {
-        if (this.bakeButton && this.bakeButton.disabled) return false;
-        if (this.bakeButton) this.bakeButton.disabled = true;
+        if (this.updateApplying) throw new Error('Update applying');
+        this._updateOperations = (this._updateOperations || 0) + 1;
         try {
-            if (this.storyPlaybackController) {
-                await this.storyPlaybackController.yieldToManualInput();
-            }
-            if (this.engine.strokeActive) this.engine.endStroke();
+            if (this.bakeButton && this.bakeButton.disabled) return false;
+            if (this.bakeButton) this.bakeButton.disabled = true;
+            try {
+                if (this.storyPlaybackController) {
+                    await this.storyPlaybackController.yieldToManualInput();
+                }
+                if (this.engine.strokeActive) this.engine.endStroke();
 
-            const width = Math.max(1, Math.round(this.paintingRectangle.width));
-            const height = Math.max(1, Math.round(this.paintingRectangle.height));
-            const pixels = this.engine.exportPixels({
-                width,
-                height,
-                resolutionScale: this.resolutionScale,
-                colorModel: FluidEngine.COLOR_MODEL.RGB,
-            });
-            const bakedCanvas = this._pixelsToCanvas(pixels, width, height);
-
-            // This is the commit point: the upload succeeds before wet paint
-            // and its dynamics are discarded by the same engine operation.
-            this.engine.bakeToBackground(bakedCanvas);
-            this.snapshotIndex = 0;
-            this.maxRedoIndex = 0;
-            this.undoing = false;
-            this.refreshDoButtons();
-            this.brushInitialized = false;
-            this.interactionState = InteractionMode.NONE;
-            this.needsRedraw = true;
-
-            if (this.storyPlaybackController) {
-                this.storyPlaybackController.acceptBakedBackground({
-                    fileName: 'Baked artwork',
-                    byteSize: pixels.byteLength,
-                    sourceWidth: width,
-                    sourceHeight: height,
-                    baked: true,
+                const width = Math.max(1, Math.round(this.paintingRectangle.width));
+                const height = Math.max(1, Math.round(this.paintingRectangle.height));
+                const pixels = this.engine.exportPixels({
+                    width,
+                    height,
+                    resolutionScale: this.resolutionScale,
+                    colorModel: FluidEngine.COLOR_MODEL.RGB,
                 });
+                const bakedCanvas = this._pixelsToCanvas(pixels, width, height);
+
+                // This is the commit point: the upload succeeds before wet paint
+                // and its dynamics are discarded by the same engine operation.
+                this.engine.bakeToBackground(bakedCanvas);
+                this.snapshotIndex = 0;
+                this.maxRedoIndex = 0;
+                this.undoing = false;
+                this.refreshDoButtons();
+                this.brushInitialized = false;
+                this.interactionState = InteractionMode.NONE;
+                this.needsRedraw = true;
+
+                if (this.storyPlaybackController) {
+                    this.storyPlaybackController.acceptBakedBackground({
+                        fileName: 'Baked artwork',
+                        byteSize: pixels.byteLength,
+                        sourceWidth: width,
+                        sourceHeight: height,
+                        baked: true,
+                    });
+                }
+                const status = document.getElementById('bake-status');
+                if (status) status.textContent = 'Baked. Wet paint and Undo history were reset.';
+                return true;
+            } finally {
+                if (this.bakeButton) this.bakeButton.disabled = false;
             }
-            const status = document.getElementById('bake-status');
-            if (status) status.textContent = 'Baked. Wet paint and Undo history were reset.';
-            return true;
-        } finally {
-            if (this.bakeButton) this.bakeButton.disabled = false;
-        }
+
+        } finally { this._updateOperations--; }
     }
 
     async clear() {

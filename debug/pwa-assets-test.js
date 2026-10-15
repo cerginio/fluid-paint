@@ -121,5 +121,5 @@ test('production ships identity-pinned SW; source HTML never registers', () => {
   assert.ok(sw.includes(JSON.parse(read('release.json')).releaseId));
   assert.match(read(built('bundle.js')), /serviceWorker\.register/);
   assert.doesNotMatch(fs.readFileSync(path.join(root,'index.html'),'utf8'), /pwa-register|serviceWorker/);
-  assert.doesNotMatch(sw, /skipWaiting\s*\(|clients\.claim\s*\(/);
+  assert.doesNotMatch(sw, /clients\.claim\s*\(/); assert.match(sw, /ALLOW_UPDATE/);
 });

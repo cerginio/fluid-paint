@@ -20,7 +20,8 @@ async function state(page,expected){await page.waitForFunction(s=>document.getEl
  await page.goto(server.base+'/?debug=none&diag=0');await page.locator('#pwa-panel summary').click();
  await page.evaluate(()=>navigator.serviceWorker.ready);await state(page,'preparing');
  assert.equal(await page.evaluate(()=>navigator.serviceWorker.controller),null);
- assert.match(await page.locator('#pwa-reason').innerText(),/ще не контролюється/);
+ const uncontrolledProof=await page.waitForFunction(()=>{const panel=document.getElementById('pwa-panel'),text=document.getElementById('pwa-reason')?.textContent;return panel?.dataset.update==='idle' && text?.includes('ще не контролюється') && !navigator.serviceWorker.controller ? {text,state:panel.dataset.state} : false},null,{timeout:15000});
+ assert.match((await uncontrolledProof.jsonValue()).text,/ще не контролюється/);
  await shot(page,'first-uncontrolled');check('fresh registration success remains uncontrolled and not ready');
  // Explicit QA user reload, never application reload machinery.
  await page.reload();await state(page,'ready');await page.locator('#pwa-panel summary').click();

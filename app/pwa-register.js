@@ -1,4 +1,4 @@
-/* Production-only readiness, install and update detection. Never activates or reloads. */
+/* Production-only pinned readiness and explicitly consented, work-safe updates. */
 (function (root) {
   'use strict';
   function readiness({controller, active, status, shellId}) {
@@ -96,23 +96,108 @@
       dispose() { disposed=true; ++epoch; if(timer !== null) cancel(timer); disposers.forEach(fn=>fn()); },
       snapshot() { return {...state}; }};
   }
+  const updateMarker = 'fluid-pwa-update-once-v1';
+  function createActivation({registration, container, storage, safety, loadedRelease, loadedShell, status = requestStatus,
+    send, reload, lock = () => {}, notify = () => {}, render = () => {}}) {
+    let phase = 'idle', target = null, worker = null, flight = false, exported = false;
+    const emit = (message = '') => render({phase, target, exported, message});
+    function blocked() {
+      try { return safety()?.active !== false; } catch { return true; }
+    }
+    function fail(message) { phase = 'error'; exported = false; lock(false); emit(message); return false; }
+    function changed() {
+      if (phase !== 'applying' || !target) return;
+      const current = container.controller;
+      if (!current) return;
+      status(current).then(reply => {
+        if (phase !== 'applying' || current !== container.controller || reply.releaseId !== target || !reply.complete) return;
+        try {
+          const marker = JSON.parse(storage.getItem(updateMarker));
+          if (marker?.target !== target || marker.reloaded) return;
+          // Consume BEFORE reload; a crash or duplicate event cannot loop.
+          storage.setItem(updateMarker, JSON.stringify({target, reloaded:true}));
+          phase = 'reloading'; emit(); reload();
+        } catch { fail('Не вдалося записати одноразове підтвердження. Перезавантажте вручну.'); }
+      }).catch(() => fail('Не вдалося підтвердити новий worker. Перезавантажте вручну.'));
+    }
+    container.addEventListener('controllerchange', changed);
+    async function verifyLoaded() {
+      try {
+        const marker = JSON.parse(storage.getItem(updateMarker) || 'null');
+        if (!marker?.reloaded) return;
+        storage.removeItem(updateMarker);
+        const actual = loadedRelease || await status(container.controller).then(r => r.complete && r.shellId === loadedShell ? r.releaseId : null);
+        if (marker.target !== actual) return fail('Завантажено неочікувану версію. Повторного reload не буде.');
+        phase = 'verified'; emit('Нову версію завантажено й перевірено.');
+      } catch { fail('Session storage недоступне. Автоматичний reload вимкнено.'); }
+    }
+    return {
+      verifyLoaded,
+      async begin() {
+        if (flight || ['applying','reloading'].includes(phase)) return false;
+        exported = false;
+        if (blocked()) return fail('Завершіть мазок, import/export/Bake та playback (також paused) у цій вкладці й повторіть.');
+        worker = registration.waiting;
+        if (!worker) return fail('Немає готового оновлення.');
+        try {
+          const reply = await status(worker);
+          if (worker !== registration.waiting || !reply.complete || !/^[a-f0-9]{64}$/.test(reply.releaseId)) throw Error();
+          target = reply.releaseId; phase = 'confirm'; emit('Малюнок потенційно незбережений. PNG — лише пласке зображення; мокра фарба та Undo будуть втрачені.');
+          notify(target); return true;
+        } catch { return fail('Версію оновлення не підтверджено.'); }
+      },
+      cancel() { if (flight || ['applying','reloading'].includes(phase)) return; phase='idle'; target=null; exported=false; emit('Оновлення відкладено.'); },
+      async export(save) {
+        if (phase !== 'confirm' || flight || blocked()) return false;
+        flight=true; phase='exporting'; emit('Експортуємо PNG. Завершення API не доводить збереження файлу.');
+        try { await save(); exported=true; phase='confirm'; emit('Перевірте файл PNG на диску, потім окремо підтвердьте оновлення.'); return true; }
+        catch { return fail('PNG export не вдався. Оновлення не застосовано.'); }
+        finally { flight=false; }
+      },
+      async allow(choice) {
+        if (phase !== 'confirm' || flight || !['discard','saved'].includes(choice) || (choice==='saved' && !exported)) return false;
+        if (blocked()) return fail('Ця вкладка ще працює. Завершіть операцію й повторіть.');
+        flight=true;
+        try {
+          const reply = await status(worker);
+          if (blocked() || registration.waiting !== worker || !reply.complete || reply.releaseId !== target) throw Error('stale');
+          storage.setItem(updateMarker, JSON.stringify({target,reloaded:false}));
+          phase='applying'; lock(true); emit('Застосовуємо оновлення лише у цій вкладці…');
+          await send(worker, {type:'ALLOW_UPDATE',releaseId:target});
+          return true;
+        } catch { lock(false); try { storage.removeItem(updateMarker); } catch {} return fail('Оновлення не підтверджено. Роботу не перервано; повторіть.'); }
+        finally { flight=false; }
+      },
+      snapshot() { return {phase,target,exported}; },
+      dispose() { container.removeEventListener('controllerchange', changed); }
+    };
+  }
+  function requestCommand(worker, data) {
+    return new Promise((resolve,reject) => {
+      const requestId=root.crypto.randomUUID(), c=new root.MessageChannel();
+      const done=()=>{clearTimeout(timer);c.port1.close();c.port2.close();};
+      const timer=setTimeout(()=>{done();reject(Error('Update timeout'));},2000);
+      c.port1.onmessage=e=>{if(e.data?.requestId!==requestId)return;done();e.data.allowed?resolve(e.data):reject(Error('Update refused'));};
+      try { worker.postMessage({...data,requestId},[c.port2]); } catch(e) {done();reject(e);}
+    });
+  }
   function installMode(nav, standalone, prompt) {
     if (standalone) return 'standalone';
     if (/iPad|iPhone|iPod/.test(nav.userAgent) || (nav.platform === 'MacIntel' && nav.maxTouchPoints > 1)) return 'ios';
     return prompt ? 'prompt' : 'fallback';
   }
-  if (typeof module !== 'undefined') module.exports = {readiness, requestStatus, installMode, createDetection};
+  if (typeof module !== 'undefined') module.exports = {readiness, requestStatus, installMode, createDetection, createActivation, updateMarker};
   if (!root.document) return;
   const doc = root.document;
   function start() {
     // Embedded host owns its UI; no additional overlay or install solicitation.
     if (root !== root.top || new URLSearchParams(root.location.search).get('embedded') === '1') return;
     const panel = doc.createElement('details'); panel.id = 'pwa-panel';
-    panel.innerHTML = '<summary>Offline / встановлення<span class="pwa-summary-warning">Перезапуск не відновлює малюнок, мокру фарбу й Undo. Спершу збережіть PNG.</span></summary><div class="pwa-content"><p id="pwa-status" role="status" aria-live="polite"></p><p id="pwa-reason"></p><p id="pwa-warning"><strong>Перед перезавантаженням або оновленням збережіть PNG.</strong> Offline-перезапуск не відновлює малюнок, мокру фарбу та історію Undo. PNG зберігає лише пласке зображення.</p><p>Перший запуск без мережі потребує попередньої online-підготовки. Браузер може видалити локальні дані; після очищення потрібна повторна підготовка online.</p><button type="button" id="pwa-verify">Перевірити offline-готовність</button><section aria-label="Оновлення"><p id="pwa-update" role="status" aria-live="polite"></p><progress id="pwa-progress" aria-label="Перевірка або завантаження" hidden></progress><p id="pwa-versions"></p><p id="pwa-last-check"></p><button type="button" id="pwa-check">Перевірити оновлення</button><button type="button" id="pwa-later" hidden>Пізніше</button><p id="pwa-update-note">Оновлення не застосовуються автоматично. Безпечна активація буде доступна окремо.</p></section><p id="pwa-install-info"></p><button type="button" id="pwa-install" hidden>Встановити застосунок</button></div>';
+    panel.innerHTML = '<summary>Offline / встановлення<span class="pwa-summary-warning">Перезапуск не відновлює малюнок, мокру фарбу й Undo. Спершу збережіть PNG.</span></summary><div class="pwa-content"><p id="pwa-status" role="status" aria-live="polite"></p><p id="pwa-reason"></p><p id="pwa-warning"><strong>Перед перезавантаженням або оновленням збережіть PNG.</strong> Offline-перезапуск не відновлює малюнок, мокру фарбу та історію Undo. PNG зберігає лише пласке зображення.</p><p>Перший запуск без мережі потребує попередньої online-підготовки. Браузер може видалити локальні дані; після очищення потрібна повторна підготовка online.</p><button type="button" id="pwa-verify">Перевірити offline-готовність</button><section aria-label="Оновлення"><p id="pwa-update" role="status" aria-live="polite"></p><progress id="pwa-progress" aria-label="Перевірка або завантаження" hidden></progress><p id="pwa-versions"></p><p id="pwa-last-check"></p><button type="button" id="pwa-check">Перевірити оновлення</button><button type="button" id="pwa-later" hidden>Пізніше</button><button type="button" id="pwa-apply" hidden>Оновити</button><div id="pwa-consent" hidden><p id="pwa-activation-status" role="status"></p><p id="pwa-clients">Інші вкладки — лише повідомлення, не блокування.</p><button type="button" id="pwa-export">Завантажити PNG</button><button type="button" id="pwa-saved" hidden>PNG збережено — оновити все одно</button><button type="button" id="pwa-discard">Оновити без збереження — оновити все одно</button><button type="button" id="pwa-cancel">Пізніше</button></div><p id="pwa-update-note">Оновлення не застосовуються автоматично. Лише ця вкладка перезавантажиться після окремої згоди.</p></section><p id="pwa-install-info"></p><button type="button" id="pwa-install" hidden>Встановити застосунок</button></div>';
     doc.body.appendChild(panel);
     const statusNode = doc.getElementById('pwa-status'), reason = doc.getElementById('pwa-reason');
     const shellId = doc.querySelector('meta[name="fluid-shell-id"]')?.content;
-    let detection, lastActiveIdentity;
+    let detection, activation, lastActiveIdentity;
     let registration, epoch = 0, wasReady = false, deferredPrompt = null;
     function show(state, text) {
       panel.dataset.state = state;
@@ -154,12 +239,37 @@
     verify();
     root.navigator.serviceWorker.register('/sw.js', {scope:'/', updateViaCache:'none'}).then(r => {
       registration = r;
+      const broadcast = typeof root.BroadcastChannel === 'function' ? new root.BroadcastChannel('fluid-pwa-update') : null;
+      if (broadcast) broadcast.onmessage = () => { doc.getElementById('pwa-update-note').textContent = 'Інша вкладка готує оновлення. Ця вкладка не перезавантажиться без вашої згоди.'; };
+      activation = createActivation({registration:r, container:root.navigator.serviceWorker, storage:root.sessionStorage,
+        loadedShell:shellId, safety:() => root.__painter?.getUpdateSafety(), send:requestCommand,
+        reload:() => root.location.reload(),
+        lock:value => { if(root.__painter) root.__painter.updateApplying=value; doc.body.inert=value; },
+        notify:async target => {
+          broadcast?.postMessage({type:'UPDATE_NOTICE',releaseId:target});
+          try { const reply=await requestCommand(r.waiting,{type:'CLIENTS',releaseId:target});
+            doc.getElementById('pwa-clients').textContent=`Відкрито ще ${Math.max(0,reply.count-1)} вкладок (включно з uncontrolled). Закриття рекомендоване, але відповіді не потрібні. «Оновити все одно» не перезавантажує їх.`;
+          } catch { doc.getElementById('pwa-clients').textContent='Інші вкладки не відповіли. «Оновити все одно» доступне; це не блокування.'; }
+        },
+        render:state => { const box=doc.getElementById('pwa-consent');box.hidden=['idle','verified'].includes(state.phase);
+          panel.dataset.activation=state.phase;doc.getElementById('pwa-activation-status').textContent=state.message;
+          doc.getElementById('pwa-saved').hidden=!state.exported;
+          for(const id of ['pwa-export','pwa-saved','pwa-discard']) doc.getElementById(id).disabled=state.phase!=='confirm';
+          if(state.phase==='verified')doc.getElementById('pwa-update-note').textContent=state.message;
+        }});
+      activation.verifyLoaded();
+      doc.getElementById('pwa-apply').onclick=()=>activation.begin();
+      doc.getElementById('pwa-export').onclick=()=>activation.export(()=>root.__painter.save());
+      doc.getElementById('pwa-saved').onclick=()=>activation.allow('saved');
+      doc.getElementById('pwa-discard').onclick=()=>activation.allow('discard');
+      doc.getElementById('pwa-cancel').onclick=()=>activation.cancel();
       detection = createDetection({registration:r, container:root.navigator.serviceWorker, visible:() => !doc.hidden, render:state => {
         panel.dataset.update = state.phase;
         doc.getElementById('pwa-update').textContent = {idle:'Оновлення', checking:'Перевіряємо оновлення', downloading:'Завантажуємо оновлення', ready:state.later ? 'Оновлення відкладено' : 'Оновлення готове', failed:'Не вдалося перевірити / підготувати оновлення'}[state.phase];
         doc.getElementById('pwa-progress').hidden = !['checking','downloading'].includes(state.phase);
         doc.getElementById('pwa-versions').textContent = `Активна версія: ${state.active || 'не підтверджено'}. Очікує: ${state.waiting || 'немає підтвердженої'}.`;
         doc.getElementById('pwa-last-check').textContent = `Остання перевірка: ${state.lastCheck === null ? 'ще не було' : new Date(state.lastCheck).toLocaleTimeString()}. ${state.result}`;
+        doc.getElementById('pwa-apply').hidden = !state.waiting;
         doc.getElementById('pwa-later').hidden = !state.waiting || state.later;
         if (state.active && state.active !== lastActiveIdentity) { lastActiveIdentity = state.active; verify(); }
       }});

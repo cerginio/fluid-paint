@@ -8,7 +8,7 @@ function environment(failure) {
   const stores=new Map([['foreign-user-data',new Map()],['fluid-pwa-shell-v1-old-complete',new Map([['old',new Response('old')]])]]);
   let puts=0,fetches=0;
   const caches={keys:async()=>[...stores.keys()],delete:async n=>stores.delete(n),open:async n=>{if(!stores.has(n))stores.set(n,new Map());const m=stores.get(n);return {keys:async()=>[...m.keys()],match:async u=>m.get(u)?.clone(),put:async(u,r)=>{if(failure==='quota'&&++puts===2)throw new DOMException('quota','QuotaExceededError');m.set(u,r.clone());}};}};
-  const self={location:{origin:'https://app.test'},addEventListener(){}};
+  const listeners={};let skips=0;const self={location:{origin:'https://app.test'},registration:{scope:'https://app.test/'},clients:{get:async id=>id==='own'?{type:'window',url:'https://app.test/'}:null,matchAll:async options=>{assert.equal(options.includeUncontrolled,true);return [{url:'https://app.test/'},{url:'https://app.test/?uncontrolled'}]}},skipWaiting:async()=>{skips++},addEventListener:(type,fn)=>listeners[type]=fn};
   const context={self,caches,crypto:{subtle:webcrypto.subtle,randomUUID},URL,Response,TextDecoder,Uint8Array,DataView,Map,Error,fetch:async()=>{
     fetches++;
     if(fetches===2&&failure==='network')throw new TypeError('network');
@@ -17,7 +17,7 @@ function environment(failure) {
     return new Response(body,{status,headers:{'Content-Type':mime}});
   }};
   const api=vm.runInNewContext('('+fluidPwaWorker.toString()+')('+JSON.stringify(inv)+')',context);
-  return {api,stores,entry,inv};
+  return {api,stores,entry,inv,listeners,get skips(){return skips}};
 }
 for(const failure of ['quota','network','404','mime','html','hash'])test('atomic rejection: '+failure,async()=>{
   const {api,stores}=environment(failure),before=[...stores.keys()];
@@ -45,5 +45,20 @@ test('all formats and opaque/redirect/status fail closed before hash',async()=>{
 });
 test('production-only inclusion and no forced lifecycle/UX; actual dev build is exercised by runner',()=>{
   const root=path.resolve(__dirname,'..'),gulp=fs.readFileSync(path.join(root,'gulpfile.js'),'utf8'),html=fs.readFileSync(path.join(root,'index.html'),'utf8'),sw=fs.readFileSync(path.join(root,'dist/sw.js'),'utf8');
-  assert.match(gulp,/isProd \? \['app\/pwa-register.js'\] : \[\]/);assert.doesNotMatch(html,/pwa-register|pwa-worker|serviceWorker/);assert.doesNotMatch(sw,/skipWaiting\s*\(|clients\.claim\s*\(/);
+  assert.match(gulp,/isProd \? \['app\/pwa-register.js'\] : \[\]/);assert.doesNotMatch(html,/pwa-register|pwa-worker|serviceWorker/);assert.doesNotMatch(sw,/clients\.claim\s*\(/);assert.match(sw,/ALLOW_UPDATE/);assert.match(sw,/data.releaseId !== inventory.releaseId/);
+});
+
+test('actual worker ALLOW requires source, same release and complete install; clients are notifications only',async()=>{
+ const e=environment();const send=async(type,releaseId=e.inv.releaseId,id='own')=>{let promise,reply;e.listeners.message({data:{type,releaseId,requestId:'request'},source:{id},ports:[{postMessage:r=>reply=r}],waitUntil:p=>promise=p});await promise;return reply};
+ await send('ALLOW_UPDATE');assert.equal(e.skips,0);await e.api.install();
+ assert.equal((await send('ALLOW_UPDATE','wrong')).allowed,false);assert.equal((await send('ALLOW_UPDATE',e.inv.releaseId,'foreign')).allowed,false);assert.equal(e.skips,0);
+ assert.equal((await send('CLIENTS')).count,2);assert.equal(e.skips,0);assert.equal((await send('ALLOW_UPDATE')).allowed,true);assert.equal(e.skips,1);
+});
+test('compatibility serves only exact old hash bytes from committed namespace, never old HTML',async()=>{
+ const e=environment();await e.api.install();const oldName=[...e.stores.keys()].at(-1),old=e.stores.get(oldName);
+ // Use real factory with a distinct release, sharing persistent caches
+ const source=fluidPwaWorker.toString();let networkOnly=0;const cacheApi={keys:async()=>[...e.stores.keys()],open:async name=>{const m=e.stores.get(name);return {keys:async()=>[...m.keys()],match:async u=>m.get(u)?.clone()}}};
+ const api=vm.runInNewContext('('+source+')('+JSON.stringify({...e.inv,releaseId:'b'.repeat(64),entries:[]})+')',{self:{location:{origin:'https://app.test'},addEventListener(){}},caches:cacheApi,URL,Response,fetch:async()=>{networkOnly++;return Response.error()},crypto:webcrypto,Uint8Array,Map});
+ assert.equal(await (await api.serve({},e.entry.path)).text(),'const ok = 1;');assert.equal((await api.serve({},'/index.html')).type,'error');assert.equal(networkOnly,0);await api.serve({},'/unknown.'+'c'.repeat(64)+'.js');assert.equal(networkOnly,1);
+ old.set('https://app.test'+e.entry.path,new Response('tampered'));assert.equal((await api.serve({},e.entry.path)).type,'error');old.delete('https://app.test/__fluid_pwa_complete__');assert.equal((await api.serve({},e.entry.path)).type,'error');
 });

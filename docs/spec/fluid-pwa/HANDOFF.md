@@ -31,14 +31,107 @@ harness для service worker — окрема spike-фаза **перед** SW 
 hashed assets і release identity йдуть **до** SW (фаза 2), щоб перший же SW
 мав чесну identity й atomic install і не переписувався потім.
 
-> **Далі:** фаза 7 — безпечна активація і захист роботи, після окремого дозволу почати.
-> **Фаза 6 прийнята власником через `handoff:next` 2026-10-15 і закрита.**
-> **Фаза 5 прийнята власником через `handoff:next` 2026-10-15 і закрита.**
-> [QA-5A–5I](./QA.md), [PHASE5-REPORT.md](./PHASE5-REPORT.md).
-> **Фаза 4 прийнята власником через `handoff:next` 2026-10-15 і закрита** у `feba360`.
-> Фази 1–6 прийняті; closing commit поверх `5d876c7`, 7–10 не починались.
-> Deploy не виконано. Фазу 7 не починати без окремого дозволу.
-> Production deploy окремо заборонено; naming migration не є external-consumer audit.
+> **Далі: обов’язкова фаза 7A — компактний icon-first PWA UX, перед фазою 8.**
+> Фазу 7 прийнято власником через `handoff:next` 2026-10-15 і закрито із
+> зауваженням щодо UX; closing commit поверх `5d900c1`. Фази 1–7 прийняті.
+> [QA-7A–7M](./QA.md), [PHASE7-REPORT.md](./PHASE7-REPORT.md).
+> 7A зараз лише контракт/checklist, НЕ реалізація; чекати окремого `start 7A`.
+> Фаза 8 заблокована до реалізації, eval і acceptance 7A та окремого дозволу.
+> Preview/production deploy не виконано; фази 8–10 не починались.
+> Нижчі no-phase7 твердження попередніх фаз — історія, superseded цією фазою.
+
+## Фаза 7 — прийнята й закрита із UX follow-up 7A
+
+`paint.js#getUpdateSafety()` трасує actual stroke/interaction/manual pending,
+реальні async export/import/Bake counters та story loading/playing/paused/run.
+Повного dirty/checkpoint API немає: dirty **unknown**, отже потенційно незбережено.
+Active stroke не обрізається: завершити природно й повторити update. Playback,
+import/export/Bake updater не перериває. Export PNG completion не activate:
+потрібна окрема перевірка файлу користувачем або explicit discard із втратою
+wet/history. Відмова/помилка/stale identity/missing API/storage refusal не дають allow.
+
+Production factory `createActivation` у `app/pwa-register.js`: CLIENTS actual
+matchAll includeUncontrolled + BroadcastChannel notification, **не lock**.
+Unresponsive clients не потребують reply, explicit anyway лишається. Worker
+ALLOW bound до same-scope WindowClient/exact complete release, без claim чи
+unconditional skipWaiting. Reload тільки requesting page після actual
+controllerchange, one-shot sessionStorage marker до reload, pinned loaded
+shellId/target releaseId verification після нього. ACK не є controllerchange.
+Compatibility routing служить old SHA-named bytes із committed caches під новим
+SW; old HTML не serve, unknown hashes network-only. **Cap/cleanup/rollback не додано.**
+
+Історичний final `node debug/pwa-phase7-eval.js`: **PASS / exit 0; 22 commands exit 0**.
+Guard окремо passed/failed: activation **12/0**, detection **15/0**, readiness
+**11/0**, worker **12/0**, release **4/0**, assets **7/0**, harness **5/0**, shader
+**25/0**, demo **8/0**, palette **6/0**; control API PASS без enumeration.
+Browser окремо: activation **14/0**, detection **7/0**, readiness **13/0**,
+production **10/0**, assets **2 viewport**, release **2 WebGL**, fixture **8 cases**.
+Не сумувати suites/рівні. Старі phase-1–6 числа нижче — історичні.
+
+Actual production V1/V2 persistent same-origin: real dirty stroke/cancel/PNG
+error/pending export/Bake/import/playback gates, separate export confirmation,
+explicit discard, uncontrolled included count, frozen nonconsenting tab,
+applying-window old-shell tab, exact old hashes offline під V2, один own reload
+та no loop. Той самий profile закрито/запущено offline до navigation: V2 cold
+PASS. Retained regression зберігає natural activation без ALLOW після close.
+Timing gates probe явно описані у report, не видаються за physical lifecycle.
+
+Evidence поза repo:
+`C:/Users/cergi/AppData/Local/Temp/fluid-pwa-phase7-final-MsWR9J/`.
+Root result має exact commands/logs/codes; activation-browser — frozen V1/V2,
+profile, identities/caches/server/browser JSON, **13 PNG, 3 HAR, 3 trace ZIP**.
+Final ports 57245/61163/61694/61152/53415/59252/59027/51333 окремим bind-back PASS.
+Історично own browsers disconnected, eval servers stopped; тоді review stand не залишено. Поточний retained stand — у closing check нижче; чужих не чіпали.
+Первинний post-document verifier: історичний PASS, 118 media artifacts;
+45 own final/scratch ports тоді bind-back PASS. Незалежний parent readback
+підтвердив commands/artifacts/caches/source та повторив guards activation 12/0,
+worker 12/0. Повтор verifier FAIL лише на bind-back: 51333 тепер зайнятий
+стороннім DDPM.Subagent.User.exe (PID 43012), EACCES; процес не чіпали.
+Phase-7 node/Chromium leftovers не знайдено. Поточний
+post-document-verification.json зберігає цей FAIL; browser final PASS незмінний.
+Деталі — parent-readback.json у evidence та PHASE7-REPORT.md.
+
+Нові інваріанти: counter тримає real encoder до Promise completion; ALLOW ACK
+не запускає ранній STATUS до old controller; consented session marker дає лише
+один own reload; frozen/uncontrolled clients не hard-lock і old hashes лишаються.
+Guards — pwa-activation-test.js / actual worker-test; probe — activation-browser.
+
+NOT TESTED: physical Android/iOS/Safari/A2HS/standalone, native GPU/OS reboot,
+real mobile suspension/native install dialog/15-minute wall-clock, browser quota/
+eviction/MIME/hash injection, full large-story playback, live Netlify/CDN headers,
+CORS/demo downloads, full make verify. Physics/palette/vendor незмінні.
+Фази 8–10 не реалізовані. **Наступний крок — окремий дозвіл на 7A, не фазу 8.**
+
+## Closing check фази 7 — 2026-10-15
+
+Прийняття власником — acceptance із збереженим боргом, не нове physical/full QA.
+Свіжий closing eval виконано в isolated source clone поза repo, щоб не
+перебудовувати `dist`, який обслуговує живий стенд. Build PASS; inventory та
+releaseId byte-identical retained V1
+`4e6ce90e534c2b1929546a183156178cf28eb3571815375bfcf3d4ddbd996eb2`.
+Свіжі guards passed/failed окремо: activation **12/0**, detection **15/0**,
+readiness **11/0**, worker **12/0**, release **4/0**, assets **7/0**, harness
+**5/0**, shader **25/0**, demo **8/0**, palette **6/0**; control API PASS без
+enumeration. 12 closing commands exit 0 (build + 10 suites + control), не сума tests.
+Evidence: `C:/Users/cergi/AppData/Local/Temp/fluid-pwa-phase7-closure-01eEQx/result.json`.
+
+Browser probes не перезапускались: повторно прочитано historical final result,
+22 exit codes/log paths і 7 probe results PASS; activation **14/0**, detection
+**7/0**, readiness **13/0**, production **10/0**, assets **2 viewport**, release
+**2 WebGL**, fixture **8 cases** — історичні. Production sources SHA-exact до
+frozen evidence (V2 fixture label повернуто до V1 лише для порівняння).
+Cleanup verifier FAIL/EACCES стороннього 51333 з parent-readback лишається
+обмеженням; жодного нового global free-port claim чи зупинки чужого процесу.
+
+**Живий built stand збережено за прямою вимогою власника:**
+`http://127.0.0.1:3000/?webgl=2&debug=none&diag=0&seed=41`.
+Fresh listener readback: actual `node.exe` PID **31212**, parent **70768**,
+command `node_modules/gulp/bin/gulp.js startServer` (wrapper PID 17540 не owner).
+Fresh HTTP readback: усі **19 inventory entries** HTTP200/SHA-exact і `/sw.js`
+HTTP200/exact local SHA. Це single V1 review stand, не live V1/V2 upgrade/CDN proof.
+Під час closure сервер не зупиняли, served dist не переписували. Попередня parent
+спроба rebuild впала через missing font; clean retry PASS, не «без невдалих спроб».
+Deploy відсутній; усі NOT TESTED межі збережено. 7A зараз лише контракт, не UX code.
 
 ## Фаза 6 — прийнята й закрита
 
@@ -572,7 +665,11 @@ Closing check 2026-10-14: `npm run build` PASS, `npm run test:pwa-assets`
    waiting worker виявлено, «Пізніше» лишає V1 повністю робочою, V2 готова;
    старі й нові assets не змішуються.
 
-7. **Фаза 7 — безпечна активація і захист роботи.**
+~~7. **Фаза 7 — безпечна активація і захист роботи.**~~
+   **ЗАКРИТО: прийнято власником 2026-10-15 (`handoff:next`) із обов’язковою 7A.**
+   [PHASE7-REPORT.md](./PHASE7-REPORT.md), [QA-7A–7M](./QA.md). UX-зауваження
+   винесено в 7A перед фазою 8; implementation 7A потребує окремого дозволу.
+   Нижче збережений acceptance контракт.
    Контракт: дії «Перевірити оновлення» / «Оновити» / «Пізніше»; ні
    автоматичного reload, ні unconditional `skipWaiting()`/`clients.claim()`;
    до activation завершується мазок, не перериваються import/export/Bake й
@@ -596,7 +693,42 @@ Closing check 2026-10-14: `npm run build` PASS, `npm run test:pwa-assets`
    старих hash assets; suspended вкладка не блокує «Оновити все одно»;
    жодного reload loop.
 
+7A. **Обов’язкова фаза 7A — компактний icon-first PWA UX перед фазою 8.**
+   **Лише специфікація/checklist; НЕ реалізовано.** Вимога власника при
+   `handoff:next`: «переробити UX на компактним без тексту з іконками і мінімум
+   тексту, текст англійською по замовченню, якщо нема локалізації то і не треба».
+   Починати тільки після окремого `start 7A`; closure 7 не дозволяє UX implementation.
+   - [ ] Замість великої текстової PWA панелі — компактні icon-first status/actions;
+     у звичайному/collapsed стані мінімум тексту, без довгих пояснень або IDs.
+   - [ ] Коротка English copy за замовчуванням для PWA status, actions, errors,
+     install fallback і consent. Повторно використати локалізацію **лише якщо вона
+     вже існує**; якщо її немає — English-only, без нового framework/catalogs або
+     окремої localization requirement. Наявність локалізації перевірити на старті,
+     цей closure не стверджує результату такої перевірки.
+   - [ ] Release/shell IDs, timestamps і технічні деталі — secondary disclosure,
+     не домінантний main UI; debugging/pinned identity checks не прибирати.
+   - [ ] Icon-only controls мають короткі English tooltips/accessible names,
+     keyboard activation, visible focus і зрозумілі status/error announcements.
+     Не покладатися лише на колір; pointer/touch controls не перекривають canvas
+     або основні File/Player/State controls на desktop і 320px.
+   - [ ] Мінімум тексту НЕ скасовує loss-consent: concise English попередження
+     перед reload/update про artwork/wet paint/Undo loss, PNG flattened/not backup,
+     окремі export → file verification → confirmation та explicit discard/cancel.
+     Unknown dirty, busy gates, once-only own reload, no claim, multi-tab notification
+     not lock, embedded exclusion і genuine install policy лишаються незмінними.
+   - [ ] Guard: production activation/detection/readiness/worker suites та build;
+     адаптувати copy/selectors assertions до нового контракту, не послаблюючи gates.
+     Probe: real desktop/320px icon actions, keyboard/accessibility, collapsed/
+     details/consent/error/install states і retained actual V1/V2 activation matrix;
+     actual screenshots та loss-consent review до owner acceptance.
+   - [ ] Оновити QA-7A historical snapshot labels як історію, додати окремі
+     runnable QA-7AUX scenarios без колізії з існуючим **QA-7A** (це сценарій
+     фази 7, не acceptance фази 7A). Record fresh evidence, потім owner review.
+   **Gate:** фазу 8 не починати до implementation + eval + owner acceptance 7A
+   і окремого дозволу на 8. Physical/CDN/CORS/full-verify борг не зникає від UX.
+
 8. **Фаза 8 — retention, quota і rollback identity.**
+   **Передумова: 7A реалізована, перевірена та прийнята; окремий дозвіл на фазу 8.**
    Контракт: liveness як інваріант (release із можливим живим клієнтом не
    видаляється), cap у три complete releases, який liveness не скасовує;
    на cap новий install відхиляється як quota refusal з чесним UI, активна

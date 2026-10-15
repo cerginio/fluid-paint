@@ -67,6 +67,7 @@ test-fast:
 	$(NPM) run test:pwa-worker
 	$(NPM) run test:pwa-readiness
 	$(NPM) run test:pwa-detection
+	$(NPM) run test:pwa-activation
 
 test-browser:
 	$(NPM) run test:shader-bundle:gpu
@@ -81,6 +82,7 @@ test-browser:
 	$(NPM) run test:pwa-worker:browser
 	$(NPM) run test:pwa-readiness:browser
 	$(NPM) run test:pwa-detection:browser
+	$(NPM) run test:pwa-activation:browser
 
 test:
 	$(MAKE) test-fast
