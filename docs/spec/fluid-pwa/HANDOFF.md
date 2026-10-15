@@ -1,14 +1,43 @@
 # Handoff: Fluid PWA — offline shell та надійні оновлення
 
-Стан на 2026-10-15. Фази 1–7 прийняті власником і закриті; фаза 7 — із обов’язковим UX follow-up 7A. Preview/production deploy не виконано.
+## Поточний локальний review — minimal status + automatic PNG
+
+**Supersedes the icon-only UI/consent contract below; prior measurements remain historical.**
+**Прийнято власником через `handoff:next` 2026-10-15; фазу 7A закрито.** Closing commit авторизований цією командою; нового external deploy немає. Незакриті technical/physical/legacy обмеження нижче збережені.
+
+- Live: http://127.0.0.1:3000/?webgl=2&debug=none&diag=0&seed=41 . Same freshly checked node.exe **PID31212**, parent70768; no listener restart.
+- Release `2195ab1b3a1e1a35d8201df0daa1c1b1d52dd77bb50a6b525f8845f446255e69`; build metadata **2026-10-15T18:49:32.443Z**, visible **2026-10-15 18:49** (UTC minute, not runtime clock/hash). Full hashes remain internal. Snapshot build has `gitSha:null` (no Git metadata in copied source); source SHA comparison is recorded separately, not invented revision metadata.
+- Visible information: Active version and Last check / No update found. Verbose preparation, backup, shell hash, verified-update and install instructions removed. Real licensed SVGs retained; minimal Credits link opens distributed/offline-cached `pwa-credits.html` with Dazzle UI / SVG Repo / CC BY4.0 attribution.
+- Save PNG invokes actual painter export. Explicit Update on the **new code** checks real pigment readback / baked-or-imported background (dirty remains unknown), automatically downloads nonempty artwork, then rechecks busy/candidate identity before ALLOW. Empty canvas does not download. Encoder/readback/candidate/storage failures fail closed. No repeated file-check/discard dialog. PNG remains flattened, not wet-paint/Undo persistence; browser download initiation cannot prove the user's final disk destination.
+- Evidence `$A = C:/Users/cergi/AppData/Local/Temp/fluid-pwa-autosave-x4ZnZf`: `result.json` **PASS_WITH_LEGACY_LIMITATION**. Two isolated production builds; affected **54 tests passed / 0 failed** (`unit.log`, repeated current-checkout `final-unit.log`). Actual browser proves pointer PNG before one reload, encoder failure preserving old active/artwork/waiting with no download/reload, empty update with zero downloads, menu PNG, desktop/320 minimal UI, exact HTTP/cache inventory and retained old immutable URLs. Not a full make verify or physical-device rerun.
+- Auto PNG `auto-update-pointer-artwork.png`: **180x130, 23159 bytes**, SHA `b942d80cb3ae21fe7a4bfdb4a62f3e4e5ff34a2ffe7b2aa96cdea195cee59e5f`, decoded **8230 colored pixels**. Menu PNG: **180x130, 20856 bytes**, decoded **8750 colored pixels**. Not blank/synthetic exports.
+- **Legacy limitation, not automatic-save PASS:** real persistent/restarted `ca3c9da7…` localhost client existed before publication, retained pointer artwork/document while `registration.update()` fetched exact new complete waiting release. Its already-loaded immutable JS necessarily kept its old Export PNG + separate confirmation path. That real PNG was exported and decoded before one explicit consenting reload to the new version. No old bundle rewrite, script injection, forced activation or user data clearing. New one-click auto-save applies after this first upgrade; retroactive auto-save in the old document is not claimed.
+- Screenshots: `$A/new-ui-desktop.png`, `new-ui-320.png`, `legacy-ca3-waiting.png`; valid PNGs, HAR/traces, `cache-snapshot.json`, frozen `source/`, `v2/`, `old-dist-backup/` retained. Owned test browsers closed; own test ports bind-back verified; retained3000 remains running.
+- Intermediate failures retained: `fluid-pwa-autosave-gFfxmx` pointer setup while expanded dock; `4YxzbB` old inventory guard assumed every non-index entry immutable (fixed for separate fixed credits HTML). Main `$A` hit one No-update wait timeout after successful save/failure/empty probes; fresh persistent-profile check and bounded `resume.cjs` completed UI/publish/legacy/cache verification. Original failure is retained in `previousRunnerError`; not relabelled a clean uninterrupted run.
+- Full details and exact source list: [AUTOSAVE-REVISION.md](./AUTOSAVE-REVISION.md). Physical/native/Safari/CORS/retention/rollback debt unchanged. **Далі — фаза 8 (retention/quota/rollback), тільки після окремого дозволу; зараз не починалась.**
+- Closing guard: шість unit entrypoints activation/detection/readiness/worker/UX/autosave — **63 executions passed / 0 failed**; autosave imports activation cases, тому це не 63 унікальні assertions. Попередній browser probe `$A/result.json` **PASS_WITH_LEGACY_LIMITATION** збережено без перепублікації; historical broad consent suites не заявлені як current PASS. Closing readback PASS:8 production/build source SHA-identical до tested snapshot;20 exact inventory HTTP entries +3 SW/release/inventory metadata SHA-exact; auto/menu PNG SHA-exact до browser artifacts. Retained release2195ab1b… не перебудовували. Сторонні вже наявні зміни `debug/pwa-worker-browser-test.js`, `debug/shader-bundle-gpu-test.js`, `docs/spec/fluid-pwa/PHASE7-REPORT.md` лишено поза closing commits. Acceptance не означає physical/full-suite PASS.
+
+## Історичний стан до owner acceptance 7A
+
+
+Стан на 2026-10-15. Фази 1–7 прийняті власником і закриті. **7A реалізована й перевірена, передана на review; НЕ прийнята власником.** Дозвіл на реалізацію — відповідь власника `7a`. Commit/production не виконано. За «Зроби деплой» опубліковано draft: актуальний URL/evidence у [PHASE7A-REPORT.md](./PHASE7A-REPORT.md#draft-preview-7a--2026-10-15). Canonical full verify equivalent PASS (26 commands); live assets/cache headers PASS, online UI/draw PASS, **HTTPS offline readiness/reload/cold browser restart drawing PASS** на corrected draft `6ad0c2e352ccd54a95955f40`. Scoped exact generated manifest MIME fix входить у deploy authorization; strict worker незмінний. Попередній MIME FAIL збережено як історію у report. Нижчі no-preview/full-verify/CDN-NOT-TESTED записи — історія попереднього eval; physical/CORS борг лишається.
 
 > **Архів:** фази 1–7 перенесено в [_archive/HANDOFF-phases-1-7.md](_archive/HANDOFF-phases-1-7.md) (2026-10-15); [парні регресійні QA](_archive/QA-phases-1-7.md).
 
 Поточний контракт: release identity/hashed inventory → atomic verified SW install → pinned-shell readiness → detection → explicit safe activation. Compatibility old SHA assets збережено; cap/cleanup/rollback ще немає. Реалізація й історичні вимірювання: [phase 7 report](./PHASE7-REPORT.md) та архів. No-SW/no-phase7 твердження ранніх фаз — лише історія, не чинні обмеження.
 
+## Historical owner review 7A — icon-only revision
+
+**Новий live review:** http://127.0.0.1:3000/?webgl=2&debug=none&diag=0&seed=41 . Release `ca3c9da7eb4d622d0b7ee3f58d012a23384a79d8495758852b6a813857285148`; fresh exact PID31212/parent70768 незмінний. Власник явно дозволив SVG Repo icons + оновлення localhost. [Поточний report](./PHASE7A-REPORT.md#svg-repo-icons--оновлений-localhost--поточний-review) supersedes нижчі retained-dist-unchanged/старий UI snapshots; external preview `6ad0c2e352ccd54a95955f40` лишився historical glyph-version, нового deploy немає.
+
+- **UX-7A-ICONS — IMPLEMENTED, PENDING OWNER ACCEPTANCE:** 9 actual Dazzle Line SVG Repo icons (Dazzle UI / CC BY4.0), inert generated geometry, consistent 22px/2px/24-viewBox, 44px controls, SVG status/details/disclosures; names/English/keyboard/live text збережено. Exact sources/license/adaptations: [provenance](../../../assets/pwa-ui/README.md), [SHA manifest](../../../assets/pwa-ui/sources.json). Не acceptance 7A.
+- **REVIEW-LOCAL-STALE — FIXED, VERIFIED:** old `4e6ce90e…` served artifact замінено verified isolated V1 icon build, old immutable hashes retained; no server restart/user cache clear/forced claim/reload. 183 source SHA checks перед publish;19 inventory+SW/release/inventory (22 HTTP paths) exact. Actual localhost persistent old V1 client із real pointer artwork → `registration.update()` `/sw.js`, updateViaCache none → exact new complete waiting release; Cancel зберіг V1/artwork, explicit consent лише own test-artwork reload1, nonconsenting tab retained. `$L/result.json` PASS у `C:/Users/cergi/AppData/Local/Temp/fluid-pwa-local-icons-mGPEXY`.
+- Fresh final `$E = C:/Users/cergi/AppData/Local/Temp/fluid-pwa-phase7a-eanPOO/result.json`:13 commands exit0. Guards activation12/0, detection16/0, readiness11/0, worker12/0, UX5/0; browser production10/0, readiness13/0, detection7/0, actual V1/V2 activation14/0. Desktop/320 SVG screenshots/probes; own5 ports bind-back PASS. Worker/Paint safety factories незмінні; physical/native/Safari/CORS/phase8 debt не закрито. Нижчі старі counts — historical.
+
+
 ## Чинні передумови 7A та збережений борг
 
-- `getUpdateSafety()` трактує dirty як unknown; stroke/import/export/Bake/playback не перериваються. PNG completion не доводить запис файлу: потрібні окрема перевірка й згода або explicit discard із попередженням про artwork/wet/history loss.
+- `getUpdateSafety()` dirty remains unknown; busy stroke/import/export/Bake/playback blocks Update. Current revision auto-downloads real nonempty canvas before ALLOW; no manual-backup/discard workflow on new code. One-time legacy-document limitation is recorded above.
 - CLIENTS includeUncontrolled та BroadcastChannel — notification, не lock. ALLOW прив’язаний до same-scope WindowClient/exact complete release; no claim/unconditional skipWaiting. Лише requesting page робить один reload після controllerchange з one-shot sessionStorage marker та pinned shell/release verification.
 - Partial/failed install не служить shell; cache readiness потребує actual controller/complete/pinned identity. Fonts/icons/shell локальні. Build identity залежить лише від canonical inventory paths+SHA; подробиці encoding — у [архіві](_archive/HANDOFF-phases-1-7.md).
 - Історичні PASS не перетворюють physical/CDN/CORS/full-verify та cleanup-readback limitation на перевірене покриття. Нижчий closing check — історичний запис, сервер/PID зараз не перевіряли.
@@ -33,13 +62,13 @@ harness для service worker — окрема spike-фаза **перед** SW 
 hashed assets і release identity йдуть **до** SW (фаза 2), щоб перший же SW
 мав чесну identity й atomic install і не переписувався потім.
 
-> **Далі: обов’язкова фаза 7A — компактний icon-first PWA UX, перед фазою 8.**
+> **Далі: фаза 8 — retention/quota/rollback identity, після окремого дозволу. 7A прийнята через `handoff:next` і закрита.**
 > Фазу 7 прийнято власником через `handoff:next` 2026-10-15 і закрито із
 > зауваженням щодо UX; closing commit поверх `5d900c1`. Фази 1–7 прийняті.
 > [QA-7A–7M](./QA.md), [PHASE7-REPORT.md](./PHASE7-REPORT.md).
-> 7A зараз лише контракт/checklist, НЕ реалізація; чекати окремого `start 7A`.
-> Фаза 8 заблокована до реалізації, eval і acceptance 7A та окремого дозволу.
-> Preview/production deploy не виконано; фази 8–10 не починались.
+> 7A прийнята; чинний minimal-status/auto-PNG контракт та legacy limitation — [AUTOSAVE-REVISION.md](./AUTOSAVE-REVISION.md). Historical reports/evidence не стирали.
+> Передумова acceptance 7A виконана. Окремого дозволу на реалізацію фази 8 ще немає.
+> Draft preview опубліковано, online/offline review доступний; corrected draft і historical MIME failure у report. Production deploy не виконано; фази 8–10 не починались.
 > Нижчі no-phase7 твердження попередніх фаз — історія, superseded цією фазою.
 
 Нові інваріанти: counter тримає real encoder до Promise completion; ALLOW ACK
@@ -51,9 +80,21 @@ NOT TESTED: physical Android/iOS/Safari/A2HS/standalone, native GPU/OS reboot,
 real mobile suspension/native install dialog/15-minute wall-clock, browser quota/
 eviction/MIME/hash injection, full large-story playback, live Netlify/CDN headers,
 CORS/demo downloads, full make verify. Physics/palette/vendor незмінні.
-Фази 8–10 не реалізовані. **Наступний крок — окремий дозвіл на 7A, не фазу 8.**
+Фази 8–10 не реалізовані. **7A закрито; наступний вхід — read-only handoff:start, потім окремий дозвіл на 8.**
 
-## Closing check фази 7 — 2026-10-15
+## Review 7A — свіжа перевірка 2026-10-15
+
+Production changes: `app/pwa-register.js`, `app/layout.css`; без physics/palette/vendor/SW protocol changes.
+Один runnable runner з root, без перезапису retained dist: `node debug/pwa-phase7a-eval.js`.
+13 top-level commands exit 0 (не сума tests); exact args/env/cwd/logs — evidence/result.json.
+Actual Chromium 153.0.8010.12/SwiftShader, не physical mobile. Native install dialog
+не пропонувався; fallback і iOS-UA інструкція перевірені, не Safari acceptance.
+Новий dock резервує висоту; expanded details може займати до 45dvh content зі
+scroll, не перекриваючи canvas. Existing mobile Story tools overlap між власними
+панелями не перероблявся; PWA dock їхні tabs не перекриває.
+Повний результат, невдала проміжна probe й точні screenshot paths — [report 7A](./PHASE7A-REPORT.md).
+
+## Історичний closing check фази 7 — 2026-10-15
 
 Прийняття власником — acceptance із збереженим боргом, не нове physical/full QA.
 Свіжий closing eval виконано в isolated source clone поза repo, щоб не
@@ -130,39 +171,28 @@ Closing check 2026-10-14: `npm run build` PASS, `npm run test:pwa-assets`
 ## НЕЗАКРИТЕ — почни звідси
 
 
-7A. **Обов’язкова фаза 7A — компактний icon-first PWA UX перед фазою 8.**
-   **Лише специфікація/checklist; НЕ реалізовано.** Вимога власника при
-   `handoff:next`: «переробити UX на компактним без тексту з іконками і мінімум
-   тексту, текст англійською по замовченню, якщо нема локалізації то і не треба».
-   Починати тільки після окремого `start 7A`; closure 7 не дозволяє UX implementation.
-   - [ ] Замість великої текстової PWA панелі — компактні icon-first status/actions;
-     у звичайному/collapsed стані мінімум тексту, без довгих пояснень або IDs.
-   - [ ] Коротка English copy за замовчуванням для PWA status, actions, errors,
-     install fallback і consent. Повторно використати локалізацію **лише якщо вона
-     вже існує**; якщо її немає — English-only, без нового framework/catalogs або
-     окремої localization requirement. Наявність локалізації перевірити на старті,
-     цей closure не стверджує результату такої перевірки.
-   - [ ] Release/shell IDs, timestamps і технічні деталі — secondary disclosure,
-     не домінантний main UI; debugging/pinned identity checks не прибирати.
-   - [ ] Icon-only controls мають короткі English tooltips/accessible names,
-     keyboard activation, visible focus і зрозумілі status/error announcements.
-     Не покладатися лише на колір; pointer/touch controls не перекривають canvas
-     або основні File/Player/State controls на desktop і 320px.
-   - [ ] Мінімум тексту НЕ скасовує loss-consent: concise English попередження
-     перед reload/update про artwork/wet paint/Undo loss, PNG flattened/not backup,
-     окремі export → file verification → confirmation та explicit discard/cancel.
-     Unknown dirty, busy gates, once-only own reload, no claim, multi-tab notification
-     not lock, embedded exclusion і genuine install policy лишаються незмінними.
-   - [ ] Guard: production activation/detection/readiness/worker suites та build;
-     адаптувати copy/selectors assertions до нового контракту, не послаблюючи gates.
-     Probe: real desktop/320px icon actions, keyboard/accessibility, collapsed/
-     details/consent/error/install states і retained actual V1/V2 activation matrix;
-     actual screenshots та loss-consent review до owner acceptance.
-   - [ ] Оновити QA-7A historical snapshot labels як історію, додати окремі
-     runnable QA-7AUX scenarios без колізії з існуючим **QA-7A** (це сценарій
-     фази 7, не acceptance фази 7A). Record fresh evidence, потім owner review.
-   **Gate:** фазу 8 не починати до implementation + eval + owner acceptance 7A
-   і окремого дозволу на 8. Physical/CDN/CORS/full-verify борг не зникає від UX.
+~~7A. **Компактний icon-first PWA UX, SVG Repo icons, minimal status та automatic PNG.**~~ — ЗАКРИТО через `handoff:next` 2026-10-15.
+   Поточний контракт та closing результати — на початку цього handoff; наступні bullets — збережена історія первинного UX eval, manual-confirmation flow superseded auto-PNG.
+   Авторизовано відповіддю `7a`; не owner acceptance і не дозвіл на commit/deploy.
+   - [x] Compact dock: collapsed **49px** на 1000×900 та 320×900, короткі статуси,
+     icon actions із English title/accessible name; long IDs/timestamps — `Details & install`.
+   - [x] Перевірено app/index/package: локалізаційного framework/catalogs не знайдено;
+     PWA English-only, без нового localization шару.
+   - [x] Native keyboard Enter, Escape, visible focus, live status/error; жодного
+     color-only статусу. Measured dock height резервується поза canvas та File/Player/State.
+   - [x] English artwork/wet paint/Undo loss; flattened PNG не backup; окремі
+     export → перевірка файлу → confirmation; explicit discard/cancel. Safety factory
+     та worker gates не змінено (лише copy/focus/render/layout).
+   - [x] Fresh isolated build PASS; guards activation **12/0**, detection **15/0**,
+     readiness **11/0**, worker **12/0**, UX **4/0**. Browser: production **10/0**,
+     readiness **13/0**, detection **7/0**, actual V1/V2 activation **14/0**;
+     desktop/320 keyboard/details/consent/error/install screenshots та geometry у report.
+   - [x] Нові runnable `QA-7AUX-*`; старий `QA-7A` — історичний ID фази 7.
+   - [x] Owner review / acceptance 7A через `handoff:next`; phase8 потребує окремого дозволу.
+   Evidence: `C:/Users/cergi/AppData/Local/Temp/fluid-pwa-phase7a-azLg6U/result.json`.
+   Retained `127.0.0.1:3000` PID31212 збережено; served inventory/SW byte-exact
+   до/після eval, root dist не будували. Own 5 ports bind-back PASS; деталі в report.
+   Physical/CDN/CORS/full-verify та historical cleanup-readback debt збережено.
 
 8. **Фаза 8 — retention, quota і rollback identity.**
    **Передумова: 7A реалізована, перевірена та прийнята; окремий дозвіл на фазу 8.**
