@@ -38,7 +38,7 @@ async function startProductionServer({dist=path.resolve(__dirname,'../dist'),por
     const send=(status,body,type,cache,headers={})=>{log({method:request.method,url:request.url,status,type,cache});response.writeHead(status,{'Content-Type':type,'Cache-Control':cache,...headers});response.end(request.method==='HEAD'?undefined:body);};
     if(!['GET','HEAD'].includes(request.method)){send(405,'Method not allowed','text/plain','no-store');return;}
     const fixture=overlay(pathname);
-    if(fixture){send(200,fixture.body,fixture.type,fixture.cache,fixture.headers);return;}
+    if(fixture){if(fixture.disconnect){request.socket.destroy();return;}send(fixture.status || 200,fixture.body,fixture.type,fixture.cache,fixture.headers);return;}
     const file=path.resolve(root,'.'+(pathname==='/'?'/index.html':pathname));
     const relative=path.relative(root,file);
     if(relative.startsWith('..') || path.isAbsolute(relative)){send(403,'Forbidden','text/plain','no-store');return;}
@@ -56,7 +56,7 @@ async function startProductionServer({dist=path.resolve(__dirname,'../dist'),por
 }
 async function launchProfile({profile,evidence,label,offline=false,headed=false}) {
   externalDirectory(profile);externalDirectory(evidence);
-  const context=await chromium.launchPersistentContext(profile,{headless:!headed,serviceWorkers:'allow',offline,viewport:{width:1000,height:720},recordHar:{path:path.join(evidence,label+'.har'),content:'embed'},args:['--renderer-process-limit=1']});
+  const context=await chromium.launchPersistentContext(profile,{headless:!headed,serviceWorkers:'allow',offline,viewport:{width:1000,height:720},recordHar:{path:path.join(evidence,label+'.har'),content:'embed'},args:['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader','--renderer-process-limit=1']});
   try {await context.tracing.start({screenshots:true,snapshots:true,sources:true});} catch(error){await context.close();throw error;}
   return {context,async close(){
     const browser=context.browser(),pages=context.pages().length;

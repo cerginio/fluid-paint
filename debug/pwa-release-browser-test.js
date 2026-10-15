@@ -1,6 +1,6 @@
 'use strict';
 // Reuses the phase-1 production gulp/Playwright runner contract, browser lock,
-// Paint debug API and the retained story UI fixture. No SW/persistent harness.
+// Paint debug API and retained story UI input; offline acceptance has its own runner.
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
@@ -11,9 +11,9 @@ const {chromium}=require('playwright');
 require('./browser-lock').acquireBrowserLock('Fluid PWA phase 2 production release');
 const root=path.resolve(__dirname,'..');
 const parent=path.join(os.tmpdir(),'fluid-pwa');fs.mkdirSync(parent,{recursive:true});
-const evidence=fs.mkdtempSync(path.join(parent,'phase2-'));
+const evidence=process.env.PWA_RELEASE_EVIDENCE_DIR ? require('./pwa-sw-harness').externalDirectory(process.env.PWA_RELEASE_EVIDENCE_DIR) : fs.mkdtempSync(path.join(parent,'phase2-'));
 const git=args=>execFileSync('git',args,{cwd:root,encoding:'utf8'}).trim();
-const result={status:'RUNNING',startedAt:new Date().toISOString(),evidence,revision:git(['rev-parse','HEAD']),dirtyScope:git(['status','--short','--untracked-files=all']),command:'npm run test:pwa-release:browser',environment:{node:process.version,platform:process.platform,arch:process.arch,backend:'Chromium ANGLE SwiftShader',serverCommand:'NODE_ENV=production PORT=0 node node_modules/gulp/bin/gulp.js startServer'},inputs:{story:'docs/story-2026-09-08-4-frames.json',png:'real PNG exported in this run',seed:41},builds:[],cases:[],requests:[],responses:[],requestFailures:[],completedSteps:[],limitations:['Headless Chromium/SwiftShader, not physical Android/iOS or native GPU.','Online production assets only; no SW, offline cold start, install, update, persistent-profile harness, CDN headers or deploy.','Optional CDN Demo data not accepted; localhost not CORS allowlisted.','GPU allocations bounded using existing Paint debug API; painting resize uses existing preview/commit API, viewport resize and drawing/Bake/export/import use real UI.']};
+const result={status:'RUNNING',startedAt:new Date().toISOString(),evidence,revision:git(['rev-parse','HEAD']),dirtyScope:git(['status','--short','--untracked-files=all']),command:'npm run test:pwa-release:browser',environment:{node:process.version,platform:process.platform,arch:process.arch,backend:'Chromium ANGLE SwiftShader',serverCommand:'NODE_ENV=production PORT=0 node node_modules/gulp/bin/gulp.js startServer'},inputs:{story:'docs/story-2026-09-08-4-frames.json',png:'real PNG exported in this run',seed:41},builds:[],cases:[],requests:[],responses:[],requestFailures:[],completedSteps:[],limitations:['Headless Chromium/SwiftShader, not physical Android/iOS or native GPU.','Online production regression with production registration; offline cold start/install/update are exercised by pwa-worker-browser-test, not this runner. No CDN/deploy proof.','Optional CDN Demo data not accepted; localhost not CORS allowlisted.','GPU allocations bounded using existing Paint debug API; painting resize uses existing preview/commit API, viewport resize and drawing/Bake/export/import use real UI.']};
 let server,browser,context,port,serverLog='';
 const inventory=()=>JSON.parse(fs.readFileSync(path.join(root,'dist/precache-inventory.json'),'utf8'));
 function build(label){
@@ -68,7 +68,7 @@ async function main(){
     await page.screenshot({path:path.join(evidence,`webgl${version}-import.png`)});
     await page.setInputFiles('#story-file-input',path.join(root,result.inputs.story));await page.waitForFunction(()=>window.__painter.storyPlaybackController.state==='ready');assert.equal(await page.locator('#story-player-page').isVisible(),true);
     assert.match(await page.locator('#story-player-file-name').textContent(),/story-2026-09-08-4-frames.json/);await page.screenshot({path:path.join(evidence,`webgl${version}-story.png`)});
-    assert.deepEqual(errors,[]);assert.equal(await page.evaluate(async()=> (await navigator.serviceWorker.getRegistrations()).length),0);
+    assert.deepEqual(errors,[]);assert.equal(await page.evaluate(async()=> (await navigator.serviceWorker.getRegistrations()).length),1);
     result.cases.push({version,url,releaseId:inventory().releaseId,drawn,resized,baked,png,pngBytes:bytes.length,imported,storyState:'ready',errors});
     result.completedSteps.push(`WebGL${version}: pointer draw, painting resize, viewport resize, UI Bake, real PNG download, local PNG + story import`);
     await page.close();

@@ -16,8 +16,8 @@ test('external evidence rejects checkout and temp root',()=>{
   assert.throws(()=>h.externalDirectory(path.resolve(__dirname,'..')),/os.tmpdir|repo/);
   assert.throws(()=>h.externalDirectory(os.tmpdir()),/os.tmpdir/);
 });
-test('fixture has isolated scope and natural lifecycle; no production output worker',()=>{
-  assert.equal(fixture.PREFIX,'/__pwa_fixture/');assert.equal(fs.existsSync(path.resolve(__dirname,'../dist/sw.js')),false);
+test('fixture has isolated scope and natural lifecycle; production worker has its own identity',()=>{
+  assert.equal(fixture.PREFIX,'/__pwa_fixture/');const production=fs.readFileSync(path.resolve(__dirname,'../dist/sw.js'),'utf8');assert.ok(production.includes(JSON.parse(fs.readFileSync(path.resolve(__dirname,'../dist/release.json'))).releaseId));assert.doesNotMatch(production,/fluid-pwa-fixture/);
   const source=fixture.workerSource('v1');new Function(source);
   assert.doesNotMatch(source,/self\.skipWaiting\(|clients\.claim\(/);assert.match(source,/requestId/);assert.match(source,/IGNORE/);
   const sw=fixture.fixtureRoutes(()=>'v2')('/sw.js');assert.equal(sw.cache,'no-store');assert.equal(sw.headers['Service-Worker-Allowed'],fixture.PREFIX);

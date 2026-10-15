@@ -111,7 +111,7 @@ async function shaderRegistry() {
 }
 
 function scripts() {
-  return src([registryFile, ...paths.js], { allowEmpty: false })
+  return src([registryFile, ...paths.js, ...(isProd ? ['app/pwa-register.js'] : [])], { allowEmpty: false })
     .pipe(plumber())
     .pipe(concat('bundle.js', { newLine: ';\n' }))
     .pipe(terser({

@@ -1,5 +1,5 @@
 'use strict';
-// Build-only production finalizer. No runtime/SW code.
+// Build-only production finalizer; serializes the pinned production SW last.
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
@@ -62,6 +62,8 @@ async function finalizeRelease(root, dist = path.join(root,'dist')) {
   let gitSha = null;
   try { gitSha = execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim(); } catch { /* diagnostics may be unavailable in source archives */ }
   await fs.writeFile(path.join(dist,'release.json'),JSON.stringify({schemaVersion:1,releaseId,gitSha,buildTime:new Date().toISOString(),assetMap},null,2)+'\n');
+  const worker = require(path.join(root, 'app/pwa-worker.js')).fluidPwaWorker;
+  await fs.writeFile(path.join(dist,'sw.js'),`'use strict';\n(${worker.toString()})(${JSON.stringify(inventory)});\n`);
   return inventory;
 }
 module.exports = {sha256,canonicalInventory,finalizeRelease};

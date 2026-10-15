@@ -16,7 +16,7 @@ async function selftest({evidence=h.createEvidence(),profile=path.join(evidence,
   if(!Number.isInteger(port) || port<0 || port>65535) throw new Error('Invalid port');
   const baseline=previous?.version || 'v1';
   const nextVersion='v'+(Number(baseline.slice(1))+1);
-  const result={status:'RUNNING',evidence,profile,startedAt:new Date().toISOString(),environment:{node:process.version,platform:process.platform},revision:execFileSync('git',['rev-parse','HEAD'],{cwd:path.resolve(__dirname,'..'),encoding:'utf8'}).trim(),fixtureOnly:true,cases:[],runs:[],coldStarts:[],protocol:[],http:[],pageErrors:[],cleanup:{contextsClosed:0,contextClosures:[]},limitations:['Disposable fixture only; production SW/app offline behavior not implemented or accepted.','Desktop Chromium, not physical Android/iOS, storage eviction or CDN/deploy acceptance.','Cold browser process restart at same localhost origin; OS restart is not tested.']};
+  const result={status:'RUNNING',evidence,profile,startedAt:new Date().toISOString(),environment:{node:process.version,platform:process.platform},revision:execFileSync('git',['rev-parse','HEAD'],{cwd:path.resolve(__dirname,'..'),encoding:'utf8'}).trim(),fixtureOnly:true,cases:[],runs:[],coldStarts:[],protocol:[],http:[],pageErrors:[],cleanup:{contextsClosed:0,contextClosures:[]},limitations:['Disposable fixture only; production SW/app offline behavior is not exercised by this fixture selftest.','Desktop Chromium, not physical Android/iOS, storage eviction or CDN/deploy acceptance.','Cold browser process restart at same localhost origin; OS restart is not tested.']};
   result.resume=resume;result.baseline=baseline;result.nextVersion=nextVersion;
   let server,session,version=baseline;
   const serverLog=[],browserLog=[];
@@ -46,7 +46,8 @@ async function selftest({evidence=h.createEvidence(),profile=path.join(evidence,
     const record={label,offlineBeforeNavigation:true,fromServiceWorker:response.fromServiceWorker(),byte,state,active,caches};result.coldStarts.push(record);await snapshot(page,label,record);await close();return record;
   };
   try {
-    assert.equal(fs.existsSync(path.resolve(__dirname,'../dist/sw.js')),false,'Production dist must have no SW in phase 3');
+    const productionWorker=fs.readFileSync(path.resolve(__dirname,'../dist/sw.js'));
+    result.productionWorkerSha256=crypto.createHash('sha256').update(productionWorker).digest('hex');
     server=await h.startProductionServer({port,overlay:fixture.fixtureRoutes(()=>version),log:entry=>serverLog.push(entry)});result.port=server.port;result.origin=server.base;
     console.log('Fixture review URL '+server.base+fixture.PREFIX);
     // Real production dist, exact byte readback plus production-like local headers.
@@ -98,8 +99,8 @@ async function selftest({evidence=h.createEvidence(),profile=path.join(evidence,
     await snapshot(page,'run2-waiting',{second,states,replies,negativeTimeout:result.negativeTimeout,caches:await h.inspectCaches(page)});
     const finalCold=await cold('run2-cold-offline',nextVersion);pass('run 2: natural activation then offline cold launch of '+nextVersion);
     fs.writeFileSync(marker,JSON.stringify({fixtureOnly:true,port:server.port,version:nextVersion,caches:finalCold.caches},null,2));
-    assert.deepEqual(result.pageErrors,[]);assert.equal(fs.existsSync(path.resolve(__dirname,'../dist/sw.js')),false);
-    pass('zero page errors and production SW remains absent');result.status='PASS';
+    assert.deepEqual(result.pageErrors,[]);assert.deepEqual(fs.readFileSync(path.resolve(__dirname,'../dist/sw.js')),productionWorker);
+    pass('zero page errors and production SW remains byte-identical');result.status='PASS';
   } catch(error) {result.status='FAIL';result.error=error.stack;}
   finally {
     try {await close();} catch(error){result.status='FAIL';result.cleanup.browserError=error.stack;}

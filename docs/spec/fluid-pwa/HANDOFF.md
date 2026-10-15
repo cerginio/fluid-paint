@@ -1,6 +1,6 @@
 # Handoff: Fluid PWA — offline shell та надійні оновлення
 
-Стан на 2026-10-14. **Фаза 1 прийнята власником командою `handoff:next` і закрита.**
+Стан на 2026-10-15. **Фаза 1 прийнята власником командою `handoff:next` і закрита.**
 Фаза 1 закомічена в `67b9726`. **Фаза 2 прийнята власником командою
 `handoff:next` 2026-10-14 і закрита; closing commit поверх `67b9726`.**
 **Фаза 3 прийнята власником командою `handoff:next` 2026-10-14 і закрита;
@@ -31,13 +31,79 @@ harness для service worker — окрема spike-фаза **перед** SW 
 hashed assets і release identity йдуть **до** SW (фаза 2), щоб перший же SW
 мав чесну identity й atomic install і не переписувався потім.
 
-> **Далі:** фаза 4 — SW: install, перевірений precache, fetch routing,
-> після окремого дозволу почати. Фаза 3 прийнята й закрита;
-> [QA-3A–3G](./QA.md), [PHASE3-REPORT.md](./PHASE3-REPORT.md).
-> Фаза 4 і production deploy ще не авторизовані.
-> Історичний дозвіл фази 2 на naming migration не є незалежним external-consumer audit.
+> **Далі:** фаза 5 — readiness і install UX, після окремого дозволу почати.
+> **Фаза 4 прийнята власником через `handoff:next` 2026-10-15 і закрита.**
+> Код і closure-документи входять у closing commit поверх `66c65e1`;
+> [QA-4A–4P](./QA.md), [PHASE4-REPORT.md](./PHASE4-REPORT.md).
+> Фази 5–10 не авторизовані й не починались.
+> Production deploy окремо заборонено; naming migration не є external-consumer audit.
+
+## Фаза 4 — прийнята й закрита
+
+Прийнято власником через `handoff:next` 2026-10-15. Closing commit поверх
+`66c65e1`; deploy не виконано. Production code: `app/pwa-worker.js` template,
+`app/pwa-register.js` production-only inclusion у Gulp, final generated `/sw.js`.
+SW містить pinned inventory/releaseId, staging cache per attempt + complete
+marker last; HTTP status/MIME/format/size/SHA checks; failed cache не служить,
+старий complete release і чужі caches не чіпаються. Routing §3.3, без HTML
+fallback/SWR/forced activation/reload. STATUS diagnostic protocol не є UI.
+Actual development build і source HTML виключають registration/SW.
+
+Runnable повний eval: `node debug/pwa-phase4-eval.js` з кореня checkout.
+Нові `pwa-worker-test.js`, `pwa-worker-browser-test.js`, `pwa-phase4-eval.js`;
+package scripts і Makefile tiers. Old no-production-SW assertions замінено
+production identity/source-dev exclusion/isolated fixture/byte-preservation,
+не послаблено inventory/assets/shader guards.
+
+Історичний final eval реалізації 2026-10-14: build PASS; guards worker **10/0**, release **4/0**,
+assets **7/0**, harness **5/0**, shader **25/0**, demo **8/0**, palette **6/0**;
+control API PASS без assertion enumeration. Production browser **10/0**,
+retained asset browser **2 viewport**, release browser **2 WebGL**, disposable
+harness **8/0**. Не підсумовувати різні suites/рівні. Chromium 153.0.8010.12,
+Node 24.19.0, SwiftShader. П'ять production persistent browser processes
+повністю закрито/disconnected, три cold offline navigations після close.
+Offline WebGL1/2 draw/resize/Bake/PNG export/local PNG/story import+playback
+PASS; Bake rendered delta=0, wet=0, GL/page errors=0. Completed playback —
+12-tile subset retained story: 14/14 operations, pending=0; повний великий
+JSON імпортований, але full playback до кінця NOT TESTED.
+
+Два actual failed upgrades: required JS TCP cut після попередніх install fetches
+і HTTP404; redundant/waiting=false, CacheStorage лишився byte-identical V1,
+partial cache відсутній, old app online/offline і subsequent browser restart
+працюють. Valid V2 потім verified/waiting, V1 не reload; natural activation
+після всіх clients close та offline V2 cold shell PASS. Query unchanged;
+same-origin controlled embedded exact-origin handshake PASS, actual сторонній
+origin/window не ready за deadline, стан app незмінний. Vendor untouched.
+
+Evidence поза repo:
+`C:/Users/cergi/AppData/Local/Temp/fluid-pwa-phase4-final-5sYqN3/`.
+Root `result.json`: exact commands/exit codes/suite counts/absolute artifacts;
+`production-probe/result.json`: actual-worker cases, dist snapshots/profile,
+CacheStorage bytes, PNG/HAR/traces, browser/server logs. Own servers stopped,
+усі owned ports bind-back PASS окремим Node process; чужих не зупиняли.
+Review stand не залишено. `git diff --check` PASS.
+Повний report і manual steps — [PHASE4-REPORT.md](./PHASE4-REPORT.md), [QA.md](./QA.md).
+
+**Новий інваріант фази 4:** partial/failed release ніколи не serve app shell;
+exact-worker guards перевіряють кожну rejection reason, а actual production SW
+network/404 probes доводять стару complete identity після offline restart.
+Реєстрація source/dev заборонена; natural activation не є forced update.
+
+NOT TESTED: actual browser quota exhaustion/MIME/hash/HTML fault injection
+(covered Node guards); physical Android/iOS/native GPU/OS reboot, full великої
+story playback, storage eviction, CDN/headers/CORS/demo downloads, full
+`make verify`. Phases5–10 readiness/install/update UX, cap/retention/rollback
+не реалізовано; acceptance фази 4 не є acceptance цих меж чи deploy permission.
+
+Closing check 2026-10-15: production build PASS; свіжі guards worker **10/0**,
+release **4/0**, assets **7/0**, harness **5/0** — окремі suites.
+Збережені browser results PASS/exitCode=0 повторно прочитано: production
+**10 cases**, assets **2 viewport**, release **2 WebGL**, fixture **8 cases**;
+проби не перезапускались. Port 3000 bind-back PASS. NOT TESTED збережено.
 
 ## Фаза 3 — прийнята й закрита
+
+Нижче — історичний eval фази 3. Її no-production-SW межа superseded фазою 4; поточний fixture guard перевіряє ізоляцію та незмінність production SW bytes.
 
 Прийнято власником через `handoff:next` 2026-10-14; deploy не виконано. Нові `debug/pwa-sw-harness.js`,
 `pwa-sw-fixture.js`, `pwa-sw-selftest.js`, `pwa-sw-harness-test.js` і три
@@ -261,7 +327,7 @@ Closing check 2026-10-14: `npm run build` PASS, `npm run test:pwa-assets`
 ~~1. **Фаза 1 — локальні assets і нуль зовнішніх залежностей.**~~
    **ЗАКРИТО: прийнято власником 2026-10-14 (`handoff:next`).** Див.
    [QA.md](./QA.md) і історичні факти фази 1 вище. Історично після фази 1 наступною була фаза 2; тепер 1–2 закриті,
-   тепер фаза 3 також закрита, 4–10 не починались.
+   тепер фаза 3 також закрита; фаза 4 також закрита, 5–10 не починались.
    Контракт: self-hosted Open Sans woff2 400/600/700 з `@font-face` у
    `app/layout.css`, Google Fonts посилання зняте з `index.html`; icon master
    (vector або ≥512px) і згенеровані з нього 192/512 maskable та apple touch;
@@ -314,7 +380,9 @@ Closing check 2026-10-14: `npm run build` PASS, `npm run test:pwa-assets`
    Межа фази: якщо cold start із повним закриттям сторінок у harness
    недосяжний, це фіксується як обмеження до написання SW, а не під час.
 
-4. **Фаза 4 — SW: install, перевірений precache, fetch routing.**
+~~4. **Фаза 4 — SW: install, перевірений precache, fetch routing.**~~
+   **ЗАКРИТО: прийнято власником 2026-10-15 (`handoff:next`).**
+   Історичний report/eval і свіжий closing check вище; deploy не виконано.
    Контракт: build-generated `/sw.js` зі стабільним URL і `releaseId`;
    install завантажує inventory у власний staging cache і перевіряє статус,
    тип/формат і hash кожного required asset; будь-який

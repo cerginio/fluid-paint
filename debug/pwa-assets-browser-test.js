@@ -77,7 +77,7 @@ async function main() {
     }
     const apple=await page.evaluate(async()=>{const i=new Image();i.src=document.querySelector('link[rel="apple-touch-icon"]').href;await i.decode();return [i.naturalWidth,i.naturalHeight];});
     assert.deepEqual(apple,[180,180]);
-    assert.equal(await page.evaluate(async()=> (await navigator.serviceWorker.getRegistrations()).length),0);
+    assert.equal(await page.evaluate(async()=> (await navigator.serviceWorker.getRegistrations()).length),1);
     assert.deepEqual(errors,[]);
     result.manifest=parsed;result.pages.push({viewport,geometry,fontFaces,pageErrors:errors,manifestErrors:parsed.errors});
     await page.close();

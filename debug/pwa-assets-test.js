@@ -116,7 +116,10 @@ test('master remains the directed 733px source, not an upscaled favicon', () => 
   assert.equal(createHash('sha256').update(fs.readFileSync(path.join(root,'assets/icons/master-733.png'))).digest('hex'),
     '725ac9836dd734c49a7753777316cc273a5bfc50a8f632ddc61c2baf937b9003');
 });
-test('phases 1-2 do not register or ship a service worker', () => {
-  assert.ok(!fs.existsSync(path.join(dist,'sw.js')));
-  assert.doesNotMatch(read(built('bundle.js'))+read('index.html'), /serviceWorker\s*\.\s*register\s*\(/);
+test('production ships identity-pinned SW; source HTML never registers', () => {
+  const sw = read('sw.js');
+  assert.ok(sw.includes(JSON.parse(read('release.json')).releaseId));
+  assert.match(read(built('bundle.js')), /serviceWorker\.register/);
+  assert.doesNotMatch(fs.readFileSync(path.join(root,'index.html'),'utf8'), /pwa-register|serviceWorker/);
+  assert.doesNotMatch(sw, /skipWaiting\s*\(|clients\.claim\s*\(/);
 });

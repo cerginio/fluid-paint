@@ -109,7 +109,7 @@ test('runtime logical collision fails before XHR', async () => {
 for (const kind of ['missing', 'empty', 'collision']) {
   test(`actual gulp build exits nonzero for ${kind} (isolated Temp fixture)`, async () => {
     const fixture = await fs.mkdtemp(path.join(os.tmpdir(), `fluid-2-C-build-${kind}-`));
-    for (const file of ['gulpfile.js', 'common.js', 'fluid-engine/index.js', 'debug/shader-bundle-build.js', 'debug/pwa-release-build.js']) {
+    for (const file of ['gulpfile.js', 'common.js', 'fluid-engine/index.js', 'debug/shader-bundle-build.js', 'debug/pwa-release-build.js', 'app/pwa-worker.js', 'app/pwa-register.js']) {
       await fs.mkdir(path.dirname(path.join(fixture, file)), { recursive: true });
       await fs.copyFile(path.join(root, file), path.join(fixture, file));
     }

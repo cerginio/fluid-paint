@@ -27,11 +27,11 @@ test('canonical encoding is exact UTF-8 JSON pairs, byte ordered, no BOM/newline
   assert.notEqual(sha256(canonicalInventory([{path:'/a',sha256:a}])),sha256(canonicalInventory([{path:'/a',sha256:b}])));
 });
 test('two actual clean production builds are identical and delete stale output; diagnostics excluded',()=>{
-  build(); const first=json('precache-inventory.json'); const metadata=json('release.json');
+  build(); const first=json('precache-inventory.json'); const firstSw=fs.readFileSync(path.join(dist,'sw.js')); const metadata=json('release.json');
   fs.writeFileSync(path.join(dist,'stale-phase2-owned.js'),'stale');
   fs.mkdirSync(path.join(dist,'stale-phase2-owned'),{recursive:true});fs.writeFileSync(path.join(dist,'stale-phase2-owned/old.css'),'old');
   build(); const second=json('precache-inventory.json');
-  assert.deepEqual(first,second);assert.equal(metadata.releaseId,json('release.json').releaseId);
+  assert.deepEqual(first,second);assert.deepEqual(firstSw,fs.readFileSync(path.join(dist,'sw.js')));assert.equal(metadata.releaseId,json('release.json').releaseId);
   assert.ok(!fs.existsSync(path.join(dist,'stale-phase2-owned.js')));assert.ok(!fs.existsSync(path.join(dist,'stale-phase2-owned')));
   assert.notEqual(metadata.buildTime,json('release.json').buildTime);
   assert.equal(second.releaseId,sha256(canonicalInventory(second.entries)));
@@ -45,7 +45,7 @@ test('inventory validates every content hash, hash filename and HTML/CSS/manifes
     assert.doesNotMatch(e.path,/shaders|sw\.js|release\.json|precache-inventory|\.build/);
     if(e.path!=='/index.html')assert.ok(e.path.includes(`.${e.sha256}.`),e.path);
   }
-  assert.ok(!fs.existsSync(path.join(dist,'sw.js')));assert.ok(!fs.existsSync(path.join(dist,'.build')));
+  assert.ok(fs.readFileSync(path.join(dist,'sw.js'),'utf8').includes(inv.releaseId));assert.ok(!fs.existsSync(path.join(dist,'.build')));
   for(const [source,output] of Object.entries(meta.assetMap))assert.ok(!fs.existsSync(path.join(dist,source)),source);
   const resolve=(value,base)=>{
     assert.ok(!/^(?:[a-z][\w+.-]*:|\/\/)/i.test(value),value);
@@ -72,7 +72,7 @@ test('real isolated production build changes identity on changed HTML bytes; che
   const temp=fs.mkdtempSync(path.join(os.tmpdir(),'fluid-pwa-phase2-change-'));
   const before=json('precache-inventory.json');
   const tracked=execFileSync('git',['ls-files','-z'],{cwd:root}).toString().split('\0').filter(Boolean);
-  for(const file of [...new Set([...tracked,'debug/pwa-release-build.js'])]){
+  for(const file of [...new Set([...tracked,'debug/pwa-release-build.js','app/pwa-worker.js','app/pwa-register.js'])]){
     fs.mkdirSync(path.dirname(path.join(temp,file)),{recursive:true});fs.copyFileSync(path.join(root,file),path.join(temp,file));
   }
   const source=fs.readFileSync(path.join(temp,'index.html'),'utf8');

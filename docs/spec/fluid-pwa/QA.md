@@ -35,6 +35,180 @@ PWA_QA_PORT=3000 npm run test:pwa-release:browser
 Phase-2 runner сам робить два production builds; evidence — автоматичний unique
 `phase2-…`. Не запускати guards/probes паралельно із сервером (працюють з dist).
 
+## Фаза 4 — production offline shell (прийнята, закрита)
+
+**Прийнято власником через `handoff:next` 2026-10-15, закрито.**
+Код/документи входять у closing commit поверх `66c65e1`; deploy не виконано. [PHASE4-REPORT.md](./PHASE4-REPORT.md) містить контракт, виміряні
+факти та NOT TESTED. Преамбула запуску вище прочитана; рядка `**Деплой:**`
+немає, production deploy окремо заборонено. Нові сценарії виконано автором;
+Історичний eval нижче не перетворює NOT TESTED на PASS.
+
+### Запуск / evidence
+
+```sh
+node debug/pwa-phase4-eval.js
+# Вузький guard + production probe:
+NODE_ENV=production node node_modules/gulp/bin/gulp.js build
+node --test debug/pwa-worker-test.js
+node debug/pwa-worker-browser-test.js
+```
+
+Runner створює унікальний Temp evidence root поза repo, сам запускає/закриває
+servers та browsers. Не чистити збережений profile, щоб підмінити cold proof
+fresh-profile запуском. Поточний successful evidence:
+`C:/Users/cergi/AppData/Local/Temp/fluid-pwa-phase4-final-5sYqN3/`.
+Нижче `$E` означає цей **абсолютний** root; `$E/production-probe` має actual
+production dist snapshots/profile, 5 HAR/5 traces, screenshots і PNG exports.
+Історичні results реалізації 2026-10-14: worker 10/0; release 4/0; assets 7/0; harness 5/0; shader 25/0;
+demo 8/0; palette 6/0; control API PASS. Production browser 10/0;
+retained browsers: assets 2 viewport, release 2 WebGL, fixture harness 8 cases.
+Різні рівні й suites не підсумовуються.
+
+Для ручних кліків запустити свій production build/Gulp server за преамбулою
+і відкрити `http://127.0.0.1:3000/?webgl=2&debug=none&diag=0&seed=41`;
+повторити з `webgl=1`. Для exact install-failure/security matrix використовувати
+runner, не підмінювати його Gulp serving: no-store/MIME та network cuts дає
+production-like harness. Gulp server не є live CDN headers acceptance.
+Всі review servers автора зупинені; порт у збережених URLs — історичний,
+не живий стенд. Власний ручний server після перевірки завершити Ctrl+C.
+
+### QA-4A. Guards та production/source/dev boundary
+
+**qa:mode:** cli
+**qa:open:** термінал у `D:/work/fluid-paint/fluid-paint`.
+**qa:action:** виконати `node debug/pwa-phase4-eval.js`.
+**qa:inspect:** stdout, надрукований root/result.json і окремі `.stdout.log`/`.stderr.log`.
+**qa:expected:** exit 0, status=PASS; counts вище; actual dev build не має sw.js/registration, production має identity-pinned SW; source HTML не вантажить registration. Покрито guard+actual build, не лише regex.
+
+### QA-4B. Реальний complete precache
+
+**qa:mode:** cli
+**qa:open:** `$E/production-probe/result.json`, `v1-cache.json`, `online.png`.
+**qa:action:** прочитати active та cache snapshot після online install/reload.
+**qa:inspect:** releaseId/complete, SHA/size всіх inventory entries та last-written marker.
+**qa:expected:** active.complete=true; один V1 cache, 19 assets+marker; hashes exact; усі HTTP readbacks 200/correct MIME. Registration success саме по собі ready не проголошує. Покрито actual SW, не fixture.
+
+### QA-4C. Повне закриття і cold offline navigation
+
+**qa:mode:** cli
+**qa:open:** `$E/production-probe/result.json`, `cold-offline-trace.zip`, `final-cold.png`.
+**qa:action:** перевірити case «all pages closed/browser restarted/offline before first navigation» і closures.
+**qa:inspect:** fromServiceWorker, unchanged query URL, pagesClosed/browserDisconnected.
+**qa:expected:** перше navigation після restart — SW HTTP response, не live toggle/reload proof; п'ять processes disconnected у повному runner. Offline cold navigation після failed upgrades теж працює. OS reboot не заявляється.
+
+### QA-4D. Offline малювання
+
+**qa:mode:** browser
+**qa:open:** local URL вище після online install, ready/reload; увімкнути offline у DevTools. Для збереженої проби — `$E/production-probe/webgl2-draw.png` і `webgl1-draw.png`.
+**qa:action:** виконати recipe QA-2B, провести pointer stroke по білому canvas; повторити WebGL1/2.
+**qa:inspect:** непорожній синій мазок та drawn у production result.
+**qa:expected:** materialMagnitude>0, glError=0, WebGL backend відповідний URL. Покрито actual pointer draw після cold offline launch.
+
+### QA-4E. Offline resize
+
+**qa:mode:** browser
+**qa:open:** та сама offline вкладка після QA-4D; screenshots `webgl*-resize.png`.
+**qa:action:** виконати block QA-2C; змінити viewport 960×720 → 1000×740.
+**qa:inspect:** canvas і resized у result.
+**qa:expected:** 196×142, previewError=commitError=0, мазок лишається. Existing debug preview/commit API + actual viewport resize, не edge-pointer acceptance.
+
+### QA-4F. Offline Bake
+
+**qa:mode:** browser
+**qa:open:** та сама offline вкладка; `$E/production-probe/webgl*-bake.png` і `webgl*-baked-artwork.png`.
+**qa:action:** grip → + → State → `#bake-button` за QA-2D.
+**qa:inspect:** стійкий `#bake-status`, Undo/Redo, artwork після згортання panels.
+**qa:expected:** «Baked. Wet paint and Undo history were reset.»; maxRenderedDelta=0, wet=0, background=true, Undo/Redo=false. Actual UI click, не mock.
+
+### QA-4G. Offline PNG export
+
+**qa:mode:** browser
+**qa:open:** та сама вкладка після Bake; `$E/production-probe/webgl1-export.png`, `webgl2-export.png`.
+**qa:action:** закрити extension, розгорнути panel, натиснути `#save-button`, зберегти download.
+**qa:inspect:** downloaded PNG в image viewer.
+**qa:expected:** справжній непорожній PNG 196×142 із синім artwork; download.failure=null. Flattened export, не wet checkpoint.
+
+### QA-4H. Offline локальний PNG import
+
+**qa:mode:** browser
+**qa:open:** вкладка QA-4G; screenshot `webgl*-import.png`.
+**qa:action:** + → File → `#story-file-input`, вибрати exported PNG.
+**qa:inspect:** `#story-background-name` і canvas.
+**qa:expected:** filename показано, hasBackground=true, source dimensions 196×142; жодного network download PNG. Actual file input, обидва backends.
+
+### QA-4I. Offline import retained story
+
+**qa:mode:** browser
+**qa:open:** вкладка QA-4H; screenshot `webgl*-story.png`.
+**qa:action:** File input → `docs/story-2026-09-08-4-frames.json` із checkout.
+**qa:inspect:** Player filename і controller.state.
+**qa:expected:** original filename і state=ready. Великий retained JSON імпортований offline; завершення всього його playback цим check не заявляється.
+
+### QA-4J. Offline completed локальний playback
+
+**qa:mode:** browser
+**qa:open:** та сама вкладка; `$E/production-probe/local-story-12-tiles.json`.
+**qa:action:** імпортувати цей bounded subset retained source через File input; вибрати `#story-speed` 16×; натиснути `#story-play-pause`.
+**qa:inspect:** Player та `webgl*-playback.png`.
+**qa:expected:** стійкі «Playback completed.», «14 / 14 operations · 100% painted»; completed, pendingOperations=0, glError=0. Обидва WebGL backends; реальна story pipeline, не SW fixture. Повна 1.9 MB story до кінця — NOT TESTED.
+
+### QA-4K. Реальний network cut нового install
+
+**qa:mode:** cli
+**qa:open:** `$E/production-probe/result.json`, `server.json`, `browser.json`, `failed-network-old-offline.png`.
+**qa:action:** знайти case actual failed upgrade network після V1 install.
+**qa:inspect:** fetchedEntries/cut hits, redundant/waiting і exact old cache snapshot.
+**qa:expected:** required JS TCP socket розірвано після інших fetches; worker redundant, waiting=false, old releaseId лишився, partial cache відсутній; V1 app offline відкривається. Не mock-only proof.
+
+### QA-4L. Required asset 404
+
+**qa:mode:** cli
+**qa:open:** той самий production result; `failed-404-old-offline.png`.
+**qa:action:** знайти case actual failed upgrade 404.
+**qa:inspect:** asset pathname, real HTTP 404, redundant, V1 cache hashes.
+**qa:expected:** required JS 404 відхиляє install; old app продовжує offline працювати, без HTML-as-JS fallback/partial serving. Guard окремо перевіряє MIME/HTML/hash/quota/format/status/network reasons.
+
+### QA-4M. Routing allowlist і query
+
+**qa:mode:** cli
+**qa:open:** production result routingOffline та worker guard stdout.
+**qa:action:** прочитати URL cold starts, failed fetches `/missing.js`, `/release.json`, `/sw.js`, shader path і allowlist test.
+**qa:inspect:** unchanged location.search, network-only failures, cross-origin/POST/auth/range guard.
+**qa:expected:** `/` і `/index.html` мають pinned HTML без переписаного query; інші paths не отримують HTML. Inventory only cache-first, без SWR.
+
+### QA-4N. Embedded origin/window security regression
+
+**qa:mode:** cli
+**qa:open:** production result embedded case та `embedded-security.png`.
+**qa:action:** прочитати controlled iframe state і actual wrong-origin attacker refusal.
+**qa:inspect:** exact editorOrigin query, controller=true, embedded.ready=true, unchanged state після attack.
+**qa:expected:** same-origin iframe реальний bridge handshake проходить; сторонній origin/window не доходить до ready за 600ms deadline. Vendored code незмінний; повний зовнішній Tilecraft scene/export flow цим handshake не приймається.
+
+### QA-4O. Verified update waiting, лише natural activation
+
+**qa:mode:** cli
+**qa:open:** production result останніх двох cases; `valid-upgrade-waiting.png`, `natural-activation-cold.png`.
+**qa:action:** прочитати active/waiting STATUS replies і наступний cold start.
+**qa:inspect:** V1 active, V2 waiting.complete=true; URL unchanged; новий active після close.
+**qa:expected:** valid V2 не активується примусово і не reload V1; після всіх clients close природно активується V2, title `v2 Fluid Paint`, offline fromServiceWorker=true. Update UX ще не реалізовано.
+
+### QA-4P. Cleanup та окремий bind-back
+
+**qa:mode:** cli
+**qa:open:** root/result.json та `independent-bind-back.stdout.log`.
+**qa:action:** прочитати exact separate-process bind command; за потреби виконати його з verifiedPorts result.
+**qa:inspect:** closures, serverStopped/attackerStopped, portFree, всі owned regression ports.
+**qa:expected:** всі browsers disconnected, own servers stopped, кожен owned port окремо bindable; review stand не залишено, чужі процеси не зачеплено. Профілі/artifacts збережені тільки в Temp.
+
+### NOT TESTED / межі фази 4
+
+Real browser MIME/HTML/hash injection та actual quota exhaustion — NOT TESTED
+у браузері; rejection branches виконані exact-worker Node guards. Physical
+Android/iOS/standalone/native GPU/OS reboot, storage eviction, full large-story
+playback, live headers/CDN/CORS demos, retention/cap/rollback/multitab/update UX,
+full `make verify` — NOT TESTED / майбутні фази. Offline restart не відновлює
+wet drawing; readiness/install/warning UX — фаза 5+. Деталі в report.
+
 ## Фаза 3 — persistent SW harness (2026-10-14, прийнята)
 
 **Прийнято власником через `handoff:next` 2026-10-14, закрито.** Deploy не виконано. Це викидна fixture, не production SW/app.
@@ -137,7 +311,7 @@ Cleanup/bind-back PASS; screenshot waiting v2/v3 переглянуто parent.
 **qa:open:** `$PWA_PHASE3/guard-selftest/result.json` і `server.json`.
 **qa:action:** прочитати `http`, `coldStarts[1].caches`, logs 404; виконати `npm run test:pwa-assets` з recipe.
 **qa:inspect:** 19 inventory responses і 3 SW/metadata responses; byte entry URL/status/MIME/size/SHA; retained guard summary.
-**qa:expected:** усі 19 production entries status=200, hashVerified=true і правильний MIME; hash-named assets immutable, HTML no-cache; `/sw.js`, `/release.json`, `/precache-inventory.json` no-store. Unknown JS має 404, не HTML fallback. Cache byte status=200, text/plain, 29 bytes, SHA `fdcb9c1acae2c9c5d0d836c55057415afdbc0b731f94f5a1e69dbf0cce8bf237`; retained assets 7/0 і production `dist/sw.js` відсутній. 405 перевіряє Node server guard, не browser log. Покрито guard+probe.
+**qa:expected:** усі 19 production entries status=200, hashVerified=true і правильний MIME; hash-named assets immutable, HTML no-cache; `/sw.js`, `/release.json`, `/precache-inventory.json` no-store. Unknown JS має 404, не HTML fallback. Cache byte status=200, text/plain, 29 bytes, SHA `fdcb9c1acae2c9c5d0d836c55057415afdbc0b731f94f5a1e69dbf0cce8bf237`; retained assets 7/0; тепер production `dist/sw.js` існує з pinned releaseId, fixture його bytes не змінює (historical phase3 absence перевіряла попередній контракт). 405 перевіряє Node server guard, не browser log. Покрито guard+probe.
 
 ### QA-3G. Cleanup та bind-back
 
@@ -305,13 +479,14 @@ webmanifest/png/svg/woff2; SVG — тимчасовий probe-файл, приб
 
 ## Межі й не перевірене
 
-- Фаза 2 додає hashed assets та precache inventory, **не precache cache**.
-  Фаза 3 доводить persistent SW harness/offline cold start тільки викидної
-  fixture. Production SW/readiness, app offline cold start, install/update UX,
-  hosting headers і deployment ще не реалізовані. Manifest/inventory — build
-  groundwork, не app offline acceptance. Фаза 1 не додавала hashing (історичний факт).
-- Android/iOS standalone, фізичні пристрої та production app offline cold start — NOT TESTED,
-  це майбутні фази. Ширина 320px — desktop Chromium viewport, не телефон.
+- Історично фаза 2 додала inventory без CacheStorage; фаза 3 — лише fixture.
+  Фаза 4 тепер реалізує production SW/app offline cold start, див. QA-4/report.
+  Readiness/install/update UX, hosting headers/deployment ще не реалізовані.
+  Фаза 1 не додавала hashing (історичний факт); no-SW expectations фаз 1–3
+  superseded фазою 4, fixture byte-preservation guard збережено.
+- Android/iOS standalone та фізичні пристрої — NOT TESTED, майбутні фази.
+  Production cold start підтверджено тільки desktop Chromium/SwiftShader.
+  Ширина 320px — desktop Chromium viewport, не телефон.
 - Відкриття + ініціює чинний запит Demo index до CDN (2 запити у пробі).
   Це optional app data, не HTML/CSS/manifest dependency; CORS/demo playback
   та доступність зовнішнього каталогу не приймаються цією фазою.
@@ -323,12 +498,19 @@ webmanifest/png/svg/woff2; SVG — тимчасовий probe-файл, приб
 
 ## Журнал фаз
 
+- 2026-10-15 — фаза 4 **прийнята власником через `handoff:next`, закрита**.
+  Closing commit поверх `66c65e1`; deploy не виконано. Свіжі closing checks:
+  production build PASS; worker 10/0, release 4/0, assets 7/0, harness 5/0.
+  Browser results повторно прочитано: історичні production 10 cases PASS,
+  assets 2 viewport, release 2 WebGL, fixture 8 cases; проби не перезапускались.
+  Port 3000 bind-back PASS. Межі NOT TESTED збережено. Далі фаза 5 після дозволу почати.
+
 - 2026-10-14 — фаза 3 **прийнята власником через `handoff:next` і закрита**.
   Код/документи входять у closing commit поверх `ff429d4`; deploy не виконано.
   Свіжий closing build PASS, harness guard 5/0, retained assets 7/0.
   Browser evidence вище повторно прочитано: історичні first/resume 8/0 кожен,
   проби не перезапускались. Port 3000 незалежно bind-back PASS.
-  Межі NOT TESTED збережено. Далі фаза 4 після дозволу почати.
+  Межі NOT TESTED збережено. Історичний next-work тоді — фаза 4; тепер вона також прийнята й закрита.
 
 - 2026-10-14 — фаза 2 прийнята власником (`handoff:next`) і закрита.
   Closing build PASS; свіжі guards release 4/0, assets 7/0, shader 25/0
@@ -342,4 +524,4 @@ webmanifest/png/svg/woff2; SVG — тимчасовий probe-файл, приб
 - 2026-10-14 — фаза 1 прийнята власником (`handoff:next`) і закрита;
   closing build PASS, guard 7 passed / 0 failed. Browser evidence вище
   збережено; фізичні Android/iOS NOT TESTED. Deploy не виконано.
-  Історичний next-work тоді: фаза 2; тепер 1–3 закриті, 4–10 не починались.
+  Історичний next-work тоді: фаза 2; тепер 1–4 закриті, 5–10 не починались.
