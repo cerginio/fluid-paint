@@ -58,10 +58,10 @@ function fluidPwaWorker(inventory) {
   }
   self.addEventListener('install', event => event.waitUntil(install()));
   self.addEventListener('fetch', event => { const path = route(event.request); if (path) event.respondWith(serve(event.request, path)); });
-  // Diagnostic-only protocol for actual-worker probes; no activation command.
+  // Pinned readiness/diagnostic protocol; no activation command.
   self.addEventListener('message', event => {
     if (event.data?.type !== 'STATUS' || typeof event.data.requestId !== 'string' || !event.ports[0]) return;
-    event.waitUntil((async () => event.ports[0].postMessage({requestId:event.data.requestId, releaseId:inventory.releaseId, complete:!!await completeCache()}))());
+    event.waitUntil((async () => event.ports[0].postMessage({requestId:event.data.requestId, releaseId:inventory.releaseId, shellId:inventory.shellId, complete:!!await completeCache()}))());
   });
   return {route, verified, install, completeCache, serve};
 }

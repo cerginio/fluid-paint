@@ -54,9 +54,9 @@ async function startProductionServer({dist=path.resolve(__dirname,'../dist'),por
   let stopped=false;
   return {port:actualPort,base:`http://127.0.0.1:${actualPort}`,async stop(){if(stopped)return;stopped=true;server.closeAllConnections();await new Promise((resolve,reject)=>server.close(error=>error?reject(error):resolve()));},async verifyStopped(){return bindBack(actualPort);}};
 }
-async function launchProfile({profile,evidence,label,offline=false,headed=false}) {
+async function launchProfile({profile,evidence,label,offline=false,headed=false,userAgent}) {
   externalDirectory(profile);externalDirectory(evidence);
-  const context=await chromium.launchPersistentContext(profile,{headless:!headed,serviceWorkers:'allow',offline,viewport:{width:1000,height:720},recordHar:{path:path.join(evidence,label+'.har'),content:'embed'},args:['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader','--renderer-process-limit=1']});
+  const context=await chromium.launchPersistentContext(profile,{headless:!headed,userAgent,serviceWorkers:'allow',offline,viewport:{width:1000,height:720},recordHar:{path:path.join(evidence,label+'.har'),content:'embed'},args:['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader','--renderer-process-limit=1']});
   try {await context.tracing.start({screenshots:true,snapshots:true,sources:true});} catch(error){await context.close();throw error;}
   return {context,async close(){
     const browser=context.browser(),pages=context.pages().length;

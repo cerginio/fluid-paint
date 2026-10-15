@@ -65,6 +65,7 @@ test-fast:
 	$(NPM) run test:pwa-release
 	$(NPM) run test:pwa-assets
 	$(NPM) run test:pwa-worker
+	$(NPM) run test:pwa-readiness
 
 test-browser:
 	$(NPM) run test:shader-bundle:gpu
@@ -77,6 +78,7 @@ test-browser:
 	$(NPM) run test:pwa-release:browser
 	$(NPM) run test:pwa-assets:browser
 	$(NPM) run test:pwa-worker:browser
+	$(NPM) run test:pwa-readiness:browser
 
 test:
 	$(MAKE) test-fast

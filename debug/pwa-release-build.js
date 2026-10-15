@@ -46,6 +46,10 @@ async function finalizeRelease(root, dist = path.join(root,'dist')) {
   await hashed('manifest.webmanifest',Buffer.from(JSON.stringify(manifest)));
   let html = await fs.readFile(path.join(dist,'index.html'),'utf8');
   for (const [source,target] of Object.entries(assetMap)) html = html.split(source).join(target);
+  // Bind the loaded HTML and all rewritten asset references without a circular
+  // releaseId-in-HTML hash. The token is hashed into the final inventory HTML.
+  const shellId = sha256(Buffer.from(html));
+  html = html.replace('</head>', `<meta name="fluid-shell-id" content="${shellId}"></head>`);
   await fs.writeFile(path.join(dist,'index.html'),html);
   // Non-runtime authoring master and scratch registry never ship in production.
   await fs.rm(path.join(dist,'assets/icons/master-733.png'),{force:true});
@@ -57,7 +61,7 @@ async function finalizeRelease(root, dist = path.join(root,'dist')) {
   }
   entries.sort((a,b)=>Buffer.compare(Buffer.from(a.path),Buffer.from(b.path)));
   const releaseId = sha256(canonicalInventory(entries));
-  const inventory = {schemaVersion:1,releaseId,canonicalEncoding:'utf8-json-path-sha256-pairs-v1',entries};
+  const inventory = {schemaVersion:1,releaseId,shellId,canonicalEncoding:'utf8-json-path-sha256-pairs-v1',entries};
   await fs.writeFile(path.join(dist,'precache-inventory.json'),JSON.stringify(inventory,null,2)+'\n');
   let gitSha = null;
   try { gitSha = execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim(); } catch { /* diagnostics may be unavailable in source archives */ }

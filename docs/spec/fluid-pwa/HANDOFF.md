@@ -31,12 +31,76 @@ harness для service worker — окрема spike-фаза **перед** SW 
 hashed assets і release identity йдуть **до** SW (фаза 2), щоб перший же SW
 мав чесну identity й atomic install і не переписувався потім.
 
-> **Далі:** фаза 5 — readiness і install UX, після окремого дозволу почати.
-> **Фаза 4 прийнята власником через `handoff:next` 2026-10-15 і закрита.**
-> Код і closure-документи входять у closing commit поверх `66c65e1`;
-> [QA-4A–4P](./QA.md), [PHASE4-REPORT.md](./PHASE4-REPORT.md).
-> Фази 5–10 не авторизовані й не починались.
+> **Далі:** фаза 6 — headers і detection state machine, після окремого дозволу почати.
+> **Фаза 5 прийнята власником через `handoff:next` 2026-10-15 і закрита.**
+> [QA-5A–5I](./QA.md), [PHASE5-REPORT.md](./PHASE5-REPORT.md).
+> **Фаза 4 прийнята власником через `handoff:next` 2026-10-15 і закрита** у `feba360`.
+> Фази 1–5 прийняті; 6–10 не починались. Closing commit поверх `feba360`; deploy не виконано.
 > Production deploy окремо заборонено; naming migration не є external-consumer audit.
+
+## Фаза 5 — прийнята й закрита
+
+Прийнято власником через `handoff:next` 2026-10-15; closing commit поверх
+`feba360`, deploy не виконано. [QA-5A–5I](./QA.md). Фаза 6 потребує окремого дозволу.
+Нижчі записи «5–10 не починались» — історичний стан попередніх фаз,
+який superseded цим live entry лише для реалізації фази 5.
+
+`app/pwa-register.js` тепер production-only readiness/install controller.
+Ready потребує verified complete precache, activated active worker, object
+identity actual controller===active та pinned loaded-shell token; registration
+success/uncontrolled page/timeout/wrong shell/cache wipe не дають ready.
+Finalizer `debug/pwa-release-build.js` hash-ить переписаний HTML перед вставкою
+`fluid-shell-id` meta; final HTML із token входить у release inventory. SW
+STATUS повертає цей pinned shellId/releaseId/complete; UI не довіряє latest
+network metadata. UUID, bounded timeout, stale reply/controller guards збережені.
+Повний source tracing і межі — [PHASE5-REPORT.md](./PHASE5-REPORT.md).
+
+Warning про втрату малюнка/wet/history видиме і у згорнутій панелі. Перший
+online install, storage loss та flattened PNG пояснено без обіцянок recovery.
+Install — тільки genuine event + user click; menu fallback/iOS A2HS/standalone
+policy. Embedded UI не отримує overlay. No update/activation/reload machinery.
+
+Runnable `node debug/pwa-phase5-eval.js`: final PASS, runner exit 0,
+**18 commands exit 0**, builds/guards/probes послідовні. Історичні guards реалізації:
+readiness **11/0**, worker **10/0**, release **4/0**, assets **7/0**, harness
+**5/0**, shader **25/0**, demo **8/0**, palette **6/0**; control API PASS.
+Browser: readiness **13/0** (5 persistent processes закрито), production
+regression **10/0**, assets **2 viewport**, release **2 WebGL**, fixture **8 cases**.
+Не сумувати suites/рівні. Chromium 153.0.8010.12 / SwiftShader, Node 24.19.0.
+
+Fresh profile offline не вантажить shell; fresh online install лишається
+uncontrolled/preparing до user reload; actual SW ready і cold offline browser
+restart PASS. Cache delete відкликає ready; cache-only reload fail-closed
+(немає неправдивого recovery UI). Full site-data wipe + online restart дає
+preparing із generic поясненням, не вигадує історію очищення без доказів;
+після повторної online-підготовки і user reload ready повертається.
+Native install event не надійшов: fallback PASS, system dialog NOT TESTED;
+iOS-UA preview — Chromium, не real Safari/device. 320px keyboard/geometry PASS.
+
+Evidence **поза repo**:
+`C:/Users/cergi/AppData/Local/Temp/fluid-pwa-phase5-final-bUqgxL/`.
+Root result має exact commands/exit codes; `readiness-browser/result.json`,
+frozen dist/profile, 9 screenshots, 5 HAR/5 trace ZIP. Own browsers/servers
+закриті; ports 53545/56206/51878/53571/55120/64528 незалежно bind-back PASS.
+Review stand не залишено. Перший integrated FAIL виявив перекриття State tab;
+панель перенесено вниз ліворуч, retained actual clicks тепер PASS без force.
+
+**Новий інваріант:** тільки completed pinned shell actual controller може
+дати ready; PWA warning не блокує основні story controls. Guards/probes:
+`debug/pwa-readiness-test.js`, `pwa-readiness-browser-test.js`, retained
+`pwa-worker-browser-test.js`. Physics/palette/vendor та Netlify/prod не змінено.
+
+NOT TESTED: physical Android/iOS/Safari/A2HS/standalone, native GPU/OS reboot,
+browser quota/automatic eviction/MIME/hash faults, full large-story completed
+playback, live CDN/headers/CORS/demo downloads, full `make verify`. Standalone
+policy — guard, не physical acceptance. Фази 6–10 не реалізовані.
+
+Closing check 2026-10-15: production build PASS; свіжі окремі guards:
+readiness **11/0**, worker **10/0**, release **4/0**, assets **7/0**, harness **5/0**.
+Browser evidence повторно прочитано без перезапуску: історичні readiness 13 cases,
+production 10 cases, assets 2 viewport, release 2 WebGL, fixture 8 cases — PASS.
+Native install/iOS-device та всі NOT TESTED межі збережено. Scratch-port
+readback EACCES з попереднього parent review лишається disclosed, не browser FAIL.
 
 ## Фаза 4 — прийнята й закрита
 
@@ -403,7 +467,10 @@ Closing check 2026-10-14: `npm run build` PASS, `npm run test:pwa-assets`
    asset 404 — стара версія далі працює.
    Acceptance фази = acceptance §8A спеки.
 
-5. **Фаза 5 — readiness і install UX.**
+~~5. **Фаза 5 — readiness і install UX.**~~
+   **ЗАКРИТО: прийнято власником 2026-10-15 (`handoff:next`).**
+   Поточний eval/контракт: [PHASE5-REPORT.md](./PHASE5-REPORT.md),
+   [QA-5A–5I](./QA.md). Далі фаза 6 після окремого дозволу.
    Контракт: стани offline unavailable / preparing / offline ready, де
    «Готово до роботи offline» показується лише після завершеного precache,
    active worker і підтвердженої version/readiness — не після registration

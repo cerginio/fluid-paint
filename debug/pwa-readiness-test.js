@@ -1,0 +1,16 @@
+'use strict';
+const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs');
+const {readiness,requestStatus,installMode}=require('../app/pwa-register');
+const shellId='a'.repeat(64),active={state:'activated'};
+const good={controller:active,active,shellId,status:{complete:true,releaseId:'b'.repeat(64),shellId}};
+test('registration only and uncontrolled page never ready',()=>{assert.notEqual(readiness({...good,controller:null}),'ready');});
+test('completed pinned active controller is ready',()=>assert.equal(readiness(good),'ready'));
+test('cache wipe invalidates readiness',()=>assert.equal(readiness({...good,status:{...good.status,complete:false}}),'unavailable'));
+test('different actual controller object refused despite same URL',()=>assert.equal(readiness({...good,controller:{state:'activated'}}),'unavailable'));
+test('wrong shell or invalid release identity refused',()=>{for(const status of [{...good.status,shellId:'c'.repeat(64)},{...good.status,releaseId:'bad'},null])assert.equal(readiness({...good,status}),'unavailable');});
+test('non-active worker refused',()=>assert.equal(readiness({...good,active:{state:'installed'}}),'unavailable'));
+test('STATUS ignores stale request IDs and accepts matching reply',async()=>{const worker={postMessage(data,ports){ports[0].postMessage({...good.status,requestId:'stale'});ports[0].postMessage({...good.status,requestId:data.requestId});}};assert.deepEqual((await requestStatus(worker)).shellId,shellId);});
+test('STATUS timeout bounded and send failure rejected',async()=>{const started=Date.now();await assert.rejects(requestStatus({postMessage(){}},35),/timeout/);assert.ok(Date.now()-started<2000);await assert.rejects(requestStatus({postMessage(){throw Error('send');}},35),/send/);});
+test('install iOS iPad standalone and unsupported fallback',()=>{assert.equal(installMode({userAgent:'iPhone'},false,true),'ios');assert.equal(installMode({userAgent:'Mac',platform:'MacIntel',maxTouchPoints:5},false,true),'ios');assert.equal(installMode({userAgent:'Chrome'},true,true),'standalone');assert.equal(installMode({userAgent:'Chrome'},false,null),'fallback');assert.equal(installMode({userAgent:'Chrome'},false,{}),'prompt');});
+test('loaded shell token binds final HTML and every hashed asset reference without metadata fetch',()=>{const path=require('node:path'),{sha256}=require('./pwa-release-build');const dist=path.resolve(__dirname,'../dist'),inventory=JSON.parse(fs.readFileSync(path.join(dist,'precache-inventory.json'))),html=fs.readFileSync(path.join(dist,'index.html'),'utf8');const tag=`<meta name="fluid-shell-id" content="${inventory.shellId}">`;assert.ok(html.includes(tag));assert.equal(sha256(Buffer.from(html.replace(tag,''))),inventory.shellId);assert.notEqual(sha256(Buffer.from(html.replace(tag,'').replace('Fluid Paint','Changed shell'))),inventory.shellId);});
+test('production UI contains no activation/update/reload or fake prompt creation',()=>{const source=fs.readFileSync(require.resolve('../app/pwa-register'),'utf8');assert.doesNotMatch(source,/\.skipWaiting\s*\(|\.claim\s*\(|\.reload\s*\(|\.update\s*\(|new\s+Event\(/);assert.match(source,/beforeinstallprompt/);assert.match(source,/controller !== root.navigator.serviceWorker.controller/);});

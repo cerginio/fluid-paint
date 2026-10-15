@@ -35,6 +35,111 @@ PWA_QA_PORT=3000 npm run test:pwa-release:browser
 Phase-2 runner сам робить два production builds; evidence — автоматичний unique
 `phase2-…`. Не запускати guards/probes паралельно із сервером (працюють з dist).
 
+## Фаза 5 — readiness / install UX (прийнята, закрита)
+
+**Прийнято власником через `handoff:next` 2026-10-15, закрито.**
+Closing commit поверх `feba360`; deploy не виконано. [PHASE5-REPORT.md](./PHASE5-REPORT.md) — контракт, source tracing,
+історичний eval реалізації і межі. Нові сценарії виконані автором; NOT TESTED збережено.
+
+З кореня checkout: `node debug/pwa-phase5-eval.js`. Прямі Node entrypoints,
+послідовний shared-dist runner; ручний server перед запуском зупинити.
+Для ручного review: `NODE_ENV=production node node_modules/gulp/bin/gulp.js build`,
+потім `PORT=3000 NODE_ENV=production node node_modules/gulp/bin/gulp.js startServer`.
+Відкрити `http://127.0.0.1:3000/?debug=none&diag=0`. Це localhost, не LAN-IP.
+Перше встановлення shell online; optional demos/CORS не є частиною цієї фази.
+Після review зупинити лише свій server і перевірити порт. Автор server не лишив.
+
+`$E` нижче — **абсолютний**
+`C:/Users/cergi/AppData/Local/Temp/fluid-pwa-phase5-final-bUqgxL`.
+`$R = $E/readiness-browser`; real HAR/trace/profile/frozen dist та 9 PNG — там.
+Root `result.json` містить exact commands/exit codes: 18 команд exit 0.
+Guard readiness **11/0**, worker **10/0**, release **4/0**, assets **7/0**,
+harness **5/0**, shader **25/0**, demo **8/0**, palette **6/0**; control API PASS.
+Browser readiness **13/0**, production regression **10/0**, assets **2 viewport**,
+release **2 WebGL**, fixture **8 cases**. Різні suites/рівні не сумувати.
+
+### QA-5A. Guard та readiness identity
+
+**qa:mode:** cli
+**qa:open:** термінал у `D:/work/fluid-paint/fluid-paint`.
+**qa:action:** виконати `node debug/pwa-phase5-eval.js` без паралельних builds/probes.
+**qa:inspect:** надрукований evidence root/result.json, окремі stdout/stderr logs.
+**qa:expected:** status PASS, exit 0; counts вище; registration/uncontrolled/wipe, actual controller identity, wrong shell/version, stale requestId і bounded timeout відмовляють у false ready. Built HTML token реконструйовано та перевірено SHA-256. Standalone/iPad/fallback policy покрито guard, не physical QA.
+
+### QA-5B. Fresh profile / лише registration
+
+**qa:mode:** browser
+**qa:open:** новий browser profile online → `http://127.0.0.1:3000/?debug=none&diag=0`; evidence `$R/first-uncontrolled.png`.
+**qa:action:** відкрити «Offline / встановлення» внизу ліворуч; дочекатися online install, не reload.
+**qa:inspect:** статус і пояснення у disclosure; у probe actual controller=null.
+**qa:expected:** «Підготовка offline», текст «Ця сторінка ще не контролюється…», не «Готово…». Попередження про малюнок/wet/Undo вже видиме. Never-prepared profile offline взагалі не завантажує shell; не обіцяємо перший offline launch. Покрито actual persistent Chromium.
+
+### QA-5C. Explicit reload → verified ready
+
+**qa:mode:** browser
+**qa:open:** та сама online вкладка після QA-5B; `$R/desktop-ready.png`.
+**qa:action:** прочитати попередження, зберегти потрібну роботу; самостійно Reload; розгорнути disclosure.
+**qa:inspect:** стійкий статус та pinned shell/controller/complete у `$R/result.json`.
+**qa:expected:** «Готово до роботи offline», «Це не резервна копія малюнка». Actual controller=active activated, complete=true, shellId збігається із loaded HTML. Додатковий controlled diagnostic document із навмисне іншим shell token відхиляється (`mismatched-shell-refused.png`); не називається реальним release upgrade.
+
+### QA-5D. Cold offline restart
+
+**qa:mode:** cli
+**qa:open:** `$R/result.json`, `cold-offline-ready.png`, `cold-offline.har`, `cold-offline-trace.zip`.
+**qa:action:** перевірити case persistent browser closed/cold offline та closures.
+**qa:inspect:** offlineBeforeNavigation, fromServiceWorker та status; усі browserDisconnected.
+**qa:expected:** той самий profile після повного close, offline до першої navigation; SW response і verified ready. Малюнок/wet/history не відновлюються автоматично. Це не OS reboot і не physical standalone launch.
+
+### QA-5E. Видалений CacheStorage
+
+**qa:mode:** cli
+**qa:open:** `$R/result.json`, `cache-wipe-unavailable.png`.
+**qa:action:** знайти actual CacheStorage deletion/recheck та наступний cache-only wipe reload case.
+**qa:inspect:** deleted cache names, unavailable, пояснення втрати підготовки та expected reload error.
+**qa:expected:** ready відкликано: «Offline недоступний», «Локальна підготовка відсутня або втрачена». Причину очищення не вигадано. Після cache-only wipe reload worker fail-closed, shell недоступний; застосунок не обіцяє власний UI там, де HTML не завантажився. Покрито справжнім delete, не quota/eviction simulation.
+
+### QA-5F. Повне site-data wipe + online reload
+
+**qa:mode:** cli
+**qa:open:** `$R/result.json`, `site-wipe-reloaded-uncontrolled.png`, `after-site-wipe.har`.
+**qa:action:** знайти CDP Storage.clearDataForOrigin all, browser restart і online navigation, потім explicit user reload.
+**qa:inspect:** новий controller=null/preparing; generic storage-loss disclosure; наступне ready.
+**qa:expected:** перша online сторінка після wipe не ready, пояснює повторну online-підготовку, але не стверджує без surviving evidence «ми виявили видалення». Після нового install і user reload verified ready повертається. Повністю видалені дані самі не доводять минулу історію.
+
+### QA-5G. 320px, клавіатура і видиме попередження
+
+**qa:mode:** browser
+**qa:open:** local URL після QA-5C, viewport 320×900; `$R/320-ready.png`, `320-warning-collapsed.png`.
+**qa:action:** focus summary «Offline / встановлення»; Enter згортає/розгортає; перевірити desktop 1000×720. Для State/Bake — retained production probe без force clicks.
+**qa:inspect:** disclosure bounds і текст; коротке жовте попередження у згорнутому стані; основні controls згори.
+**qa:expected:** x=12, ширина 296px на 320px, без horizontal overflow; текст читабельний; native keyboard працює, focus видимий, warning не зникає при згортанні. Панель знизу не перехоплює State tab. Це viewport Chromium, не телефон. Embedded `?embedded=1`/iframe не отримує PWA overlay.
+
+### QA-5H. Unsupported install fallback
+
+**qa:mode:** browser
+**qa:open:** local URL після QA-5C, Chromium без native install offer; `$R/desktop-ready.png`.
+**qa:action:** розгорнути disclosure, читати нижній install текст; не створювати synthetic beforeinstallprompt.
+**qa:inspect:** меню/tab fallback, відсутність фальшивої кнопки install.
+**qa:expected:** коли genuine event немає, кнопка hidden; видно інструкцію меню / працювати у вкладці. У цьому eval nativePromptOffered=false: system dialog acceptance NOT TESTED. Якщо браузер справді надасть event, одноразова кнопка викличе його лише після user click; автоматичної установки немає.
+
+### QA-5I. iOS UA preview — не real Safari
+
+**qa:mode:** cli
+**qa:open:** `$R/ios-ua-instructions.png`, `ios-preview.har`, `ios-preview-trace.zip`, `$R/result.json`.
+**qa:action:** прочитати browser case iOS UA Chromium preview та відкрити real PNG.
+**qa:inspect:** «На iPhone / iPad відкрийте у Safari: Поділитися → На початковий екран (Add to Home Screen)».
+**qa:expected:** manual A2HS instruction, install button hidden, текст «Автоматичної установки немає». Це UA preview у Chromium, НЕ Safari/physical iOS і НЕ встановлений standalone app.
+
+### NOT TESTED / межі фази 5
+
+Physical Android/iOS/real Safari/A2HS/standalone, native GPU, OS reboot, browser
+quota exhaustion/automatic eviction та browser MIME/hash faults, full large-story
+completed playback, live CDN/headers/CORS/demo downloads, full `make verify` —
+NOT TESTED. Guard standalone policy не є device acceptance. Retained Node fault
+branches не є actual browser quota proof. Фази 6–10 не починались; немає update
+activation/reload/cap/rollback machinery. Physics/palette/vendor/Netlify/prod
+не змінено. Наступний крок — фаза 6 після окремого дозволу почати.
+
 ## Фаза 4 — production offline shell (прийнята, закрита)
 
 **Прийнято власником через `handoff:next` 2026-10-15, закрито.**
@@ -481,7 +586,8 @@ webmanifest/png/svg/woff2; SVG — тимчасовий probe-файл, приб
 
 - Історично фаза 2 додала inventory без CacheStorage; фаза 3 — лише fixture.
   Фаза 4 тепер реалізує production SW/app offline cold start, див. QA-4/report.
-  Readiness/install/update UX, hosting headers/deployment ще не реалізовані.
+  Фаза 5 прийнята: readiness/install UX (див. QA-5);
+  update UX, hosting headers/deployment ще не реалізовані.
   Фаза 1 не додавала hashing (історичний факт); no-SW expectations фаз 1–3
   superseded фазою 4, fixture byte-preservation guard збережено.
 - Android/iOS standalone та фізичні пристрої — NOT TESTED, майбутні фази.
@@ -498,12 +604,23 @@ webmanifest/png/svg/woff2; SVG — тимчасовий probe-файл, приб
 
 ## Журнал фаз
 
+- 2026-10-15 — фаза 5 **прийнята власником через `handoff:next`, закрита**.
+  Closing commit поверх `feba360`; deploy не виконано.
+
+Closing check 2026-10-15: production build PASS; свіжі окремі guards:
+readiness **11/0**, worker **10/0**, release **4/0**, assets **7/0**, harness **5/0**.
+Browser evidence повторно прочитано без перезапуску: історичні readiness 13 cases,
+production 10 cases, assets 2 viewport, release 2 WebGL, fixture 8 cases — PASS.
+Native install/iOS-device та всі NOT TESTED межі збережено. Scratch-port
+readback EACCES з попереднього parent review лишається disclosed, не browser FAIL.
+
+
 - 2026-10-15 — фаза 4 **прийнята власником через `handoff:next`, закрита**.
   Closing commit поверх `66c65e1`; deploy не виконано. Свіжі closing checks:
   production build PASS; worker 10/0, release 4/0, assets 7/0, harness 5/0.
   Browser results повторно прочитано: історичні production 10 cases PASS,
   assets 2 viewport, release 2 WebGL, fixture 8 cases; проби не перезапускались.
-  Port 3000 bind-back PASS. Межі NOT TESTED збережено. Далі фаза 5 після дозволу почати.
+  Port 3000 bind-back PASS. Межі NOT TESTED збережено. Історичний next-work — фаза 5; тепер вона також закрита.
 
 - 2026-10-14 — фаза 3 **прийнята власником через `handoff:next` і закрита**.
   Код/документи входять у closing commit поверх `ff429d4`; deploy не виконано.

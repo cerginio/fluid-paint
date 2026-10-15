@@ -1502,3 +1502,14 @@ html, body {
     right: 2.05vw;
   }
 }
+
+/* Production PWA disclosure: opaque, bounded, keyboard operable at 320px. */
+#pwa-panel { position: fixed; z-index: 90; left: 12px; bottom: max(12px, env(safe-area-inset-bottom)); width: 310px; max-width: calc(100vw - 24px); box-sizing: border-box; color: #f7f7fa; background: #25252b; border: 1px solid #777780; border-radius: 8px; font-size: 13px; line-height: 1.45; }
+#pwa-panel summary { cursor: pointer; padding: 10px 12px; font-weight: 700; }
+.pwa-summary-warning { display: block; font-size: 12px; font-weight: 400; margin-top: 4px; color: #ffe5a3; }
+#pwa-panel .pwa-content { padding: 0 12px 12px; max-height: calc(100dvh - 135px); overflow-y: auto; overflow-wrap: anywhere; }
+#pwa-panel button { display: block; white-space: normal; min-height: 44px; width: 100%; padding: 8px; color: #fff; background: #414151; border: 1px solid #a0a0b0; border-radius: 4px; cursor: pointer; }
+#pwa-panel button[hidden] { display: none; }
+#pwa-panel :focus-visible { outline: 3px solid #9fd6ff; outline-offset: 2px; }
+#pwa-status { font-weight: 700; }
+#pwa-warning { border-left: 3px solid #ffe5a3; padding-left: 8px; }
