@@ -1161,6 +1161,18 @@ class Paint {
         };
     }
 
+    // Real pigment readback includes settled paint. Baked/imported artwork is background.
+    // No dirty checkpoint exists; never use dirty:'unknown' as evidence of emptiness.
+    hasArtwork() {
+        if (this.engine.renderer.hasBackground) return true;
+        const { pixels } = this.engine.readPaintTexture();
+        for (let i = 0; i < pixels.length; i++) {
+            if (!Number.isFinite(pixels[i])) throw new Error('Paint readback failed');
+            if (pixels[i] !== 0) return true;
+        }
+        return false;
+    }
+
     async exportPngBlob() {
         if (this.updateApplying) throw new Error('Update applying');
         this._updateOperations = (this._updateOperations || 0) + 1;
@@ -1187,6 +1199,13 @@ class Paint {
         this._updateOperations = (this._updateOperations || 0) + 1;
         try {
             const blob = await this.exportPngBlob();
+            if (!blob || blob.type !== 'image/png' || blob.size < 24) {
+                throw new Error('Invalid PNG export');
+            }
+            const signature = new Uint8Array(await blob.slice(0, 8).arrayBuffer());
+            if ([137,80,78,71,13,10,26,10].some((byte, i) => signature[i] !== byte)) {
+                throw new Error('Invalid PNG signature');
+            }
             const url = URL.createObjectURL(blob);
             const anchor = document.createElement('a');
             anchor.href = url;

@@ -1503,13 +1503,30 @@ html, body {
   }
 }
 
-/* Production PWA disclosure: opaque, bounded, keyboard operable at 320px. */
-#pwa-panel { position: fixed; z-index: 90; left: 12px; bottom: max(12px, env(safe-area-inset-bottom)); width: 310px; max-width: calc(100vw - 24px); box-sizing: border-box; color: #f7f7fa; background: #25252b; border: 1px solid #777780; border-radius: 8px; font-size: 13px; line-height: 1.45; }
-#pwa-panel summary { cursor: pointer; padding: 10px 12px; font-weight: 700; }
-.pwa-summary-warning { display: block; font-size: 12px; font-weight: 400; margin-top: 4px; color: #ffe5a3; }
-#pwa-panel .pwa-content { padding: 0 12px 12px; max-height: calc(100dvh - 135px); overflow-y: auto; overflow-wrap: anywhere; }
-#pwa-panel button { display: block; white-space: normal; min-height: 44px; width: 100%; padding: 8px; color: #fff; background: #414151; border: 1px solid #a0a0b0; border-radius: 4px; cursor: pointer; }
-#pwa-panel button[hidden] { display: none; }
-#pwa-panel :focus-visible { outline: 3px solid #9fd6ff; outline-offset: 2px; }
+/* Production PWA dock: its measured height is reserved outside the canvas. */
+html.has-pwa-dock #app { height: calc(100dvh - var(--pwa-dock-height, 48px)); }
+#pwa-panel { position: fixed; z-index: 90; left: 0; right: 0; bottom: 0; box-sizing: border-box; padding-bottom: env(safe-area-inset-bottom); color: #f7f7fa; background: #25252b; border-top: 1px solid #777780; font-size: 12px; line-height: 1.4; }
+#pwa-panel > summary { cursor: pointer; min-height: 48px; display: flex; align-items: center; gap: 12px; padding: 8px 14px; list-style: none; }
+#pwa-panel .pwa-icon { width: 22px; height: 22px; display: block; flex: 0 0 22px; }
+#pwa-state-icon { display: flex; }
+#pwa-panel .pwa-disclosure { margin-left: auto; transform: rotate(180deg); }
+#pwa-panel[open] > summary .pwa-disclosure { transform: none; }
+#pwa-panel summary::-webkit-details-marker { display: none; }
+#pwa-panel .pwa-content { padding: 0 12px 12px; max-height: 45dvh; overflow-y: auto; overflow-wrap: anywhere; }
+#pwa-panel .pwa-actions { display: flex; gap: 8px; align-items: center; }
+#pwa-panel button { min-height: 44px; min-width: 44px; padding: 8px 10px; color: #fff; background: #414151; border: 1px solid #a0a0b0; border-radius: 6px; cursor: pointer; font: inherit; }
+#pwa-panel .pwa-actions button { display: flex; align-items: center; justify-content: center; padding: 10px; }
+#pwa-panel .pwa-actions { flex-wrap: wrap; }
+#pwa-panel .pwa-consent-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+#pwa-panel button:disabled { opacity: .55; cursor: not-allowed; }
+#pwa-panel [hidden] { display: none !important; }
+#pwa-panel :focus-visible { outline: 3px solid #9fd6ff; outline-offset: -3px; }
 #pwa-status { font-weight: 700; }
+#pwa-update { font-size: 11px; }
 #pwa-warning { border-left: 3px solid #ffe5a3; padding-left: 8px; }
+#pwa-consent { border-top: 1px solid #a0a0b0; padding-bottom: 12px; }
+#pwa-details > summary { cursor: pointer; min-height: 44px; padding: 10px 0; display: flex; align-items: center; gap: 10px; list-style: none; }
+#pwa-details > summary .pwa-icon:last-child { margin-left: auto; }
+#pwa-details[open] > summary .pwa-icon:last-child { transform: rotate(180deg); }
+#pwa-panel .pwa-icon-credit { color: #c7c7d2; font-size: 11px; user-select: text; }
+#pwa-details { user-select: text; }

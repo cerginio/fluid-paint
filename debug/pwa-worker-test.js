@@ -45,7 +45,7 @@ test('all formats and opaque/redirect/status fail closed before hash',async()=>{
 });
 test('production-only inclusion and no forced lifecycle/UX; actual dev build is exercised by runner',()=>{
   const root=path.resolve(__dirname,'..'),gulp=fs.readFileSync(path.join(root,'gulpfile.js'),'utf8'),html=fs.readFileSync(path.join(root,'index.html'),'utf8'),sw=fs.readFileSync(path.join(root,'dist/sw.js'),'utf8');
-  assert.match(gulp,/isProd \? \['app\/pwa-register.js'\] : \[\]/);assert.doesNotMatch(html,/pwa-register|pwa-worker|serviceWorker/);assert.doesNotMatch(sw,/clients\.claim\s*\(/);assert.match(sw,/ALLOW_UPDATE/);assert.match(sw,/data.releaseId !== inventory.releaseId/);
+  assert.match(gulp,/isProd \? \[[^\]]*'app\/pwa-register\.js'[^\]]*\] : \[\]/);assert.doesNotMatch(html,/pwa-register|pwa-worker|serviceWorker/);assert.doesNotMatch(sw,/clients\.claim\s*\(/);assert.match(sw,/ALLOW_UPDATE/);assert.match(sw,/data.releaseId !== inventory.releaseId/);
 });
 
 test('actual worker ALLOW requires source, same release and complete install; clients are notifications only',async()=>{

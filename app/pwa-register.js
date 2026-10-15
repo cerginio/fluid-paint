@@ -18,7 +18,7 @@
   // Dependencies are injectable so guards exercise the real scheduler/lifecycle code.
   function createDetection({registration, container, visible, now = Date.now,
     schedule = setTimeout, cancel = clearTimeout, status = requestStatus, online = () => root.navigator?.onLine !== false, render = () => {}}) {
-    const state = {phase:'idle', active:null, waiting:null, lastCheck:null, result:'Ще не перевірено', later:false};
+    const state = {phase:'idle', active:null, waiting:null, lastCheck:null, result:'Not checked yet', later:false};
     const watched = new Set(), disposers = [];
     let timer = null, flight = null, lastAttempt = -Infinity, deadline = Infinity, epoch = 0, disposed = false;
     const emit = () => { if (!disposed) render({...state}); };
@@ -35,19 +35,20 @@
         if (!worker) return null;
         const reply = await status(worker);
         if (!reply.complete || !/^[a-f0-9]{64}$/.test(reply.releaseId || '')) throw Error('Unverified worker');
-        return reply.releaseId;
+        return reply;
       };
       const replies = await Promise.allSettled([read(active), read(waiting)]);
       if (disposed || own !== epoch || active !== registration.active || waiting !== registration.waiting) return;
-      state.active = replies[0].status === 'fulfilled' ? replies[0].value : null;
-      const identity = replies[1].status === 'fulfilled' && waiting?.state === 'installed' ? replies[1].value : null;
+      state.active = replies[0].status === 'fulfilled' ? replies[0].value?.releaseId : null;
+      state.activeBuildTime = replies[0].status === 'fulfilled' ? replies[0].value?.buildTime : null;
+      const identity = replies[1].status === 'fulfilled' && waiting?.state === 'installed' ? replies[1].value?.releaseId : null;
       if (identity !== state.waiting) state.later = false;
       state.waiting = identity;
       // A late local STATUS response must not erase a failed network check.
       if (identity) { if (state.phase !== 'failed') state.phase = 'ready'; }
       else if (registration.installing) state.phase = 'downloading';
       else if (waiting || replies.some(r => r.status === 'rejected')) {
-        state.phase = 'failed'; state.result = 'Не вдалося підтвердити версію worker';
+        state.phase = 'failed'; state.result = 'Worker version unverified';
       } else if (state.phase === 'downloading' || state.phase === 'ready') state.phase = 'idle';
       emit();
     }
@@ -59,7 +60,7 @@
         if (worker.state === 'redundant') {
           // An old replaced worker becoming redundant is not an install failure.
           if (worker !== registration.active && worker !== container.controller && !registration.waiting) {
-            state.phase='failed'; state.result='Завантаження оновлення не завершилось; поточна версія працює'; emit();
+            state.phase='failed'; state.result='Update download failed; current version still works'; emit();
           }
         }
         refresh();
@@ -70,21 +71,21 @@
       if (flight) return flight;
       if (reason !== 'manual' && (!visible() || now() - lastAttempt < 60000)) { arm(); return Promise.resolve(); }
       lastAttempt = now(); deadline = lastAttempt + 900000; state.lastCheck = lastAttempt;
-      state.phase = 'checking'; state.result = 'Перевіряємо оновлення'; emit(); arm();
+      state.phase = 'checking'; state.result = 'Checking updates'; emit(); arm();
       flight = Promise.resolve().then(async () => {
         await registration.update();
         // Some browsers resolve update() from an existing candidate even offline.
         // Still attempt it, but never turn an offline signal into a no-update claim.
         if (!online()) throw new Error('Network check not confirmed while offline');
       }).then(async () => {
-        if (state.phase !== 'failed') state.result = 'Перевірку завершено';
+        if (state.phase !== 'failed') state.result = 'Check complete';
         if (state.phase === 'checking') state.phase = 'idle';
         await refresh();
-        if (state.phase === 'idle') state.result = 'Нової версії не виявлено';
+        if (state.phase === 'idle') state.result = 'No update found';
         emit();
       }, async () => {
         await refresh();
-        state.phase = 'failed'; state.result = 'Перевірка не вдалася (можливо, немає мережі). Це не означає, що оновлень немає'; emit();
+        state.phase = 'failed'; state.result = 'Check failed (possibly offline). Updates may still exist'; emit();
       }).finally(() => { flight = null; deadline = now() + 900000; arm(); });
       return flight;
     }
@@ -98,78 +99,47 @@
   }
   const updateMarker = 'fluid-pwa-update-once-v1';
   function createActivation({registration, container, storage, safety, loadedRelease, loadedShell, status = requestStatus,
-    send, reload, lock = () => {}, notify = () => {}, render = () => {}}) {
-    let phase = 'idle', target = null, worker = null, flight = false, exported = false;
-    const emit = (message = '') => render({phase, target, exported, message});
-    function blocked() {
-      try { return safety()?.active !== false; } catch { return true; }
-    }
-    function fail(message) { phase = 'error'; exported = false; lock(false); emit(message); return false; }
+    save, hasArtwork, send, reload, lock = () => {}, notify = () => {}, render = () => {}}) {
+    let phase='idle', target=null, flight=false, exported=false;
+    const emit=(message='')=>render({phase,target,exported,message});
+    const blocked=()=>{try{return safety()?.active !== false;}catch{return true;}};
+    const fail=message=>{phase='error';lock(false);emit(message);return false;};
     function changed() {
-      if (phase !== 'applying' || !target) return;
-      const current = container.controller;
-      if (!current) return;
-      status(current).then(reply => {
-        if (phase !== 'applying' || current !== container.controller || reply.releaseId !== target || !reply.complete) return;
-        try {
-          const marker = JSON.parse(storage.getItem(updateMarker));
-          if (marker?.target !== target || marker.reloaded) return;
-          // Consume BEFORE reload; a crash or duplicate event cannot loop.
-          storage.setItem(updateMarker, JSON.stringify({target, reloaded:true}));
-          phase = 'reloading'; emit(); reload();
-        } catch { fail('Не вдалося записати одноразове підтвердження. Перезавантажте вручну.'); }
-      }).catch(() => fail('Не вдалося підтвердити новий worker. Перезавантажте вручну.'));
+      if(phase!=='applying'||!target)return;
+      const current=container.controller;
+      status(current).then(reply=>{
+        if(phase!=='applying'||current!==container.controller||!reply.complete||reply.releaseId!==target)return;
+        const marker=JSON.parse(storage.getItem(updateMarker)||'null');
+        if(marker?.target!==target||marker.reloaded)return;
+        storage.setItem(updateMarker,JSON.stringify({target,reloaded:true}));phase='reloading';emit();reload();
+      }).catch(()=>fail('Update could not be verified.'));
     }
-    container.addEventListener('controllerchange', changed);
-    async function verifyLoaded() {
-      try {
-        const marker = JSON.parse(storage.getItem(updateMarker) || 'null');
-        if (!marker?.reloaded) return;
-        storage.removeItem(updateMarker);
-        const actual = loadedRelease || await status(container.controller).then(r => r.complete && r.shellId === loadedShell ? r.releaseId : null);
-        if (marker.target !== actual) return fail('Завантажено неочікувану версію. Повторного reload не буде.');
-        phase = 'verified'; emit('Нову версію завантажено й перевірено.');
-      } catch { fail('Session storage недоступне. Автоматичний reload вимкнено.'); }
-    }
+    container.addEventListener('controllerchange',changed);
     return {
-      verifyLoaded,
-      async begin() {
-        if (flight || ['applying','reloading'].includes(phase)) return false;
-        exported = false;
-        if (blocked()) return fail('Завершіть мазок, import/export/Bake та playback (також paused) у цій вкладці й повторіть.');
-        worker = registration.waiting;
-        if (!worker) return fail('Немає готового оновлення.');
-        try {
-          const reply = await status(worker);
-          if (worker !== registration.waiting || !reply.complete || !/^[a-f0-9]{64}$/.test(reply.releaseId)) throw Error();
-          target = reply.releaseId; phase = 'confirm'; emit('Малюнок потенційно незбережений. PNG — лише пласке зображення; мокра фарба та Undo будуть втрачені.');
-          notify(target); return true;
-        } catch { return fail('Версію оновлення не підтверджено.'); }
+      async verifyLoaded(){try{const m=JSON.parse(storage.getItem(updateMarker)||'null');if(!m?.reloaded)return;
+        storage.removeItem(updateMarker);const actual=loadedRelease||await status(container.controller).then(r=>r.complete&&r.shellId===loadedShell?r.releaseId:null);
+        if(m.target!==actual)return fail('Unexpected version loaded.');phase='verified';emit();
+      }catch{fail('Session storage unavailable.');}},
+      async begin(){
+        if(flight||['applying','reloading'].includes(phase))return false;
+        if(blocked())return fail('Finish the current operation, then retry.');
+        const worker=registration.waiting;if(!worker)return fail('No update ready.');
+        flight=true;exported=false;
+        try{
+          const reply=await status(worker);
+          if(blocked()||worker!==registration.waiting||!reply.complete||!/^[a-f0-9]{64}$/.test(reply.releaseId))throw Error('candidate');
+          target=reply.releaseId;phase='saving';lock(true);emit();
+          // UI/input stays locked throughout the asynchronous export and identity recheck.
+          // Unknown dirty state is not a clean canvas: inspect actual pigment/background.
+          if(await hasArtwork()) {await save();exported=true;}
+          const check=await status(worker);
+          if(blocked()||registration.waiting!==worker||!check.complete||check.releaseId!==target)throw Error('candidate');
+          storage.setItem(updateMarker,JSON.stringify({target,reloaded:false}));
+          phase='applying';emit();notify(target);await send(worker,{type:'ALLOW_UPDATE',releaseId:target});return true;
+        }catch{try{storage.removeItem(updateMarker);}catch{}return fail('PNG save or update verification failed. Update not applied.');}
+        finally{flight=false;}
       },
-      cancel() { if (flight || ['applying','reloading'].includes(phase)) return; phase='idle'; target=null; exported=false; emit('Оновлення відкладено.'); },
-      async export(save) {
-        if (phase !== 'confirm' || flight || blocked()) return false;
-        flight=true; phase='exporting'; emit('Експортуємо PNG. Завершення API не доводить збереження файлу.');
-        try { await save(); exported=true; phase='confirm'; emit('Перевірте файл PNG на диску, потім окремо підтвердьте оновлення.'); return true; }
-        catch { return fail('PNG export не вдався. Оновлення не застосовано.'); }
-        finally { flight=false; }
-      },
-      async allow(choice) {
-        if (phase !== 'confirm' || flight || !['discard','saved'].includes(choice) || (choice==='saved' && !exported)) return false;
-        if (blocked()) return fail('Ця вкладка ще працює. Завершіть операцію й повторіть.');
-        flight=true;
-        try {
-          const reply = await status(worker);
-          if (blocked() || registration.waiting !== worker || !reply.complete || reply.releaseId !== target) throw Error('stale');
-          storage.setItem(updateMarker, JSON.stringify({target,reloaded:false}));
-          phase='applying'; lock(true); emit('Застосовуємо оновлення лише у цій вкладці…');
-          await send(worker, {type:'ALLOW_UPDATE',releaseId:target});
-          return true;
-        } catch { lock(false); try { storage.removeItem(updateMarker); } catch {} return fail('Оновлення не підтверджено. Роботу не перервано; повторіть.'); }
-        finally { flight=false; }
-      },
-      snapshot() { return {phase,target,exported}; },
-      dispose() { container.removeEventListener('controllerchange', changed); }
+      cancel(){},snapshot(){return {phase,target,exported};},dispose(){container.removeEventListener('controllerchange',changed);}
     };
   }
   function requestCommand(worker, data) {
@@ -193,35 +163,57 @@
     // Embedded host owns its UI; no additional overlay or install solicitation.
     if (root !== root.top || new URLSearchParams(root.location.search).get('embedded') === '1') return;
     const panel = doc.createElement('details'); panel.id = 'pwa-panel';
-    panel.innerHTML = '<summary>Offline / встановлення<span class="pwa-summary-warning">Перезапуск не відновлює малюнок, мокру фарбу й Undo. Спершу збережіть PNG.</span></summary><div class="pwa-content"><p id="pwa-status" role="status" aria-live="polite"></p><p id="pwa-reason"></p><p id="pwa-warning"><strong>Перед перезавантаженням або оновленням збережіть PNG.</strong> Offline-перезапуск не відновлює малюнок, мокру фарбу та історію Undo. PNG зберігає лише пласке зображення.</p><p>Перший запуск без мережі потребує попередньої online-підготовки. Браузер може видалити локальні дані; після очищення потрібна повторна підготовка online.</p><button type="button" id="pwa-verify">Перевірити offline-готовність</button><section aria-label="Оновлення"><p id="pwa-update" role="status" aria-live="polite"></p><progress id="pwa-progress" aria-label="Перевірка або завантаження" hidden></progress><p id="pwa-versions"></p><p id="pwa-last-check"></p><button type="button" id="pwa-check">Перевірити оновлення</button><button type="button" id="pwa-later" hidden>Пізніше</button><button type="button" id="pwa-apply" hidden>Оновити</button><div id="pwa-consent" hidden><p id="pwa-activation-status" role="status"></p><p id="pwa-clients">Інші вкладки — лише повідомлення, не блокування.</p><button type="button" id="pwa-export">Завантажити PNG</button><button type="button" id="pwa-saved" hidden>PNG збережено — оновити все одно</button><button type="button" id="pwa-discard">Оновити без збереження — оновити все одно</button><button type="button" id="pwa-cancel">Пізніше</button></div><p id="pwa-update-note">Оновлення не застосовуються автоматично. Лише ця вкладка перезавантажиться після окремої згоди.</p></section><p id="pwa-install-info"></p><button type="button" id="pwa-install" hidden>Встановити застосунок</button></div>';
+    const svg = root.FluidPwaIcon;
+    const icon = (id, shape, name, hidden = false) => `<button type="button" id="${id}" title="${name}" aria-label="${name}"${hidden ? ' hidden' : ''}>${svg(shape)}</button>`;
+    panel.innerHTML = `<summary title="Offline and updates" aria-label="Offline and updates"><span id="pwa-state-icon" aria-hidden="true">${svg('cloud')}</span><span id="pwa-status" role="status" aria-live="polite"></span><span id="pwa-update" role="status" aria-live="polite"></span><span class="pwa-disclosure" aria-hidden="true">${svg('chevron-down')}</span></summary>
+      <div class="pwa-content">
+        <div class="pwa-actions" role="group" aria-label="Offline and update actions">
+          ${icon('pwa-verify','circle-check','Verify offline readiness')}${icon('pwa-check','refresh-cw-alt-3','Check for updates')}${icon('pwa-later','clock','Later',true)}${icon('pwa-apply','arrow-up','Update',true)}${icon('pwa-install','download','Install app',true)}
+          <progress id="pwa-progress" aria-label="Checking or downloading" hidden></progress>
+        </div>
+        <button type="button" id="pwa-save">Save PNG</button>
+        <p id="pwa-activation-status" role="status" aria-live="polite"></p>
+        <p id="pwa-versions"></p><p id="pwa-last-check"></p>
+        <a href="/pwa-credits.html" target="_blank" rel="noopener">Credits</a>
+      </div>`;
     doc.body.appendChild(panel);
-    const statusNode = doc.getElementById('pwa-status'), reason = doc.getElementById('pwa-reason');
+    // Reserve actual dock height: neither canvas nor floating tools sit beneath it.
+    doc.documentElement.classList.add('has-pwa-dock');
+    new root.ResizeObserver(() => doc.documentElement.style.setProperty('--pwa-dock-height', `${panel.getBoundingClientRect().height}px`)).observe(panel);
+    panel.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        panel.open = false; panel.querySelector('summary').focus();
+      }
+    });
+    const statusNode = doc.getElementById('pwa-status');
     const shellId = doc.querySelector('meta[name="fluid-shell-id"]')?.content;
+    const buildTime = doc.querySelector('meta[name="fluid-build-time"]')?.content;
+    const versionTime = value => /^\d{4}-\d\d-\d\dT\d\d:\d\d/.test(value || '') ? value.slice(0,16).replace('T',' ') : 'unverified';
     let detection, activation, lastActiveIdentity;
     let registration, epoch = 0, wasReady = false, deferredPrompt = null;
     function show(state, text) {
       panel.dataset.state = state;
-      statusNode.textContent = {ready:'Готово до роботи offline', preparing:'Підготовка offline', unavailable:'Offline недоступний'}[state];
-      reason.textContent = text;
+      doc.getElementById('pwa-state-icon').innerHTML = svg(state === 'ready' ? 'circle-check' : state === 'unavailable' || root.navigator.onLine === false ? 'cloud-slash' : 'cloud');
+      statusNode.textContent = '';
+      // Readiness detail is represented by the icon, not working-UI prose.
     }
     async function verify() {
       const ownEpoch = ++epoch, controller = root.navigator.serviceWorker?.controller;
-      show(controller ? 'preparing' : 'unavailable', 'Перевіряємо локальну підготовку. Реєстрація сама по собі не означає готовність.');
+      show(controller ? 'preparing' : 'unavailable', 'Verifying local files. Registration alone is not readiness.');
       try {
         registration = await root.navigator.serviceWorker.getRegistration('/');
         if (ownEpoch !== epoch) return;
-        if (!controller) { show('preparing', 'Ця сторінка ще не контролюється offline worker. Після підготовки можна самостійно перезавантажити сторінку, спершу зберігши роботу.'); return; }
+        if (!controller) { show('preparing', 'This page is not controlled yet. Save your work before a manual reload after preparation.'); return; }
         const status = await requestStatus(controller);
         if (ownEpoch !== epoch || controller !== root.navigator.serviceWorker.controller) return;
         const state = readiness({controller, active:registration?.active, status, shellId});
-        show(state, state === 'ready' ? 'Локальний shell цієї версії перевірено. Це не резервна копія малюнка.' : wasReady || status.complete === false ? 'Локальна підготовка відсутня або втрачена. Кеш міг бути очищений; потрібна повторна підготовка online. Причину видалення визначити неможливо.' : 'Версію цієї сторінки та активного worker не підтверджено. Offline-запуск не гарантований.');
+        show(state, state === 'ready' ? 'Local shell verified. This is not an artwork backup.' : wasReady || status.complete === false ? 'Local preparation missing or lost. Prepare again online; the cause of removal is unknown.' : 'Page and worker versions unverified. Offline launch is not guaranteed.');
         wasReady = state === 'ready' || wasReady;
-      } catch (error) { if (ownEpoch === epoch) show('unavailable', 'Не вдалося підтвердити offline-готовність. Мережа чи реєстрація не є доказом готовності; спробуйте перевірити знову online.'); }
+      } catch (error) { if (ownEpoch === epoch) show('unavailable', 'Offline readiness unverified. Retry online; a connection or registration is not proof.'); }
     }
     function installUI() {
       const mode = installMode(root.navigator, root.matchMedia('(display-mode: standalone)').matches || root.navigator.standalone, deferredPrompt);
       const button = doc.getElementById('pwa-install'); button.hidden = mode !== 'prompt';
-      doc.getElementById('pwa-install-info').textContent = {standalone:'Застосунок уже відкрито в окремому вікні.', ios:'На iPhone / iPad відкрийте у Safari: Поділитися → На початковий екран (Add to Home Screen). Автоматичної установки немає.', fallback:'Якщо браузер підтримує встановлення, скористайтеся його меню «Встановити» / «Додати на початковий екран». Якщо пункту немає, працюйте у вкладці.', prompt:'Встановлення відкриває системний діалог лише після вашого натискання. Воно не зберігає малюнок.'}[mode];
     }
     root.addEventListener('beforeinstallprompt', event => { event.preventDefault(); deferredPrompt = event; installUI(); });
     root.addEventListener('appinstalled', () => { deferredPrompt = null; installUI(); });
@@ -231,7 +223,7 @@
       try { await prompt.prompt(); await prompt.userChoice; } catch { /* unsupported/cancel remains usable */ }
     };
     installUI();
-    if (!root.isSecureContext || !('serviceWorker' in root.navigator)) { show('unavailable', 'Цей браузер або з’єднання не підтримує offline worker. Працюйте online.'); return; }
+    if (!root.isSecureContext || !('serviceWorker' in root.navigator)) { show('unavailable', 'Offline worker unsupported here. Keep working online.'); return; }
     doc.getElementById('pwa-verify').onclick = verify;
     root.navigator.serviceWorker.addEventListener('controllerchange', verify);
     doc.addEventListener('visibilitychange', () => { detection?.visibility(); if (!doc.hidden) verify(); });
@@ -239,36 +231,25 @@
     verify();
     root.navigator.serviceWorker.register('/sw.js', {scope:'/', updateViaCache:'none'}).then(r => {
       registration = r;
-      const broadcast = typeof root.BroadcastChannel === 'function' ? new root.BroadcastChannel('fluid-pwa-update') : null;
-      if (broadcast) broadcast.onmessage = () => { doc.getElementById('pwa-update-note').textContent = 'Інша вкладка готує оновлення. Ця вкладка не перезавантажиться без вашої згоди.'; };
       activation = createActivation({registration:r, container:root.navigator.serviceWorker, storage:root.sessionStorage,
         loadedShell:shellId, safety:() => root.__painter?.getUpdateSafety(), send:requestCommand,
+        hasArtwork:() => root.__painter.hasArtwork(), save:() => root.__painter.save(),
         reload:() => root.location.reload(),
-        lock:value => { if(root.__painter) root.__painter.updateApplying=value; doc.body.inert=value; },
-        notify:async target => {
-          broadcast?.postMessage({type:'UPDATE_NOTICE',releaseId:target});
-          try { const reply=await requestCommand(r.waiting,{type:'CLIENTS',releaseId:target});
-            doc.getElementById('pwa-clients').textContent=`Відкрито ще ${Math.max(0,reply.count-1)} вкладок (включно з uncontrolled). Закриття рекомендоване, але відповіді не потрібні. «Оновити все одно» не перезавантажує їх.`;
-          } catch { doc.getElementById('pwa-clients').textContent='Інші вкладки не відповіли. «Оновити все одно» доступне; це не блокування.'; }
-        },
-        render:state => { const box=doc.getElementById('pwa-consent');box.hidden=['idle','verified'].includes(state.phase);
-          panel.dataset.activation=state.phase;doc.getElementById('pwa-activation-status').textContent=state.message;
-          doc.getElementById('pwa-saved').hidden=!state.exported;
-          for(const id of ['pwa-export','pwa-saved','pwa-discard']) doc.getElementById(id).disabled=state.phase!=='confirm';
-          if(state.phase==='verified')doc.getElementById('pwa-update-note').textContent=state.message;
+        lock:value => { doc.body.inert=value; },
+        render:state => { panel.dataset.activation=state.phase;
+          doc.getElementById('pwa-activation-status').textContent=state.message;
+          if(state.phase==='error')panel.open=true;
         }});
       activation.verifyLoaded();
       doc.getElementById('pwa-apply').onclick=()=>activation.begin();
-      doc.getElementById('pwa-export').onclick=()=>activation.export(()=>root.__painter.save());
-      doc.getElementById('pwa-saved').onclick=()=>activation.allow('saved');
-      doc.getElementById('pwa-discard').onclick=()=>activation.allow('discard');
-      doc.getElementById('pwa-cancel').onclick=()=>activation.cancel();
+      doc.getElementById('pwa-save').onclick=async()=>{try{await root.__painter.save();doc.getElementById('pwa-activation-status').textContent='';}
+        catch{doc.getElementById('pwa-activation-status').textContent='PNG save failed.';}};
       detection = createDetection({registration:r, container:root.navigator.serviceWorker, visible:() => !doc.hidden, render:state => {
         panel.dataset.update = state.phase;
-        doc.getElementById('pwa-update').textContent = {idle:'Оновлення', checking:'Перевіряємо оновлення', downloading:'Завантажуємо оновлення', ready:state.later ? 'Оновлення відкладено' : 'Оновлення готове', failed:'Не вдалося перевірити / підготувати оновлення'}[state.phase];
+        doc.getElementById('pwa-update').textContent = {idle:'', checking:'Checking updates', downloading:'Downloading update', ready:state.later ? 'Update postponed' : 'Update ready', failed:'Update check failed'}[state.phase];
         doc.getElementById('pwa-progress').hidden = !['checking','downloading'].includes(state.phase);
-        doc.getElementById('pwa-versions').textContent = `Активна версія: ${state.active || 'не підтверджено'}. Очікує: ${state.waiting || 'немає підтвердженої'}.`;
-        doc.getElementById('pwa-last-check').textContent = `Остання перевірка: ${state.lastCheck === null ? 'ще не було' : new Date(state.lastCheck).toLocaleTimeString()}. ${state.result}`;
+        doc.getElementById('pwa-versions').textContent = `Active version: ${versionTime(state.activeBuildTime || (state.active ? buildTime : null))}`;
+        doc.getElementById('pwa-last-check').textContent = `Last check: ${state.lastCheck === null ? 'not yet' : new Date(state.lastCheck).toLocaleTimeString('en')}. ${state.result}`;
         doc.getElementById('pwa-apply').hidden = !state.waiting;
         doc.getElementById('pwa-later').hidden = !state.waiting || state.later;
         if (state.active && state.active !== lastActiveIdentity) { lastActiveIdentity = state.active; verify(); }
@@ -277,7 +258,7 @@
       doc.getElementById('pwa-later').onclick = () => detection.later();
       detection.check('startup');
       verify();
-    }).catch(() => show('unavailable', 'Online-підготовка не завершилась. Перший offline-запуск не гарантований.'));
+    }).catch(() => show('unavailable', 'Online preparation failed. First offline launch is not guaranteed.'));
   }
   if (doc.readyState === 'loading') doc.addEventListener('DOMContentLoaded', start, {once:true}); else start();
 }(typeof window !== 'undefined' ? window : globalThis));

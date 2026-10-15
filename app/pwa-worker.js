@@ -79,7 +79,7 @@ function fluidPwaWorker(inventory) {
     const data=event.data, port=event.ports?.[0];
     if (!data || typeof data.requestId !== 'string' || !port) return;
     event.waitUntil((async () => {
-      if (data.type === 'STATUS') { port.postMessage({requestId:data.requestId,releaseId:inventory.releaseId,shellId:inventory.shellId,complete:!!await completeCache()}); return; }
+      if (data.type === 'STATUS') { port.postMessage({requestId:data.requestId,releaseId:inventory.releaseId,shellId:inventory.shellId,buildTime:inventory.buildTime,complete:!!await completeCache()}); return; }
       const source=event.source?.id && await self.clients.get(event.source.id);
       if (!source || source.type !== 'window' || !source.url.startsWith(self.registration.scope) || data.releaseId !== inventory.releaseId || !await completeCache()) { port.postMessage({requestId:data.requestId,allowed:false}); return; }
       if (data.type === 'CLIENTS') {

@@ -1,0 +1,72 @@
+{
+  "collection": "Dazzle Line Icons",
+  "creator": "Dazzle UI",
+  "license": "CC-BY-4.0",
+  "licenseURL": "https://creativecommons.org/licenses/by/4.0/",
+  "metadataEvidence": "https://huggingface.co/datasets/nyuuzyou/svgrepo/blob/main/ATTRIBUTION/CC_Attribution_Attribution.md",
+  "icons": [
+    {
+      "name": "cloud",
+      "id": 532033,
+      "page": "https://www.svgrepo.com/svg/532033/cloud",
+      "download": "https://www.svgrepo.com/show/532033/cloud.svg",
+      "sha256": "1bcbfc6871e1e3a376bb0723ec1f6393ca456281e5c1384d7d624eb2f8af29ef"
+    },
+    {
+      "name": "cloud-slash",
+      "id": 532857,
+      "page": "https://www.svgrepo.com/svg/532857/cloud-slash",
+      "download": "https://www.svgrepo.com/show/532857/cloud-slash.svg",
+      "sha256": "4bf5edea2b9ac7ce614f584e45875146ff5c2f7c0d79c5c599ad469d20f856c0"
+    },
+    {
+      "name": "circle-check",
+      "id": 532160,
+      "page": "https://www.svgrepo.com/svg/532160/circle-check",
+      "download": "https://www.svgrepo.com/show/532160/circle-check.svg",
+      "sha256": "0f7dc8764edcc9661582e20ee1a462d4e8d8fd87f4876df75add37e95615de53"
+    },
+    {
+      "name": "refresh-cw-alt-3",
+      "id": 533704,
+      "page": "https://www.svgrepo.com/svg/533704/refresh-cw-alt-3",
+      "download": "https://www.svgrepo.com/show/533704/refresh-cw-alt-3.svg",
+      "sha256": "49990c9ecca308fd4367afb73f2efb4b805d219a49db266f6beb91ce327c6b00"
+    },
+    {
+      "name": "clock",
+      "id": 532098,
+      "page": "https://www.svgrepo.com/svg/532098/clock",
+      "download": "https://www.svgrepo.com/show/532098/clock.svg",
+      "sha256": "7791fcad21f54e8812e20a79ebc8dc805eafce4e9fbfa4b2ac5e44ccb3a83dce"
+    },
+    {
+      "name": "arrow-up",
+      "id": 533632,
+      "page": "https://www.svgrepo.com/svg/533632/arrow-up",
+      "download": "https://www.svgrepo.com/show/533632/arrow-up.svg",
+      "sha256": "b552dea060dfe575f5c0b3b3392fdc0774e5aa7b7c8135ecfe4f4e3ba43e7b6a"
+    },
+    {
+      "name": "download",
+      "id": 533682,
+      "page": "https://www.svgrepo.com/svg/533682/download",
+      "download": "https://www.svgrepo.com/show/533682/download.svg",
+      "sha256": "367330636ad15a765ad233647b196cb325af0187e904f48a709b670f6b9d8da3"
+    },
+    {
+      "name": "circle-information",
+      "id": 533722,
+      "page": "https://www.svgrepo.com/svg/533722/circle-information",
+      "download": "https://www.svgrepo.com/show/533722/circle-information.svg",
+      "sha256": "2d552216e75537e628df009cd60897f1fa132f4e691371a8376f92fd49eeebc4"
+    },
+    {
+      "name": "chevron-down",
+      "id": 533653,
+      "page": "https://www.svgrepo.com/svg/533653/chevron-down",
+      "download": "https://www.svgrepo.com/show/533653/chevron-down.svg",
+      "sha256": "20eb3fb9cbc974af084f83a6a2b7cb2f0c861e5048c864b324b43113e790acc1"
+    }
+  ]
+}

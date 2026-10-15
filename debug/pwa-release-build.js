@@ -17,6 +17,7 @@ function canonicalInventory(entries) {
   return Buffer.from(JSON.stringify(pairs), 'utf8');
 }
 async function finalizeRelease(root, dist = path.join(root,'dist')) {
+  const buildTime = new Date().toISOString();
   const assetMap = {};
   async function hashed(source, bytes = null) {
     bytes = bytes || await fs.readFile(path.join(dist,source));
@@ -48,6 +49,7 @@ async function finalizeRelease(root, dist = path.join(root,'dist')) {
   for (const [source,target] of Object.entries(assetMap)) html = html.split(source).join(target);
   // Bind the loaded HTML and all rewritten asset references without a circular
   // releaseId-in-HTML hash. The token is hashed into the final inventory HTML.
+  html = html.replace('</head>', `<meta name="fluid-build-time" content="${buildTime}"></head>`);
   const shellId = sha256(Buffer.from(html));
   html = html.replace('</head>', `<meta name="fluid-shell-id" content="${shellId}"></head>`);
   await fs.writeFile(path.join(dist,'index.html'),html);
@@ -55,21 +57,21 @@ async function finalizeRelease(root, dist = path.join(root,'dist')) {
   await fs.rm(path.join(dist,'assets/icons/master-733.png'),{force:true});
   await fs.rm(path.join(dist,'.build'),{recursive:true,force:true});
   const entries = [];
-  for (const file of ['index.html',...Object.values(assetMap)]) {
+  for (const file of ['index.html','pwa-credits.html',...Object.values(assetMap)]) {
     const bytes = await fs.readFile(path.join(dist,file));
     entries.push({path:`/${file}`,sha256:sha256(bytes),size:bytes.length});
   }
   entries.sort((a,b)=>Buffer.compare(Buffer.from(a.path),Buffer.from(b.path)));
   const releaseId = sha256(canonicalInventory(entries));
-  const inventory = {schemaVersion:1,releaseId,shellId,canonicalEncoding:'utf8-json-path-sha256-pairs-v1',entries};
+  const inventory = {schemaVersion:1,releaseId,shellId,buildTime,canonicalEncoding:'utf8-json-path-sha256-pairs-v1',entries};
   await fs.writeFile(path.join(dist,'precache-inventory.json'),JSON.stringify(inventory,null,2)+'\n');
   let gitSha = null;
   try { gitSha = execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim(); } catch { /* diagnostics may be unavailable in source archives */ }
-  await fs.writeFile(path.join(dist,'release.json'),JSON.stringify({schemaVersion:1,releaseId,gitSha,buildTime:new Date().toISOString(),assetMap},null,2)+'\n');
+  await fs.writeFile(path.join(dist,'release.json'),JSON.stringify({schemaVersion:1,releaseId,gitSha,buildTime,assetMap},null,2)+'\n');
   // Netlify path patterns are not regexes. Emit exact hash paths rather than
   // a wildcard that could give fixed/non-hashed files a year-long lifetime.
   await fs.writeFile(path.join(dist,'_headers'),Object.values(assetMap).map(file =>
-    `/${file}\n  Cache-Control: public, max-age=31536000, immutable\n`).join('\n'));
+    `/${file}\n  Cache-Control: public, max-age=31536000, immutable\n${file === assetMap['manifest.webmanifest'] ? '  Content-Type: application/manifest+json\n' : ''}`).join('\n'));
   const worker = require(path.join(root, 'app/pwa-worker.js')).fluidPwaWorker;
   await fs.writeFile(path.join(dist,'sw.js'),`'use strict';\n(${worker.toString()})(${JSON.stringify(inventory)});\n`);
   return inventory;

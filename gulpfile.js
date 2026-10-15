@@ -96,7 +96,7 @@ const paths = {
   engineShaders: 'fluid-engine/shaders/**/*.{glsl,frag,vert}',
   appShaders: 'app/shaders/**/*.{glsl,frag,vert}',
   html: 'index.html',
-  static: ['LICENSE', 'favicon-64x64.png', 'manifest.webmanifest',
+  static: ['LICENSE', 'pwa-credits.html', 'favicon-64x64.png', 'manifest.webmanifest',
     'assets/fonts/open-sans/**/*', 'assets/icons/*.png']
 };
 
@@ -111,7 +111,7 @@ async function shaderRegistry() {
 }
 
 function scripts() {
-  return src([registryFile, ...paths.js, ...(isProd ? ['app/pwa-register.js'] : [])], { allowEmpty: false })
+  return src([registryFile, ...paths.js, ...(isProd ? ['app/pwa-ui-icons.js', 'app/pwa-register.js'] : [])], { allowEmpty: false })
     .pipe(plumber())
     .pipe(concat('bundle.js', { newLine: ';\n' }))
     .pipe(terser({

@@ -1,0 +1,15 @@
+'use strict';
+const {test}=require('node:test'),assert=require('node:assert/strict');
+const {createActivation,updateMarker}=require('../app/pwa-register');
+function setup(extra={}){const events=new EventTarget(),worker={},store=new Map(),calls=[];const r={waiting:worker};let busy=false;
+ const a=createActivation({registration:r,container:events,storage:{getItem:k=>store.get(k),setItem:(k,v)=>store.set(k,v),removeItem:k=>store.delete(k)},safety:()=>({active:busy,dirty:'unknown'}),status:async()=>({complete:true,releaseId:'a'.repeat(64)}),hasArtwork:async()=>true,save:async()=>calls.push('save'),send:async()=>calls.push('allow'),reload:()=>calls.push('reload'),lock:x=>calls.push('lock:'+x),...extra});
+ return {a,r,store,calls,busy:x=>{busy=x;},events};}
+test('unknown dirty state auto-saves before ALLOW, reload once after verified controller',async()=>{const x=setup();assert.equal(await x.a.begin(),true);assert.ok(x.calls.indexOf('save')<x.calls.indexOf('allow'));x.events.controller={};x.events.dispatchEvent(new Event('controllerchange'));await new Promise(r=>setImmediate(r));x.events.dispatchEvent(new Event('controllerchange'));await new Promise(r=>setImmediate(r));assert.equal(x.calls.filter(x=>x==='reload').length,1);});
+test('empty canvas does not download',async()=>{const x=setup({hasArtwork:async()=>false});await x.a.begin();assert.ok(!x.calls.includes('save'));assert.ok(x.calls.includes('allow'));});
+test('export failure fails closed without marker or reload',async()=>{const x=setup({save:async()=>{throw Error('encode');}});assert.equal(await x.a.begin(),false);assert.ok(!x.calls.includes('allow'));assert.ok(!x.calls.includes('reload'));assert.equal(x.store.has(updateMarker),false);assert.equal(x.a.snapshot().phase,'error');});
+test('busy stroke blocks queued update without export',async()=>{const x=setup();x.busy(true);assert.equal(await x.a.begin(),false);assert.ok(!x.calls.includes('save'));});
+test('duplicate click during export cannot queue another save or activation',async()=>{let finish;const pending=new Promise(r=>finish=r);const x=setup({save:()=>pending});const first=x.a.begin();await new Promise(r=>setImmediate(r));assert.equal(await x.a.begin(),false);finish();assert.equal(await first,true);assert.equal(x.calls.filter(x=>x==='allow').length,1);});
+test('candidate change during export blocks activation',async()=>{let x;x=setup({save:async()=>{x.r.waiting={};}});assert.equal(await x.a.begin(),false);assert.ok(!x.calls.includes('allow'));});
+test('dirty operation arriving during export blocks activation',async()=>{let x;x=setup({save:async()=>x.busy(true)});assert.equal(await x.a.begin(),false);assert.ok(!x.calls.includes('allow'));});
+test('unknown/missing safety blocks activation',async()=>{const x=setup({safety:()=>undefined});assert.equal(await x.a.begin(),false);assert.ok(!x.calls.includes('allow'));});
+test('readback failure never becomes empty',async()=>{const x=setup({hasArtwork:async()=>{throw Error('GPU');}});assert.equal(await x.a.begin(),false);assert.ok(!x.calls.includes('allow'));});
