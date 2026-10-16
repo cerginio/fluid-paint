@@ -3,7 +3,7 @@
 ## Прийнятий UI фази 8 — 2026-10-16
 
 Журнал: фази 7A і 8 прийняті власником через `handoff:next`; compact popover, PNG visibility,
-opacity та margins прийняті. Production deploy авторизований; readback —
+opacity та margins прийняті. Production deploy опублікований і перевірений; readback —
 [PRODUCTION-2026-10-16.md](./PRODUCTION-2026-10-16.md). Інтернет потрібний для першого відкриття;
 optional Demo не scope8. Пристрої/Safari/standalone не перевірено.
 

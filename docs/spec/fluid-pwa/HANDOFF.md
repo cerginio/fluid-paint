@@ -4,7 +4,7 @@
 
 Власник прийняв фазу через `handoff:next` і прямо авторизував production deploy.
 Фаза 8 закрита; наступний функціональний scope — фаза 9 (offline demos), ще не розпочата.
-Публікація виконується після closing commits; результат буде в [PRODUCTION-2026-10-16.md](./PRODUCTION-2026-10-16.md).
+Production deploy та HTTPS readback PASS; результат у [PRODUCTION-2026-10-16.md](./PRODUCTION-2026-10-16.md).
 
 - Cleanup + дві вкладки: свіжий guard **78 executions / 0 failed** (з imported cases),
   browser **9 cases / 0 failed**, 2 builds; `C:/Users/cergi/AppData/Local/Temp/fluid-pwa-phase8-IuPmPV/result.json`.
@@ -20,9 +20,13 @@
   no-update/empty-with-update hides Save, real pointer artwork + ready update shows Save,
   PNG download працює. Screenshots: `C:/Users/cergi/AppData/Local/Temp/fluid-pwa-review-cz1ysO`.
 - Canonical release gate із Makefile виконується Node-оркестратором (GNU Make відсутній);
-  **PASS: 25 test commands exit0**; evidence `C:/Users/cergi/AppData/Local/Temp/fluid-pwa-prod-gate-0nOUKk/result.json`.
+  **PASS: 25 test commands + final build = 26 commands exit0**; evidence `C:/Users/cergi/AppData/Local/Temp/fluid-pwa-prod-gate-0nOUKk/result.json`.
   Старі assertions timestamp-equality/footer/manual-consent приведено до прийнятого контракту;
   негативні install/encoder/busy gates, PNG-before-navigation, once-only reload та старі assets збережено.
+
+Production deploy `6ad2774957cb01560c91ebe8`, revision `69cd448`, release `b7606642d683c177e164202aa80b8a83b4dafa2b336675f7fe6e5b04e4d83cb4`.
+HTTPS24 paths/SHA/headers PASS; browser6 cases incl. cold offline restart/draw PASS.
+Local review PID51008 stopped,3000 bind-back PASS; наступний QA URL — production.
 
 Збережені межі: physical Android/iOS/Safari/native GPU/install/OS reboot не перевірені;
 quota/locks failures — deterministic guards; unknown/legacy clients і unobserved reserved pins
@@ -127,7 +131,7 @@ harness для service worker — окрема spike-фаза **перед** SW 
 hashed assets і release identity йдуть **до** SW (фаза 2), щоб перший же SW
 мав чесну identity й atomic install і не переписувався потім.
 
-> **Далі: production deploy за прямим дозволом 2026-10-16, потім фаза9 лише за окремою командою.**
+> **Далі: фаза9 лише за окремою командою. Production 2026-10-16 опублікований і перевірений; див. PRODUCTION-2026-10-16.md.**
 > Фазу 7 прийнято власником через `handoff:next` 2026-10-15 і закрито із
 > зауваженням щодо UX; closing commit поверх `5d900c1`. Фази 1–7 прийняті.
 > [QA-7A–7M](./QA.md), [PHASE7-REPORT.md](./PHASE7-REPORT.md).
