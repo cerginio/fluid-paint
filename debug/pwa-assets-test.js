@@ -40,6 +40,8 @@ test('all built HTML/CSS/manifest references are local and resolve', () => {
     let refs = [];
     if (ext === '.html') {
       for (const tag of text.matchAll(/<[a-z][^>]*>/gi)) {
+        // Attribution anchors navigate only on explicit click; they are not shell dependencies.
+        if (path.basename(file)==='pwa-credits.html' && /^<a\s/i.test(tag[0]) && /href="https:\/\/(?:www\.svgrepo\.com\/collection\/dazzle-line-icons\/|creativecommons\.org\/licenses\/by\/4\.0\/)"/.test(tag[0])) continue;
         refs.push(...Array.from(tag[0].matchAll(/\b(?:src|href|action|poster)\s*=\s*["']([^"']+)["']/gi), (m) => m[1]));
         assert.doesNotMatch(tag[0], /\bsrcset\s*=/i, 'Add srcset parsing before using srcset');
       }

@@ -38,7 +38,7 @@ async function main(){
   context.on('response',r=>result.responses.push({url:r.url(),status:r.status()}));
   context.on('requestfailed',r=>result.requestFailures.push({url:r.url(),failure:r.failure()}));
   for(const version of [1,2]){
-    if(version===2){const second=build('second');assert.deepEqual(second,first);result.completedSteps.push('two-build-browser identity equal');}
+    if(version===2){const second=build('second');assert.deepEqual(second.entries.filter(e=>e.path!=='/index.html'),first.entries.filter(e=>e.path!=='/index.html'));assert.notEqual(second.releaseId,first.releaseId);result.completedSteps.push('two builds preserve immutable assets and refresh timestamp identity');}
     const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
     const url=`${base}/?webgl=${version}&debug=none&diag=0&seed=41`;await page.goto(url);await page.waitForFunction(()=>window.__painter?.engine?.capabilities?.canDepositPaint);
     await page.evaluate(()=>{const p=window.__painter;p.paintingRectangle.left=450;p.paintingRectangle.bottom=350;p.paintingRectangle.width=180;p.paintingRectangle.height=130;p.engine.resizePainting(p.getPaintingResolutionWidth(),p.getPaintingResolutionHeight(),0,0);p.setPaintColor('#3B82F6');p.needsRedraw=true;});

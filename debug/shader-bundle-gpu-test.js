@@ -8,6 +8,7 @@ const path = require('node:path');
 const { spawn, execFileSync } = require('node:child_process');
 const { chromium } = require('playwright');
 const { makeShaderRegistry } = require('./shader-bundle-build');
+const { startProductionServer } = require('./pwa-sw-harness');
 require('./browser-lock').acquireBrowserLock('fluid-2 C shader bundle');
 const root = path.resolve(__dirname, '..');
 const output = fs.mkdtempSync(path.join(os.tmpdir(), 'fluid-2-C-'));
@@ -51,7 +52,7 @@ async function draw(page, minimal = false) {
   }, minimal);
 }
 async function main() {
-  let browser, dev, devPort;
+  let browser, dev, devPort, production;
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const port = server.address().port; result.port = port;
   const base = `http://127.0.0.1:${port}`;
@@ -59,6 +60,10 @@ async function main() {
     const buildLog = execFileSync(process.execPath, [path.join(root, 'node_modules/gulp/bin/gulp.js'), 'build'],
       { cwd: root, env: { ...process.env, NODE_ENV: 'production' }, encoding: 'utf8' });
     fs.writeFileSync(path.join(output, 'production-build.log'), buildLog);
+    // PWA shell/inventory URLs are origin-root absolute, not /dist-relative.
+    // Keep source examples on their own origin and serve the real dist at /.
+    production = await startProductionServer({ dist: path.join(root, 'dist') });
+    result.productionPort = production.port;
     const expectedRegistry = await makeShaderRegistry(root);
     browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--renderer-process-limit=1'] });
     for (const version of [1, 2]) {
@@ -67,7 +72,7 @@ async function main() {
       page.on('pageerror', e => errors.push(e.message));
       page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
       await page.route(/\.(?:frag|vert)(?:\?|$)/, route => { requests.push(route.request().url()); return route.abort(); });
-      const url = `${base}/dist/index.html?webgl=${version}&debug=none&diag=0&seed=41`;
+      const url = `${production.base}/index.html?webgl=${version}&debug=none&diag=0&seed=41`;
       await page.goto(url); await page.waitForFunction(() => window.__painter?.engine?.capabilities?.canDepositPaint);
       const bundledRegistry = await page.evaluate(() => globalThis.FLUID_SHADER_SOURCES);
       assert.deepEqual(bundledRegistry, { ...expectedRegistry });
@@ -133,7 +138,7 @@ async function main() {
           route.fulfill({ status: kind === 'html200' ? 200 : 404, contentType: 'text/html', body: '<!doctype html><html>controlled failure</html>' }));
       }
       const minimal = kind === 'minimal404';
-      const url = `${base}/${kind === 'registry' ? 'dist/index.html' : minimal ? 'examples/minimal/index.html' : 'index.html'}?debug=none&diag=0`;
+      const url = `${kind === 'registry' ? production.base : base}/${minimal ? 'examples/minimal/index.html' : 'index.html'}?debug=none&diag=0`;
       await page.goto(url);
       const selector = minimal ? '#status' : '#shader-load-error';
       await page.waitForFunction(sel => document.querySelector(sel)?.textContent?.includes('splat.vert'), selector);
@@ -187,6 +192,10 @@ async function main() {
   } catch (error) { result.pass = false; result.error = error.stack; process.exitCode = 1; }
   finally {
     if (browser) await browser.close();
+    if (production) {
+      await production.stop(); await production.verifyStopped();
+      result.cleanup.push({ port: production.port, bindBack: true });
+    }
     if (dev && dev.exitCode === null) {
       if (process.platform === 'win32') execFileSync('taskkill', ['/PID', String(dev.pid), '/T', '/F']);
       else dev.kill('SIGTERM');
