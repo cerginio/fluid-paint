@@ -35,12 +35,63 @@ function fluidPwaWorker(inventory) {
     }
     return null;
   }
+  // Durable document pins, not leases. All participating workers serialize cache
+  // mutation/navigation with the same origin lock. Without Web Locks, fail safe.
+  const stateCache = 'fluid-pwa-liveness-v1';
+  const stateURL = new URL('/__fluid_pwa_liveness__', self.location.origin).href;
+  const owned = /^fluid-pwa-shell-v1-([a-f0-9]{64})-[a-f0-9-]{36}$/;
+  const locked = task => self.navigator?.locks ? self.navigator.locks.request('fluid-pwa-release-lifecycle-v1', task) : Promise.resolve(null);
+  async function state() {
+    const cache = await caches.open(stateCache), response = await cache.match(stateURL);
+    return {cache, value:response ? await response.json() : {pins:{}, shells:{}}};
+  }
+  async function writeState(s) { await s.cache.put(stateURL, new Response(JSON.stringify(s.value))); }
+  async function rememberDocument(id, shellId, releaseId, pending = false) {
+    if (!id) return;
+    await locked(async () => {
+      const s = await state();
+      s.value.shells[inventory.shellId] = inventory.releaseId;
+      const release = releaseId || s.value.shells[shellId];
+      if (release) s.value.pins[id] = {release, pending};
+      await writeState(s);
+    });
+  }
+  async function cleanup() {
+    return locked(async () => {
+      // Only the active worker may collect; an installing/waiting/retired worker
+      // cannot infer the identity of another worker from its stable script URL.
+      const s = await state();
+      if (s.value.activeRelease !== inventory.releaseId || !await completeCache()) return {deferred:true};
+      s.value.shells[inventory.shellId] = inventory.releaseId;
+      const clients = (await self.clients.matchAll({type:'window',includeUncontrolled:true})).filter(c => c.url.startsWith(self.registration.scope));
+      const live = new Set(clients.map(c => c.id));
+      // Unidentified (including legacy/uncontrolled) documents retain everything.
+      if (clients.some(c => !s.value.pins[c.id])) { await writeState(s); return {unknown:true}; }
+      for (const [id,pin] of Object.entries(s.value.pins)) {
+        if (live.has(id)) pin.pending = false;
+        else if (!pin.pending) delete s.value.pins[id];
+      }
+      await writeState(s);
+      const protectedReleases = new Set([inventory.releaseId,...Object.values(s.value.pins).map(p => p.release)]);
+      // A concurrent install is not garbage. Keep ALL other releases until it
+      // finishes; this also protects complete waiting without cross-worker RPC.
+      if (self.registration.installing || self.registration.waiting) return {candidate:true};
+      const removed = [];
+      for (const name of await caches.keys()) {
+        const match = owned.exec(name);
+        if (match && !protectedReleases.has(match[1])) { await caches.delete(name); removed.push(name); }
+      }
+      return {removed};
+    });
+  }
   async function install() {
     // Never overwrite a complete release, including a same-identity reinstall.
     if (await completeCache()) return;
-    const name = prefix + crypto.randomUUID();
+    // Only cache creation participates in the collection lock. Network install
+    // must not hold up STATUS/readiness of the currently working application.
+    const create = async () => { const name = prefix + crypto.randomUUID(); return {name, cache:await caches.open(name)}; };
+    const {name, cache} = self.navigator?.locks ? await locked(create) : await create();
     try {
-      const cache = await caches.open(name);
       for (const entry of inventory.entries) {
         const response = await fetch(new URL(entry.path, self.location.origin).href, {cache:'no-store', credentials:'omit', redirect:'error'});
         await verified(response, entry);
@@ -55,7 +106,7 @@ function fluidPwaWorker(inventory) {
     const response = cache && await cache.match(new URL(path, self.location.origin).href);
     // Fail closed: a partial/evicted release never serves mixed network shell.
     if (response) return response;
-    // Compatibility only: retain complete caches, never clean/cap them in phase 7.
+    // Compatibility for live documents: committed, content-addressed bytes only.
     // Old tabs can request only content-addressed bytes, never old HTML/metadata.
     if (/\.[a-f0-9]{64}\.(js|css|woff2|png|webmanifest)$/.test(path)) {
       const expected = path.match(/\.([a-f0-9]{64})\.[^.]+$/)[1];
@@ -73,13 +124,33 @@ function fluidPwaWorker(inventory) {
     return Response.error();
   }
   self.addEventListener('install', event => event.waitUntil(install()));
-  self.addEventListener('fetch', event => { const path = route(event.request); if (path) event.respondWith(serve(event.request, path)); });
+  self.addEventListener('activate', event => event.waitUntil((async () => {
+    await locked(async () => { const s = await state(); s.value.activeRelease = inventory.releaseId; s.value.shells[inventory.shellId] = inventory.releaseId; await writeState(s); });
+    await cleanup();
+  })().catch(() => {})));
+  self.addEventListener('fetch', event => {
+    const path = route(event.request);
+    if (path) event.respondWith((async () => {
+      // Pin the reserved destination BEFORE returning old HTML, even while it
+      // is not execution-ready / absent from matchAll. Pending never expires.
+      if (path === '/index.html') await rememberDocument(event.resultingClientId, null, inventory.releaseId, true);
+      return serve(event.request, path);
+    })());
+  });
   // ALLOW is bound to a real same-scope WindowClient and this verified release.
   self.addEventListener('message', event => {
     const data=event.data, port=event.ports?.[0];
     if (!data || typeof data.requestId !== 'string' || !port) return;
     event.waitUntil((async () => {
-      if (data.type === 'STATUS') { port.postMessage({requestId:data.requestId,releaseId:inventory.releaseId,shellId:inventory.shellId,buildTime:inventory.buildTime,complete:!!await completeCache()}); return; }
+      if (data.type === 'STATUS') {
+        const source = event.source?.id && await self.clients.get(event.source.id);
+        let collected = null;
+        try {
+          if (source?.type === 'window' && source.url.startsWith(self.registration.scope)) await rememberDocument(source.id, data.documentShellId);
+          collected = await cleanup();
+        } catch { /* Storage/liveness failure defers collection, never readiness. */ }
+        port.postMessage({requestId:data.requestId,releaseId:inventory.releaseId,shellId:inventory.shellId,buildTime:inventory.buildTime,complete:!!await completeCache(),cleanup:collected}); return;
+      }
       const source=event.source?.id && await self.clients.get(event.source.id);
       if (!source || source.type !== 'window' || !source.url.startsWith(self.registration.scope) || data.releaseId !== inventory.releaseId || !await completeCache()) { port.postMessage({requestId:data.requestId,allowed:false}); return; }
       if (data.type === 'CLIENTS') {
@@ -91,6 +162,6 @@ function fluidPwaWorker(inventory) {
       }
     })());
   });
-  return {route, verified, install, completeCache, serve};
+  return {route, verified, install, completeCache, serve, cleanup, rememberDocument};
 }
 if (typeof module !== 'undefined') module.exports = {fluidPwaWorker};

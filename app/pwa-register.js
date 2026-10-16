@@ -12,7 +12,7 @@
       const finish = () => { clearTimeout(timer); channel.port1.close(); channel.port2.close(); };
       const timer = setTimeout(() => { finish(); reject(new Error('STATUS timeout')); }, timeout);
       channel.port1.onmessage = event => { if (event.data?.requestId !== requestId) return; finish(); resolve(event.data); };
-      try { worker.postMessage({type:'STATUS', requestId}, [channel.port2]); } catch (error) { finish(); reject(error); }
+      try { worker.postMessage({type:'STATUS', requestId, documentShellId:root.document?.querySelector('meta[name="fluid-shell-id"]')?.content}, [channel.port2]); } catch (error) { finish(); reject(error); }
     });
   }
   // Dependencies are injectable so guards exercise the real scheduler/lifecycle code.
