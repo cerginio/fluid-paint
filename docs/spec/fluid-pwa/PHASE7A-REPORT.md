@@ -14,12 +14,12 @@
 - **Legacy limitation, not automatic-save PASS:** real persistent/restarted `ca3c9da7…` localhost client existed before publication, retained pointer artwork/document while `registration.update()` fetched exact new complete waiting release. Its already-loaded immutable JS necessarily kept its old Export PNG + separate confirmation path. That real PNG was exported and decoded before one explicit consenting reload to the new version. No old bundle rewrite, script injection, forced activation or user data clearing. New one-click auto-save applies after this first upgrade; retroactive auto-save in the old document is not claimed.
 - Screenshots: `$A/new-ui-desktop.png`, `new-ui-320.png`, `legacy-ca3-waiting.png`; valid PNGs, HAR/traces, `cache-snapshot.json`, frozen `source/`, `v2/`, `old-dist-backup/` retained. Owned test browsers closed; own test ports bind-back verified; retained3000 remains running.
 - Intermediate failures retained: `fluid-pwa-autosave-gFfxmx` pointer setup while expanded dock; `4YxzbB` old inventory guard assumed every non-index entry immutable (fixed for separate fixed credits HTML). Main `$A` hit one No-update wait timeout after successful save/failure/empty probes; fresh persistent-profile check and bounded `resume.cjs` completed UI/publish/legacy/cache verification. Original failure is retained in `previousRunnerError`; not relabelled a clean uninterrupted run.
-- Full details and exact source list: [AUTOSAVE-REVISION.md](./AUTOSAVE-REVISION.md). Physical/native/Safari/CORS/retention/rollback debt unchanged. 7A прийнята через `handoff:next`; фаза8 не починалась і потребує окремого дозволу.
+- Full details and exact source list: [AUTOSAVE-REVISION.md](./AUTOSAVE-REVISION.md). Physical/native/Safari/CORS debt unchanged. 7A прийнята через `handoff:next`. Старий retention/cap/локальний rollback scope скасовано власником; scope8 (cleanup + дві вкладки) реалізовано за окремим дозволом, очікує human review; поточні докази й обмеження — PHASE8-REPORT.md. Чинний контракт — HANDOFF.md та PWA-OFFLINE-UPDATE-SPEC.md §4.1; історичні вимірювання не змінено.
 
 
 Стан на 2026-10-15: **реалізовано, eval PASS, передано на review; НЕ прийнято власником**.
 Реалізацію авторизовано відповіддю `7a` після read-only входу. Commit не виконано. За окремим «Зроби деплой» опубліковано draft preview; production не змінено. Поточний виправлений deploy/readback і offline PASS — нижче; MIME blocker першої спроби збережено як історію; попередні no-preview/full-verify записи далі є історичними.
-Фази 1–7 залишаються прийнятими; **фаза 8 заблокована** до owner acceptance 7A й окремого дозволу на 8.
+Історичний checkpoint: 7A тоді очікувала acceptance. Зараз 7A прийнята й закрита; наступний scope — cleanup + дві вкладки за актуальним HANDOFF, не попередня retention/cap/rollback фаза. Scope8 відтоді реалізовано за окремим дозволом; очікує human review, див. PHASE8-REPORT.md.
 
 ## Historical SVG Repo icon-only localhost review
 

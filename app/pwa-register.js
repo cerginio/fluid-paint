@@ -165,21 +165,21 @@
     const panel = doc.createElement('details'); panel.id = 'pwa-panel';
     const svg = root.FluidPwaIcon;
     const icon = (id, shape, name, hidden = false) => `<button type="button" id="${id}" title="${name}" aria-label="${name}"${hidden ? ' hidden' : ''}>${svg(shape)}</button>`;
-    panel.innerHTML = `<summary title="Offline and updates" aria-label="Offline and updates"><span id="pwa-state-icon" aria-hidden="true">${svg('cloud')}</span><span id="pwa-status" role="status" aria-live="polite"></span><span id="pwa-update" role="status" aria-live="polite"></span><span class="pwa-disclosure" aria-hidden="true">${svg('chevron-down')}</span></summary>
+    panel.innerHTML = `<summary title="Offline and updates" aria-label="Offline and updates"><span id="pwa-state-icon" aria-hidden="true">${svg('cloud')}</span></summary>
       <div class="pwa-content">
+        <p id="pwa-status" role="status" aria-live="polite"></p><p id="pwa-update" role="status" aria-live="polite"></p>
         <div class="pwa-actions" role="group" aria-label="Offline and update actions">
           ${icon('pwa-verify','circle-check','Verify offline readiness')}${icon('pwa-check','refresh-cw-alt-3','Check for updates')}${icon('pwa-later','clock','Later',true)}${icon('pwa-apply','arrow-up','Update',true)}${icon('pwa-install','download','Install app',true)}
+          <button type="button" id="pwa-save" hidden>Save PNG</button>
           <progress id="pwa-progress" aria-label="Checking or downloading" hidden></progress>
         </div>
-        <button type="button" id="pwa-save">Save PNG</button>
         <p id="pwa-activation-status" role="status" aria-live="polite"></p>
         <p id="pwa-versions"></p><p id="pwa-last-check"></p>
-        <a href="/pwa-credits.html" target="_blank" rel="noopener">Credits</a>
       </div>`;
     doc.body.appendChild(panel);
-    // Reserve actual dock height: neither canvas nor floating tools sit beneath it.
-    doc.documentElement.classList.add('has-pwa-dock');
-    new root.ResizeObserver(() => doc.documentElement.style.setProperty('--pwa-dock-height', `${panel.getBoundingClientRect().height}px`)).observe(panel);
+    doc.addEventListener('pointerdown', event => {
+      if (panel.open && !panel.contains(event.target)) panel.open = false;
+    });
     panel.addEventListener('keydown', event => {
       if (event.key === 'Escape') {
         panel.open = false; panel.querySelector('summary').focus();
@@ -191,6 +191,20 @@
     const versionTime = value => /^\d{4}-\d\d-\d\dT\d\d:\d\d/.test(value || '') ? value.slice(0,16).replace('T',' ') : 'unverified';
     let detection, activation, lastActiveIdentity;
     let registration, epoch = 0, wasReady = false, deferredPrompt = null;
+    function refreshSaveButton() {
+      const button = doc.getElementById('pwa-save');
+      button.hidden = true;
+      if (!panel.open || doc.hidden || !detection?.snapshot().waiting ||
+          registration?.waiting?.state !== 'installed' ||
+          ['saving','applying','reloading'].includes(activation?.snapshot().phase)) return;
+      try {
+        if (root.__painter?.getUpdateSafety().active === false) button.hidden = !root.__painter.hasArtwork();
+      } catch { /* A failed readback does not establish that artwork can be saved. */ }
+    }
+    panel.addEventListener('toggle', refreshSaveButton);
+    // Also catches asynchronous imports, playback completion, clearing and Undo.
+    // GPU readback only runs for an open, visible panel with an installed update.
+    root.setInterval(refreshSaveButton, 1000);
     function show(state, text) {
       panel.dataset.state = state;
       doc.getElementById('pwa-state-icon').innerHTML = svg(state === 'ready' ? 'circle-check' : state === 'unavailable' || root.navigator.onLine === false ? 'cloud-slash' : 'cloud');
@@ -237,6 +251,7 @@
         reload:() => root.location.reload(),
         lock:value => { doc.body.inert=value; },
         render:state => { panel.dataset.activation=state.phase;
+          refreshSaveButton();
           doc.getElementById('pwa-activation-status').textContent=state.message;
           if(state.phase==='error')panel.open=true;
         }});
@@ -252,6 +267,7 @@
         doc.getElementById('pwa-last-check').textContent = `Last check: ${state.lastCheck === null ? 'not yet' : new Date(state.lastCheck).toLocaleTimeString('en')}. ${state.result}`;
         doc.getElementById('pwa-apply').hidden = !state.waiting;
         doc.getElementById('pwa-later').hidden = !state.waiting || state.later;
+        refreshSaveButton();
         if (state.active && state.active !== lastActiveIdentity) { lastActiveIdentity = state.active; verify(); }
       }});
       doc.getElementById('pwa-check').onclick = () => detection.check('manual');

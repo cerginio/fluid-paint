@@ -7,6 +7,20 @@
 multi-tab activation (§6), font/icon рішення (§3.2), CORS межі scope C (§7),
 PWA-придатний QA serving (§8A, §9).
 
+Ревізія 3 — рішення власника: історія версій у браузері, cap у три complete
+releases і локальна rollback-підсистема скасовані. §4.1 та acceptance нижче
+замінюють попередній retention-контракт. Це дозвіл змінити документацію,
+не реалізувати, комітити чи деплоїти. Прийнятий minimal-status/auto-PNG UX 7A
+зберігається; історичні вимірювання не є свіжим QA.
+
+Реалізація revised scope8 авторизована пізнішою командою «Роби змінену фазу 8»;
+поточний стан — human review, [PHASE8-REPORT.md](./PHASE8-REPORT.md).
+Підтверджено normal observed-client cleanup; без Web Locks, з unknown clients
+або never-observed reserved navigation pin collection консервативно відкладено
+(останній може залишитися назавжди після aborted navigation). Це обмеження
+реалізації, не зміна safety-контракту і не відновлення архіву версій як вимоги.
+Commit/deploy й human acceptance цією командою не надані.
+
 ## 1. Мета й межі
 
 Після успішної підготовки offline Fluid Paint має запускатися без мережі.
@@ -146,27 +160,34 @@ Hash-named assets роблять mixed deployment detectable. Netlify deployment
 публікувати єдиний перевірений dist без повторного іншого remote build.
 Precache нової версії не має залежати від assets, які відсутні на поточному deploy.
 
-### 4.1 Retention
+### 4.1 Життєвий цикл update та прибирання кешу
 
-Інваріант — liveness, не кількість: не видаляти assets/cache release, поки
-існують клієнти, що можуть ними користуватися. Client lease сам по собі не
-доказ відсутності — suspended tab може не відповідати, тому при невизначеності
-не чистити. Cleanup дозволено лише за доведеної відсутності клієнтів release
-і лише у власному cache namespace.
+Архів версій у браузері не є функцією продукту. Немає cap у три releases,
+штучної quota refusal за кількістю версій, збереження «попередньої про запас»,
+локального вибору версії чи автоматичної rollback-підсистеми.
 
-Кількість — лише cap: одночасно зберігати не більше трьох complete releases
-(активний, попередній і той, що встановлюється). Cap не скасовує liveness.
-Сценарій, який цього вимагає: вкладка на V1 лишається відкритою, виходить V2,
-потім V3 — правило «активний плюс попередній» видалило б V1 під живим клієнтом.
+До підтвердження Update поточний complete release працює; новий готується
+окремо через чинний atomic install gate. Невдале завантаження, включно з реальною
+помилкою browser storage quota, не пошкоджує поточну версію і не дає ready.
+Це обробка помилки наявного install, не новий quota-framework.
 
-Поведінка на cap визначена так: якщо всі збережені releases потрібні живим
-клієнтам, новий install відхиляється як quota refusal, активна версія лишається
-працездатною, «Оновлення готове» не показується, а UI чесно каже, що оновлення
-неможливе, поки відкриті старі вкладки, і перелічує дії (закрити їх або
-оновити цю). Автоматично видаляти release, на якому ще може жити клієнт,
-заборонено навіть під cap.
-User data та downloaded demos не залежать від app release cache cleanup.
-Quota refusal безпечніше за автоматичне видалення ще потрібного release.
+Після explicit Update діє прийнятий auto-PNG/safety/once-only reload контракт
+7A (§6). Непотрібні app release caches прибираються лише у власному namespace;
+active release та complete waiting candidate не видаляються. User data,
+downloaded demos та чужі caches origin не чіпати.
+
+Інші відкриті вкладки не reload примусово й не втрачають малюнок. Старі assets
+тимчасово доступні, лише поки їх можуть потребувати відкриті старі документи
+(також suspended/uncontrolled і вкладка, відкрита під час activation).
+Після підтвердженої відсутності таких клієнтів старий кеш прибирається на
+наступній lifecycle-нагоді; таймаут/мовчання вкладки не доводить її відсутність.
+Це сумісність живих вкладок, а не історія релізів. Наявність інших вкладок
+сама по собі не блокує Update; немає cap-driven вимоги закрити їх.
+
+Вузьке завершення updates перевіряє успішний перехід і cleanup, невдалий install
+та другу вкладку з малюнком. Окремої retention/quota/rollback фази немає.
+Операційне повернення коду — публікація перевіреного попереднього коду як
+чергового оновлення через той самий gate (§6), не вибір локального кешу.
 
 ## 5. New version detection
 
@@ -194,12 +215,16 @@ Netlify response headers:
 Netlify для `bundle.js` — `public,max-age=0,must-revalidate`, тобто жодне з
 цих правил зараз не діє і секцію `[[headers]]` треба створити з нуля.
 Жодної обіцянки background detection, коли app/browser закритий або suspended.
-Rollback release також є відмінною content identity, не «меншим номером,
-який треба ігнорувати».
+Повторно опублікований попередній код проходить звичайну перевірку content
+identity; сортування за «старшим номером» не вводити. Окремого локального rollback немає.
 
 UI стани: offline unavailable / preparing / offline ready;
 update checking / downloading / ready / failed / applying.
-Показувати active version, waiting version, результат останньої перевірки.
+Чинний UI-контракт (прийнято 2026-10-16): нижня ліва іконка з margins/opacity як debug,
+fixed-width 320px popover (звужується до viewport), без footer та резервування canvas height.
+Показувати active build time і результат останньої перевірки; повні release IDs внутрішні.
+Save PNG лише за verified waiting update та наявного idle artwork, в одному рядку actions.
+Credits link прибрано; artifact attribution збережено.
 Download progress не вигадувати: без byte instrumentation лише indeterminate.
 
 ## 6. Безпечний update та захист роботи
@@ -212,10 +237,13 @@ story playback. Надійно визначати active work/dirty state чер
 API; якщо dirty detection неповний — вважати стан потенційно незбереженим.
 
 PNG export — flattened artwork, не checkpoint wet simulation чи Undo.
-Користувач може завантажити PNG і потім підтвердити reload; export API completion
-не доводить, що файл фізично збережено, тому підтвердження користувача окреме.
-Альтернатива — явне «Оновити без збереження» з описом втрати wet state/history.
-Відмова чи export error не активують worker.
+Чинний прийнятий контракт 7A: explicit Update автоматично завантажує справжній
+PNG непорожнього малюнка, потім повторно перевіряє busy/candidate identity перед
+ALLOW. Порожній canvas не створює download. Encoder/readback/storage/candidate
+failure не активує worker. Немає повторного file-confirmation/discard діалогу.
+Download initiation не доводить остаточне збереження файлу на диску. Вже відкриті
+legacy документи зберігають свій старий confirmation flow до першого переходу;
+ретроактивний auto-save їм не обіцяється (AUTOSAVE-REVISION.md).
 
 Multi-tab policy першого релізу: `clients.matchAll` (включно з uncontrolled
 same-scope clients) і BroadcastChannel дають UX notification — «відкрито ще N
@@ -225,11 +253,11 @@ suspended tab за визначенням може не відповісти, т
 підтвердження дозволено лише станом самої цієї сторінки (dirty/active work).
 
 Безпеку дає не блокування, а те, що activation не робить примусовий reload:
-старий release зберігається (§4.1), новий worker обслуговує старі hash asset
+старі assets тимчасово зберігаються для живих документів (§4.1), новий worker обслуговує старі hash asset
 requests, і кожна сторінка reload виконує лише після свого підтвердження.
-Тому «закрийте інші вкладки» — рекомендація, і поряд із нею завжди присутня
-явна дія «Оновити все одно», яка активує waiting worker, не торкаючись інших
-вкладок. Перевірка клієнтів має race з відкриттям нової вкладки; цей race
+Тому інші вкладки не вимагають нового confirmation діалогу: чинний явний
+Update після власного safety/auto-PNG gate активує waiting worker, не торкаючись
+інших вкладок. Не повертати superseded manual-confirmation/discard UI. Перевірка клієнтів має race з відкриттям нової вкладки; цей race
 нешкідливий саме тому, що старі assets лишаються доступними.
 
 Після allow message — `skipWaiting`; після `controllerchange` лише сторінка,
@@ -286,7 +314,9 @@ Version metadata, headers, checking/waiting UI, safe activation, multi-tab guard
 Acceptance: V1/V2 на одному origin у production-like serving; V1 лишається при
 «Пізніше», V2 повністю готова до «Оновити», old/new assets не змішуються.
 Перевірка dirty canvas/export/refusal, waiting at startup і browser natural
-activation. Rollback artifact detection також проходить.
+activation. Завершення B — cleanup після переходу без пошкодження другої
+вкладки з малюнком; невдале завантаження зберігає поточну версію.
+Локальна історія/rollback та cap/quota-framework не є acceptance.
 
 ### C. Offline demos
 
@@ -313,7 +343,8 @@ headers definitions, update state machine та once-only activation/reload.
 Також машинно перевіряти: у built output (HTML, CSS, manifest) немає жодного
 cross-origin посилання — це перевірка обіцянки «zero external dependencies», а
 не ручний огляд; inventory не містить shader дерев; immutable rule не матчить
-фіксовані імена; retention cap не видаляє release із живим клієнтом.
+фіксовані імена; cleanup не видаляє active/waiting або assets живих документів
+і не зачіпає user data, downloaded demos та чужі caches.
 
 Browser probe: два реальних builds на одному origin, actual SW/CacheStorage,
 не mock fetch-only proof; persisted profile/context між runs. Справжні PNG,
@@ -329,16 +360,19 @@ network trace, active/waiting IDs і runner cleanup зберігати поза 
 6. Existing waiting worker до UI bootstrap; failed worker; повторні events.
 7. Storage eviction, persist refusal, interrupted demo transaction (для C).
 8. Query URLs, source mode, embedded origin security contract.
-9. V1 → V2 → rollback V1; ні mixed assets, ні endless reload.
+9. V1 → V2: ні mixed assets, ні endless reload; cleanup непотрібного V1
+   після закриття його останньої вкладки. Локальний rollback не потрібний.
 10. WebGL1/2 draw/resize/Save; palette/history/Bake/story regressions незмінні.
 11. iOS/Android standalone cold launch, offline launch, return foreground/update.
 12. Live CDN headers та побайтний artifact readback після кожного deploy.
 13. Типографіка після зняття Google Fonts: панель, слайдери та story controls
     на мобільній ширині не з'їжджають; ваги 400/600/700 приходять із локальних
     файлів, а не з fallback stack.
-14. Три живі releases одночасно: cap не видаляє release із живим клієнтом,
-    install відхиляється як quota refusal, активна версія лишається робочою.
-15. Unresponsive/suspended вкладка: «Оновити все одно» активує waiting worker,
+14. Дві вкладки: друга з реальним малюнком лишається працездатною без reload
+    після Update першої; потрібні їй старі assets доступні. Після закриття
+    останньої старої вкладки lifecycle cleanup прибирає непотрібний кеш;
+    active/waiting, чужий кеш і user/demo data незмінні. Штучного cap немає.
+15. Unresponsive/suspended вкладка: явний Update після власного safety gate активує waiting worker,
     стара вкладка не reload і не ламається на старих hash assets.
 
 Не складати SwiftShader/browser/physical acceptance в одне вигадане число.
@@ -353,7 +387,8 @@ server), `index.html` (зняти Google Fonts, додати manifest та apple
 SW/manifest/version inventory; локальні font та icon assets разом з icon
 master; debug unit/browser harness із persistent profile.
 Generated dist не комітити.
-`docs/SDLC.md` / `DEPLOY.md` — headers, update/release/rollback procedure.
+`docs/SDLC.md` / `DEPLOY.md` — headers, update/release та операційна повторна
+публікація коду (не локальна rollback-підсистема).
 
 Після spec review створити HANDOFF/QA та зареєструвати тему в AGENTS окремою
 командою фазування; зараз registry не містить фіктивного HANDOFF.

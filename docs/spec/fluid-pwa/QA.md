@@ -1,5 +1,94 @@
 # QA: Fluid PWA
 
+## Прийнятий UI фази 8 — 2026-10-16
+
+Журнал: фази 7A і 8 прийняті власником через `handoff:next`; compact popover, PNG visibility,
+opacity та margins прийняті. Production deploy авторизований; readback —
+[PRODUCTION-2026-10-16.md](./PRODUCTION-2026-10-16.md). Інтернет потрібний для першого відкриття;
+optional Demo не scope8. Пристрої/Safari/standalone не перевірено.
+
+### QA-8UI-A. Floating icon та повна висота canvas
+
+**Відкрити:** https://fluid.storytilecraft.space/?webgl=2&debug=none&diag=0&seed=41
+**Клікнути:** нижню ліву іконку Offline and updates; натиснути Escape.
+**Дивитись:** canvas і нижній лівий кут; перевірити viewport 1000×900 та 320×900.
+**Очікуваний результат:** іконка 44×44, left/bottom 8px як debug, напівпрозора; popover 320px
+(304px на 320px viewport) відкривається над нею. App займає всю висоту viewport у двох станах.
+Enter відкриває; Escape повертає focus на іконку; outside click закриває. Покрито browser probe.
+
+### QA-8UI-B. Save PNG лише перед доступним оновленням
+
+**Відкрити:** той самий https://fluid.storytilecraft.space/?webgl=2&debug=none&diag=0&seed=41
+**Клікнути:** відкрити update popover, Check for updates.
+**Дивитись:** один рядок кнопок; відсутність Credits.
+**Очікуваний результат:** без verified waiting release Save PNG приховано. Навіть за Update ready порожній
+canvas не показує Save PNG; з реальним малюнком та idle painter кнопка з'являється в actions і завантажує PNG.
+Для waiting/artwork матриці — deterministic isolated browser probe; довільний prod deploy не створює
+штучну другу версію. Explicit Update як і раніше auto-downloads artwork перед own reload.
+
+## Фаза 8 — cleanup + дві вкладки (прийнято)
+
+Реалізовано за «Роби змінену фазу 8»; прийнято через `handoff:next` 2026-10-16. Нижче первинний eval snapshot до closure; closing evidence — на початку HANDOFF.md.
+Старі archive/cap3/quota-framework/local rollback вимоги скасовані.
+[PHASE8-REPORT.md](./PHASE8-REPORT.md) — реалізація, evidence, counts і обмеження.
+Новий runner не змінює shared dist/retained3000; старий publish-capable autosave
+runner не запускати. Будує/піднімає isolated origin сам і завершує власні процеси.
+
+```sh
+node debug/pwa-phase8-browser-test.js
+```
+
+Фінальний `$E = C:/Users/cergi/AppData/Local/Temp/fluid-pwa-phase8-bWky0A`.
+`$U = http://127.0.0.1:58194/?webgl=2&debug=none&diag=0&seed=41` — **вже закритий**
+origin цього прогону, не live stand. Команда вище створює новий origin, точна
+адреса — `result.json:port`; людина може переглянути збережені PNG/JSON нижче.
+Інтернет потрібний лише для встановлення залежностей; optional Demo не scope8.
+Retained3000 зараз ECONNREFUSED, не запускали/не зупиняли. Historical URLs нижче
+не є поточною перевіркою сервера.
+
+### QA-8A. Guards та isolated build
+
+**qa:mode:** cli
+**qa:open:** термінал у `D:/work/fluid-paint/fluid-paint`.
+**qa:action:** виконати команду runner вище; відкрити надрукований evidence/result.json і guards.log.
+**qa:inspect:** result.commands, source-fingerprint.json, retainedBefore/After, parent-guards.json фінального `$E`.
+**qa:expected:** PASS; 2 builds exit0; cleanup15/0, worker12/0, activation11/0, autosave9/0, detection16/0, readiness11/0, UX4/0. Combined78 executions — не unique assertions. Retained dist не змінено; own browser disconnected і port bind-back true.
+
+### QA-8B. Невдалий install не псує поточне малювання
+
+**qa:mode:** browser
+**qa:open:** `$U` у runner; `$E/failed-install.json`, result.json:cases.
+**qa:action:** runner малює pointer strokes у двох V1 tabs; публікує лише isolated V2 і відключає required JS response під час install.
+**qa:inspect:** actual V1 identity/readiness, наявний artwork, failed-install cache snapshot.
+**qa:expected:** V1 ready/artwork intact; V2 не waiting, partial cache відсутній. Quota branch — guard, не реальне quota exhaustion browser PASS.
+
+### QA-8C. Update з frozen другою вкладкою
+
+**qa:mode:** browser
+**qa:open:** runner `$U`; `$E/v2-after-update.png`, `old-artwork-after-update.png`, result.json:frozenActiveStatus/autoPng/oldPng.
+**qa:action:** runner freezes nonconsenting V1 tab; у першій виконує Check → Update, паралельно відкриває ще вкладку; після exact V2 STATUS thaw старої вкладки, Save PNG у ній.
+**qa:inspect:** download/navigation order, old document marker/navigation counter, обидва PNG.
+**qa:expected:** auto-PNG перед одним own reload, V2 complete active до thaw. Старий document не reload, його малюнок збережено. Auto PNG 180×130/15865 bytes/6244 colored pixels, old PNG 180×130/17085 bytes/6572 colored pixels у цьому прогоні. No forced claim/reload інших tabs; no mixed bundle.
+
+### QA-8D. Старі assets offline та collection після останньої вкладки
+
+**qa:mode:** browser
+**qa:open:** `$E/old-live-offline.json`, `unknown-client-protected.json`, `after-last-old-close.json`, `v2-offline-ready-draw.png`; runner `$U`.
+**qa:action:** runner вимикає мережу, fetch усіх старих hashed assets; закриває old painting tab, лишаючи unknown credits document; потім закриває unknown/extra та робить STATUS у V2. Reload offline й новий pointer stroke.
+**qa:inspect:** result.oldOfflineReadback, cleanup.removed, protectedData та cache snapshots.
+**qa:expected:** 18 assets SHA-exact HTTP200, унікальний V1 bundle теж. Unknown client утримує V1; після закриття останнього старого/unknown наступний STATUS видаляє V1, V2 лишається complete/ready та малює offline. Foreign/user/demo caches, localStorage й IDB sentinels unchanged. Це не acceptance offline demos.
+
+### Збережені обмеження scope8
+
+Без Web Locks collection вимкнений; unknown/legacy documents відтерміновують
+його до закриття. Reserved navigation pin, який ніколи не був observed live,
+може залишитися назавжди після aborted navigation — таймером його не видаляємо.
+Це explicit limitation, не гарантія безумовного cleanup. Physical devices,
+Safari, crash/pin-write failure, aborted-navigation collection та upgrade з
+раніше опублікованого legacy worker — NOT TESTED. Full make verify не виконано.
+Історичні phase7/7A snapshots нижче не є свіжим acceptance cleanup.
+
+
 ## Поточний локальний review — minimal status + automatic PNG
 
 **Supersedes the icon-only UI/consent contract below; prior measurements remain historical.**
@@ -14,7 +103,7 @@
 - **Legacy limitation, not automatic-save PASS:** real persistent/restarted `ca3c9da7…` localhost client existed before publication, retained pointer artwork/document while `registration.update()` fetched exact new complete waiting release. Its already-loaded immutable JS necessarily kept its old Export PNG + separate confirmation path. That real PNG was exported and decoded before one explicit consenting reload to the new version. No old bundle rewrite, script injection, forced activation or user data clearing. New one-click auto-save applies after this first upgrade; retroactive auto-save in the old document is not claimed.
 - Screenshots: `$A/new-ui-desktop.png`, `new-ui-320.png`, `legacy-ca3-waiting.png`; valid PNGs, HAR/traces, `cache-snapshot.json`, frozen `source/`, `v2/`, `old-dist-backup/` retained. Owned test browsers closed; own test ports bind-back verified; retained3000 remains running.
 - Intermediate failures retained: `fluid-pwa-autosave-gFfxmx` pointer setup while expanded dock; `4YxzbB` old inventory guard assumed every non-index entry immutable (fixed for separate fixed credits HTML). Main `$A` hit one No-update wait timeout after successful save/failure/empty probes; fresh persistent-profile check and bounded `resume.cjs` completed UI/publish/legacy/cache verification. Original failure is retained in `previousRunnerError`; not relabelled a clean uninterrupted run.
-- Full details and exact source list: [AUTOSAVE-REVISION.md](./AUTOSAVE-REVISION.md). Physical/native/Safari/CORS/retention/rollback debt unchanged. 7A прийнята через `handoff:next`; фаза8 не починалась і потребує окремого дозволу.
+- Full details and exact source list: [AUTOSAVE-REVISION.md](./AUTOSAVE-REVISION.md). Physical/native/Safari/CORS debt unchanged. 7A прийнята через `handoff:next`. Старий retention/cap/локальний rollback scope скасовано власником; scope8 (cleanup + дві вкладки) реалізовано за окремим дозволом, очікує human review; поточні докази й обмеження — PHASE8-REPORT.md. Чинний контракт — HANDOFF.md та PWA-OFFLINE-UPDATE-SPEC.md §4.1; історичні вимірювання не змінено.
 
 
 Фази 1–7 закрито; регресійні сценарії перенесено в [_archive/QA-phases-1-7.md](_archive/QA-phases-1-7.md) (2026-10-15); [парний handoff](_archive/HANDOFF-phases-1-7.md).
@@ -86,9 +175,9 @@ PWA_QA_PORT=3000 npm run test:pwa-release:browser
 Phase-2 runner сам робить два production builds; evidence — автоматичний unique
 `phase2-…`. Не запускати guards/probes паралельно із сервером (працюють з dist).
 
-## Фаза 7A — реалізовано, eval PASS, очікує owner review
+## Історичний eval фази 7A — до owner acceptance та auto-PNG revision
 
-Авторизація реалізації — відповідь `7a`; draft окремо авторизовано «Зроби деплой». **Не прийнято власником; commit/production не виконано; фаза 8 заблокована.** Corrected live preview та offline PASS — у преамбулі; initial MIME blocker збережено у report.
+Історичний стан: авторизація реалізації — відповідь `7a`; draft окремо авторизовано «Зроби деплой». Тоді acceptance/commit ще не було. **7A відтоді прийнята й закрита; чинний наступний scope — cleanup + дві вкладки, за окремим дозволом на реалізацію.** Corrected live preview та offline PASS — у преамбулі; initial MIME blocker збережено у report.
 Повний звіт: [PHASE7A-REPORT.md](./PHASE7A-REPORT.md).
 
 ### Запуск без зміни retained stand

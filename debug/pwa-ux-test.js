@@ -17,19 +17,19 @@ test('actual SVG Repo shapes are pinned, inert, coherent and accessible without 
  assert.doesNotMatch(source,/require\('\.\/pwa-ui-icons'\)/);
  assert.doesNotMatch(source,/[☁✓⟳◷⊕⌃⌄]/);assert.doesNotMatch(css,/[⌃⌄]/);
  assert.match(fs.readFileSync(path.resolve(__dirname,'../pwa-credits.html'),'utf8'),/Dazzle UI/);
- assert.match(source,/href="\/pwa-credits.html"/);
+ assert.doesNotMatch(source,/href="\/pwa-credits.html"/);
 });
 test('English-only PWA copy without a new localization framework',()=>assert.doesNotMatch(source,/[\u0400-\u04ff]/));
-test('only active timestamp and last check information, Save PNG and separate credits',()=>{
+test('only active timestamp and last check information, contextual Save PNG without credits link',()=>{
  const markup=source.slice(source.indexOf('panel.innerHTML ='),source.indexOf('doc.body.appendChild(panel)'));
  for(const id of ['pwa-versions','pwa-last-check','pwa-save'])assert.ok(markup.includes(`id="${id}"`));
  for(const text of ['pwa-shell','pwa-warning','pwa-details','pwa-install-info','Discard artwork','File checked','Dazzle','Browser data','Prepare online'])assert.ok(!markup.includes(text),text);
  assert.match(source,/fluid-build-time/);assert.match(source,/activeBuildTime/);
  assert.match(source,/hasArtwork:.*hasArtwork/);assert.match(source,/save:.*painter.save/);
 });
-test('dock reserves measured space and keyboard focus does not rely on color',()=>{
- assert.match(source,/ResizeObserver/);assert.match(source,/--pwa-dock-height/);
- assert.match(css,/height: calc\(100dvh - var\(--pwa-dock-height/);
+test('floating update control preserves canvas space and keyboard focus does not rely on color',()=>{
+ assert.doesNotMatch(source,/ResizeObserver|has-pwa-dock|--pwa-dock-height/);
+ assert.doesNotMatch(css,/has-pwa-dock|--pwa-dock-height/);
  assert.match(css,/:focus-visible.*outline: 3px/);assert.match(css,/min-height: 44px; min-width: 44px/);
  assert.match(source,/event.key === 'Escape'/);
 });

@@ -1,5 +1,70 @@
 # Handoff: Fluid PWA — offline shell та надійні оновлення
 
+## Закриття фази 8 та floating update UI — 2026-10-16
+
+Власник прийняв фазу через `handoff:next` і прямо авторизував production deploy.
+Фаза 8 закрита; наступний функціональний scope — фаза 9 (offline demos), ще не розпочата.
+Публікація виконується після closing commits; результат буде в [PRODUCTION-2026-10-16.md](./PRODUCTION-2026-10-16.md).
+
+- Cleanup + дві вкладки: свіжий guard **78 executions / 0 failed** (з imported cases),
+  browser **9 cases / 0 failed**, 2 builds; `C:/Users/cergi/AppData/Local/Temp/fluid-pwa-phase8-IuPmPV/result.json`.
+  Старий runner припускав, що isolated review3000 дорівнює shared dist: перша closing спроба
+  `fluid-pwa-phase8-fJVM2y` відхилена; тепер dist та review HTTP перевіряються незалежно до/після.
+- UI: 44×44 icon, 8px від лівого/нижнього краю з safe-area (як debug; Android desktop-site 2.05vw).
+  Fixed popover 320px, на 320px viewport — 304px; full-height canvas без footer/ResizeObserver.
+  Opacity як bug: background .55 / foreground .85 / border .35. Enter/Escape та outside-click close.
+- Save PNG — лише installed verified waiting update + idle painter із реальним artwork;
+  у спільному рядку actions, без Credits link. Automatic PNG перед explicit Update збережено.
+  Standalone `pwa-credits.html` та ліцензійні attribution лишено в artifact.
+- Browser: повна висота app не змінюється при відкритті; desktop/320/short landscape;
+  no-update/empty-with-update hides Save, real pointer artwork + ready update shows Save,
+  PNG download працює. Screenshots: `C:/Users/cergi/AppData/Local/Temp/fluid-pwa-review-cz1ysO`.
+- Canonical release gate із Makefile виконується Node-оркестратором (GNU Make відсутній);
+  **PASS: 25 test commands exit0**; evidence `C:/Users/cergi/AppData/Local/Temp/fluid-pwa-prod-gate-0nOUKk/result.json`.
+  Старі assertions timestamp-equality/footer/manual-consent приведено до прийнятого контракту;
+  негативні install/encoder/busy gates, PNG-before-navigation, once-only reload та старі assets збережено.
+
+Збережені межі: physical Android/iOS/Safari/native GPU/install/OS reboot не перевірені;
+quota/locks failures — deterministic guards; unknown/legacy clients і unobserved reserved pins
+консервативно утримують cache. Offline demos/CORS не є acceptance. Нижчі checkpoints історичні.
+
+## Історичний checkpoint фази 8 — до acceptance
+
+Дозвіл «Роби змінену фазу 8» авторизував реалізацію cleanup + дві вкладки.
+**Далі: human review [QA-8](./QA.md#фаза-8--cleanup--дві-вкладки-review),
+[PHASE8-REPORT.md](./PHASE8-REPORT.md); не нова реалізація фази 8/9.**
+Commit/deploy/оновлення retained dist не виконано. 7A лишається прийнятою.
+
+Свіжі guards: cleanup15/0, worker12/0, activation11/0, autosave9/0,
+detection16/0, readiness11/0, UX4/0; combined78 executions не є unique total.
+Isolated browser PASS/9 cases: failed V2 install зберігає V1/artwork;
+auto-PNG перед одним own reload; frozen/nonconsenting вкладка не reload;
+18 old hashed assets SHA-exact offline (унікальний V1 bundle); остання стара
+вкладка закрилась → STATUS прибрав V1; user/demo/foreign data unchanged;
+V2 offline reload/draw PASS. Evidence `C:/Users/cergi/AppData/Local/Temp/fluid-pwa-phase8-bWky0A`.
+Own browser closed, port58194 bind-back PASS. Retained3000 ECONNREFUSED до/після,
+усі54 dist файли та3 unrelated files SHA-unchanged до baseline, сервер не чіпали.
+
+**Обмеження cleanup:** без Web Locks не збираємо; unknown/legacy clients
+утримують кеш до закриття; pending reserved navigation без жодного live
+спостереження може відтермінувати cleanup назавжди (не протухає за таймером).
+Aborted navigation/crash та physical/Safari/legacy-worker upgrade не browser PASS.
+Це не архів версій як функція і не повернення cap/rollback requirement.
+Нижчі «дозволу ще немає/cleanup немає» — попередні checkpoints, superseded
+цим статусом; історичні вимірювання та безпека відкритих вкладок збережені.
+
+## Рішення власника — заміна scope 8
+
+Історія версій у браузері, cap у три releases, штучна quota refusal за їхньою
+кількістю та локальна rollback-підсистема скасовані, не відкладені як борг.
+Замість попередньої фази 8 — вузьке завершення updates: cleanup непотрібного
+app cache та безпека другої вкладки. Канонічний контракт —
+[PWA-OFFLINE-UPDATE-SPEC.md §4.1](./PWA-OFFLINE-UPDATE-SPEC.md#41-життєвий-цикл-update-та-прибирання-кешу).
+7A лишається прийнятою. Рішення про заміну scope спочатку дозволяло лише
+документацію; наступна команда «Роби змінену фазу 8» дозволила реалізацію.
+Commit і deploy не авторизовані. Старі звіти/архіви з retention/cap/rollback
+описують історичний план, а не чинний requirement. Безпека живих вкладок чинна.
+
 ## Поточний локальний review — minimal status + automatic PNG
 
 **Supersedes the icon-only UI/consent contract below; prior measurements remain historical.**
@@ -14,7 +79,7 @@
 - **Legacy limitation, not automatic-save PASS:** real persistent/restarted `ca3c9da7…` localhost client existed before publication, retained pointer artwork/document while `registration.update()` fetched exact new complete waiting release. Its already-loaded immutable JS necessarily kept its old Export PNG + separate confirmation path. That real PNG was exported and decoded before one explicit consenting reload to the new version. No old bundle rewrite, script injection, forced activation or user data clearing. New one-click auto-save applies after this first upgrade; retroactive auto-save in the old document is not claimed.
 - Screenshots: `$A/new-ui-desktop.png`, `new-ui-320.png`, `legacy-ca3-waiting.png`; valid PNGs, HAR/traces, `cache-snapshot.json`, frozen `source/`, `v2/`, `old-dist-backup/` retained. Owned test browsers closed; own test ports bind-back verified; retained3000 remains running.
 - Intermediate failures retained: `fluid-pwa-autosave-gFfxmx` pointer setup while expanded dock; `4YxzbB` old inventory guard assumed every non-index entry immutable (fixed for separate fixed credits HTML). Main `$A` hit one No-update wait timeout after successful save/failure/empty probes; fresh persistent-profile check and bounded `resume.cjs` completed UI/publish/legacy/cache verification. Original failure is retained in `previousRunnerError`; not relabelled a clean uninterrupted run.
-- Full details and exact source list: [AUTOSAVE-REVISION.md](./AUTOSAVE-REVISION.md). Physical/native/Safari/CORS/retention/rollback debt unchanged. **Далі — фаза 8 (retention/quota/rollback), тільки після окремого дозволу; зараз не починалась.**
+- Full details and exact source list: [AUTOSAVE-REVISION.md](./AUTOSAVE-REVISION.md). Physical/native/Safari/CORS debt unchanged. **Scope8 реалізований, далі human review QA-8; старий retention/cap/rollback scope скасовано.**
 - Closing guard: шість unit entrypoints activation/detection/readiness/worker/UX/autosave — **63 executions passed / 0 failed**; autosave imports activation cases, тому це не 63 унікальні assertions. Попередній browser probe `$A/result.json` **PASS_WITH_LEGACY_LIMITATION** збережено без перепублікації; historical broad consent suites не заявлені як current PASS. Closing readback PASS:8 production/build source SHA-identical до tested snapshot;20 exact inventory HTTP entries +3 SW/release/inventory metadata SHA-exact; auto/menu PNG SHA-exact до browser artifacts. Retained release2195ab1b… не перебудовували. Сторонні вже наявні зміни `debug/pwa-worker-browser-test.js`, `debug/shader-bundle-gpu-test.js`, `docs/spec/fluid-pwa/PHASE7-REPORT.md` лишено поза closing commits. Acceptance не означає physical/full-suite PASS.
 
 ## Історичний стан до owner acceptance 7A
@@ -24,7 +89,7 @@
 
 > **Архів:** фази 1–7 перенесено в [_archive/HANDOFF-phases-1-7.md](_archive/HANDOFF-phases-1-7.md) (2026-10-15); [парні регресійні QA](_archive/QA-phases-1-7.md).
 
-Поточний контракт: release identity/hashed inventory → atomic verified SW install → pinned-shell readiness → detection → explicit safe activation. Compatibility old SHA assets збережено; cap/cleanup/rollback ще немає. Реалізація й історичні вимірювання: [phase 7 report](./PHASE7-REPORT.md) та архів. No-SW/no-phase7 твердження ранніх фаз — лише історія, не чинні обмеження.
+Поточний контракт: release identity/hashed inventory → atomic verified SW install → pinned-shell readiness → detection → explicit safe activation. Compatibility old SHA assets збережено; cleanup реалізовано у фазі8, очікує human review. Cap і локальний rollback скасовані як вимоги, не є боргом. Реалізація й історичні вимірювання: [phase 7 report](./PHASE7-REPORT.md) та архів. No-SW/no-phase7 твердження ранніх фаз — лише історія, не чинні обмеження.
 
 ## Historical owner review 7A — icon-only revision
 
@@ -62,13 +127,13 @@ harness для service worker — окрема spike-фаза **перед** SW 
 hashed assets і release identity йдуть **до** SW (фаза 2), щоб перший же SW
 мав чесну identity й atomic install і не переписувався потім.
 
-> **Далі: фаза 8 — retention/quota/rollback identity, після окремого дозволу. 7A прийнята через `handoff:next` і закрита.**
+> **Далі: production deploy за прямим дозволом 2026-10-16, потім фаза9 лише за окремою командою.**
 > Фазу 7 прийнято власником через `handoff:next` 2026-10-15 і закрито із
 > зауваженням щодо UX; closing commit поверх `5d900c1`. Фази 1–7 прийняті.
 > [QA-7A–7M](./QA.md), [PHASE7-REPORT.md](./PHASE7-REPORT.md).
 > 7A прийнята; чинний minimal-status/auto-PNG контракт та legacy limitation — [AUTOSAVE-REVISION.md](./AUTOSAVE-REVISION.md). Historical reports/evidence не стирали.
-> Передумова acceptance 7A виконана. Окремого дозволу на реалізацію фази 8 ще немає.
-> Draft preview опубліковано, online/offline review доступний; corrected draft і historical MIME failure у report. Production deploy не виконано; фази 8–10 не починались.
+> Передумова acceptance 7A виконана. Scope8 реалізовано за окремою командою; owner acceptance ще немає.
+> Draft preview опубліковано, online/offline review доступний; corrected draft і historical MIME failure у report. Production deploy не виконано; scope8 передано на review, фази9–10 не починались.
 > Нижчі no-phase7 твердження попередніх фаз — історія, superseded цією фазою.
 
 Нові інваріанти: counter тримає real encoder до Promise completion; ALLOW ACK
@@ -80,7 +145,7 @@ NOT TESTED: physical Android/iOS/Safari/A2HS/standalone, native GPU/OS reboot,
 real mobile suspension/native install dialog/15-minute wall-clock, browser quota/
 eviction/MIME/hash injection, full large-story playback, live Netlify/CDN headers,
 CORS/demo downloads, full make verify. Physics/palette/vendor незмінні.
-Фази 8–10 не реалізовані. **7A закрито; наступний вхід — read-only handoff:start, потім окремий дозвіл на 8.**
+Scope8 реалізований, див. поточний report; фази9–10 не реалізовані. **7A закрито; далі human review QA-8.**
 
 ## Review 7A — свіжа перевірка 2026-10-15
 
@@ -194,22 +259,31 @@ Closing check 2026-10-14: `npm run build` PASS, `npm run test:pwa-assets`
    до/після eval, root dist не будували. Own 5 ports bind-back PASS; деталі в report.
    Physical/CDN/CORS/full-verify та historical cleanup-readback debt збережено.
 
-8. **Фаза 8 — retention, quota і rollback identity.**
-   **Передумова: 7A реалізована, перевірена та прийнята; окремий дозвіл на фазу 8.**
-   Контракт: liveness як інваріант (release із можливим живим клієнтом не
-   видаляється), cap у три complete releases, який liveness не скасовує;
-   на cap новий install відхиляється як quota refusal з чесним UI, активна
-   версія лишається, «Оновлення готове» не показується; cleanup лише у
-   власному namespace і лише за доведеної відсутності клієнтів; user data й
-   downloaded demos не залежать від release cleanup; rollback release
-   трактується як інша content identity, а не «менший номер».
-   Guard: `node --test` на cap і liveness (release із живим клієнтом не
-   видаляється навіть під cap; quota refusal замість видалення), на
-   namespace cleanup і на розпізнавання rollback identity.
-   Probe (harness): вкладка на V1 лишається відкритою, виходять V2 і V3 —
-   V1 не видалено, install відхилено як quota refusal, активна версія
-   робоча; далі V1 як rollback artifact проходить той самий install gate
-   без mixed assets і без endless reload.
+~~8. **Вузьке завершення updates — cleanup + дві вкладки (заміна старої фази 8).**~~ — ЗАКРИТО через `handoff:next` 2026-10-16.
+   **7A та scope8 прийняті. Closing eval і UI-контракт — на початку; PHASE8-REPORT.md.**
+   - [x] До explicit Update поточна версія працює; нова готується окремо.
+     Невдалий install, також реальна storage quota error, не псує поточну
+     версію і не дає ready. Не вводити cap чи новий quota-framework.
+   - [x] Після Update — чинний auto-PNG/safety/once-only reload контракт 7A;
+     cleanup непотрібних app caches лише у власному namespace. Active/waiting,
+     user data, downloaded demos та чужі caches не видаляються.
+   - [x] Друга відкрита вкладка з малюнком не reload примусово й працює зі
+     своїми старими assets. Зберігання лише для живих документів, не «про запас».
+     Suspended/uncontrolled та new-tab activation race не скасовують safety;
+     мовчання/таймаут не є доказом відсутності клієнта і не блокує Update.
+   - [x] Після закриття останнього observed старого клієнта непотрібний кеш прибирається
+     на наступній lifecycle-нагоді; не залишати його як історію версій.
+   Guard: `node --test debug/pwa-cleanup-test.js debug/pwa-worker-test.js`;
+   cleanup15/0 та worker12/0. Activation/autosave/detection/readiness/UX — у report.
+   Probe: два real builds V1/V2 на одному isolated origin: успішний Update;
+   невдале завантаження; друга вкладка з реальним малюнком до/після переходу;
+   cache/asset readback до і після закриття останньої старої вкладки.
+   Probe: `node debug/pwa-phase8-browser-test.js` PASS/9 cases, evidence у report.
+   Для normal observed clients cleanup PASS; aborted/unobserved reserved pin
+   може лишитися назавжди, без Web Locks cleanup вимкнений — retained limitations.
+   Не запускати publish-capable legacy autosave runner; retained dist/server не змінювати.
+   Виключено: cap у три releases, локальний archive/selector/rollback subsystem.
+   Операційне повернення коду — звичайна повторна публікація, не окремий gate.
 
 9. **Фаза 9 — offline demos (scope C).**
    Контракт: UI «Зберегти offline», downloaded list з availability/size і
@@ -234,12 +308,12 @@ Closing check 2026-10-14: `npm run build` PASS, `npm run test:pwa-assets`
    origin не додано в allowlist CDN (див. відкриті питання).
 
 10. **Фаза 10 — release QA (scope D).**
-    Контракт: preview deploy і повна update matrix V1 → V2 → rollback V1 на
+    Контракт: preview deploy і update matrix V1 → V2 з cleanup та другою вкладкою на
     ньому; реальні Android Chrome та iOS Safari / Add to Home Screen через
     https preview URL (SW не реєструється на `http://LAN-IP`); live перевірка
     фактичних CDN headers і побайтний readback артефактів після кожного
     deploy; оновлені `docs/SDLC.md` і `DEPLOY.md` (headers,
-    update/release/rollback процедура); негативна матриця §9 пройдена або
+    update/release та операційна повторна публікація коду, не локальний rollback); негативна матриця §9 пройдена або
     явно позначена NOT TESTED там, де пристрою чи origin немає.
     Guard: `make verify` і повний набір guard'ів фаз 1–9 зелені на тому
     самому артефакті, що публікується.

@@ -1503,20 +1503,23 @@ html, body {
   }
 }
 
-/* Production PWA dock: its measured height is reserved outside the canvas. */
-html.has-pwa-dock #app { height: calc(100dvh - var(--pwa-dock-height, 48px)); }
-#pwa-panel { position: fixed; z-index: 90; left: 0; right: 0; bottom: 0; box-sizing: border-box; padding-bottom: env(safe-area-inset-bottom); color: #f7f7fa; background: #25252b; border-top: 1px solid #777780; font-size: 12px; line-height: 1.4; }
-#pwa-panel > summary { cursor: pointer; min-height: 48px; display: flex; align-items: center; gap: 12px; padding: 8px 14px; list-style: none; }
+/* Floating update control leaves the painting viewport at its full height. */
+#pwa-panel { --pwa-corner-gap: 8px; position: fixed; z-index: 90; left: max(var(--pwa-corner-gap), env(safe-area-inset-left)); bottom: max(var(--pwa-corner-gap), env(safe-area-inset-bottom)); width: 44px; height: 44px; color: #f7f7fa; font-size: 12px; line-height: 1.4; }
+#pwa-panel > summary { cursor: pointer; width: 44px; height: 44px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; padding: 10px; list-style: none; color: rgba(255, 255, 255, 0.85); background: rgba(0, 0, 0, 0.55); border: 1px solid rgba(255, 255, 255, 0.35); border-radius: 8px; box-shadow: 0 2px 10px #0003; }
+#pwa-panel[open] > summary { background: #414151; border-color: #a0a0b0; }
+#pwa-panel[data-update="ready"] > summary::after { content: ''; position: absolute; top: 4px; right: 4px; width: 7px; height: 7px; border-radius: 50%; background: #9fd6ff; }
 #pwa-panel .pwa-icon { width: 22px; height: 22px; display: block; flex: 0 0 22px; }
 #pwa-state-icon { display: flex; }
-#pwa-panel .pwa-disclosure { margin-left: auto; transform: rotate(180deg); }
-#pwa-panel[open] > summary .pwa-disclosure { transform: none; }
 #pwa-panel summary::-webkit-details-marker { display: none; }
-#pwa-panel .pwa-content { padding: 0 12px 12px; max-height: 45dvh; overflow-y: auto; overflow-wrap: anywhere; }
+#pwa-panel .pwa-content { position: absolute; left: 0; bottom: 54px; width: 320px; max-width: calc(100vw - max(var(--pwa-corner-gap), env(safe-area-inset-left)) - max(var(--pwa-corner-gap), env(safe-area-inset-right))); box-sizing: border-box; padding: 12px; max-height: calc(100dvh - 90px - env(safe-area-inset-bottom)); overflow-y: auto; overflow-wrap: anywhere; background: #25252bf5; border: 1px solid #777780; border-radius: 10px; box-shadow: 0 6px 24px #0005; }
+#pwa-panel .pwa-content p { margin: 8px 0 0; }
+#pwa-panel .pwa-content p:empty { display: none; }
+#pwa-panel #pwa-update:not(:empty) { margin: 0 0 10px; }
 #pwa-panel .pwa-actions { display: flex; gap: 8px; align-items: center; }
 #pwa-panel button { min-height: 44px; min-width: 44px; padding: 8px 10px; color: #fff; background: #414151; border: 1px solid #a0a0b0; border-radius: 6px; cursor: pointer; font: inherit; }
 #pwa-panel .pwa-actions button { display: flex; align-items: center; justify-content: center; padding: 10px; }
-#pwa-panel .pwa-actions { flex-wrap: wrap; }
+#pwa-panel .pwa-actions { flex-wrap: nowrap; overflow-x: auto; }
+#pwa-panel .pwa-actions button { flex-shrink: 0; white-space: nowrap; }
 #pwa-panel .pwa-consent-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 #pwa-panel button:disabled { opacity: .55; cursor: not-allowed; }
 #pwa-panel [hidden] { display: none !important; }
@@ -1530,3 +1533,8 @@ html.has-pwa-dock #app { height: calc(100dvh - var(--pwa-dock-height, 48px)); }
 #pwa-details[open] > summary .pwa-icon:last-child { transform: rotate(180deg); }
 #pwa-panel .pwa-icon-credit { color: #c7c7d2; font-size: 11px; user-select: text; }
 #pwa-details { user-select: text; }
+
+@media (pointer: coarse) and (hover: none) and (min-width: 900px) and (max-device-width: 640px),
+       (pointer: coarse) and (hover: none) and (min-width: 900px) and (max-device-height: 640px) {
+  #pwa-panel { --pwa-corner-gap: 2.05vw; }
+}
