@@ -186,7 +186,6 @@ async function measurePath(page, replay) {
     assert.ok(ui.alphas[1] < ui.alphas[0], 'tile alpha reduces the second spot pigment load');
     assert.notEqual(ui.rotations[0], ui.rotations[1], 'per-tile rotation survives the player');
     assert.notEqual(ui.rotations[4], ui.rotations[5], 'mod 2 creates both orientations');
-    await page.click('#story-keep-partial');
     await page.locator('#story-color-model').selectOption('natural');
     await page.click('#story-play-pause');
     await page.waitForFunction(() => window.__painter.storyPlaybackController.state === 'completed');

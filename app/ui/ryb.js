@@ -139,6 +139,39 @@ function hsvToPigmentRgb(h, s, v, additive) {
   return rybToRgbDisplay(hsvToRyb(h, s, v), additive);
 }
 
+/** Find pigment loads whose picker colour is closest to an exact canvas RGB. */
+function rgbToPickerPigment(rgb, additive) {
+  if (additive) return [1 - rgb[1], 1 - rgb[0], 1 - rgb[2]];
+
+  let best = [0, 0, 0];
+  let bestError = Infinity;
+  const measure = (candidate) => {
+    const displayed = rybToRgbDisplay(candidate, false);
+    return displayed.reduce((sum, value, channel) =>
+      sum + (value - rgb[channel]) ** 2, 0);
+  };
+  // The Natural cube is nonlinear and some lit canvas RGBs are outside its
+  // gamut. Start globally, then refine the closest reachable colour locally.
+  for (let r = 0; r <= 8; r++) for (let b = 0; b <= 8; b++) for (let y = 0; y <= 8; y++) {
+    const candidate = [r / 8, b / 8, y / 8];
+    const error = measure(candidate);
+    if (error < bestError) { best = candidate; bestError = error; }
+  }
+  for (let step = 1 / 16; step >= 1 / 2048; step /= 2) {
+    let improved;
+    do {
+      improved = false;
+      for (let channel = 0; channel < 3; channel++) for (const direction of [-1, 1]) {
+        const candidate = best.slice();
+        candidate[channel] = Math.max(0, Math.min(1, candidate[channel] + direction * step));
+        const error = measure(candidate);
+        if (error + 1e-12 < bestError) { best = candidate; bestError = error; improved = true; }
+      }
+    } while (improved);
+  }
+  return best;
+}
+
 /** 0..1 rgb -> a CSS rgb() string, clamped and rounded. The cube can return a
  *  channel a hair outside 0..1, and one out-of-range channel silently drops the
  *  whole CSS declaration rather than erroring. */

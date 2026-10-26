@@ -62,6 +62,8 @@ test-fast:
 	$(NPM) run test:timing
 	$(NPM) run test:shader-bundle
 	$(NPM) run test:tilecraft
+	$(NPM) run test:tilecraft-scale
+	$(NPM) run test:story-recent
 	$(NPM) run test:pwa-release
 	$(NPM) run test:pwa-assets
 	$(NPM) run test:pwa-worker

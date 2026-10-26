@@ -2,8 +2,8 @@
 
 // Starts the supplied Tilecraft fixture through the actual browser engine.
 // Full live playback is intentionally not awaited here: the production fixture
-// has tens of thousands of points and the unit test already verifies complete
-// traversal. This test proves the browser URL wiring reaches a live stroke.
+// has tens of thousands of points. This checks that playback deposits paint;
+// continuous GPU paths need no bristle stroke to remain active.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const http = require('node:http');
@@ -36,11 +36,15 @@ const server = http.createServer((request, response) => {
     await page.waitForFunction(() => window.__tilecraftStoryStarted && window.__tilecraftStoryPlayer);
     await page.waitForTimeout(100);
     const result = await page.evaluate(() => ({
-      active: window.__painter.engine.strokeActive,
+      painted: (() => {
+        const { pixels } = window.__painter.engine.readPaintTexture();
+        for (let i = 3; i < pixels.length; i += 4) if (pixels[i] > 0) return true;
+        return false;
+      })(),
       glError: window.__painter.wgl.gl.getError(),
     }));
     assert.deepEqual(errors, []);
-    assert.equal(result.active, true);
+    assert.equal(result.painted, true);
     assert.equal(result.glError, 0);
     console.log(JSON.stringify({ story: 'story-2026-09-08-4-frames.json', ...result }));
     await page.close();

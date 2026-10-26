@@ -16,7 +16,6 @@ class StoryToolsUI {
     this.progressFill = document.getElementById('story-player-progress-fill');
     this.coverage = document.getElementById('story-player-coverage');
     this.playhead = document.getElementById('story-playhead-label');
-    this.stopDecision = document.getElementById('story-stop-decision');
     this.gaps = document.getElementById('story-player-gaps');
     this.demoSelect = document.getElementById('story-demo-select');
     this.demoRefresh = document.getElementById('story-demo-refresh');
@@ -24,6 +23,10 @@ class StoryToolsUI {
     this.demoStatus = document.getElementById('story-demo-status');
     this.demoMeta = document.getElementById('story-demo-meta');
     this.demoCatalog = typeof StoryDemoCatalog === 'function' ? new StoryDemoCatalog() : null;
+    this.recentCard = document.getElementById('story-recent-card');
+    this.recentList = document.getElementById('story-recent-list');
+    this.recentStore = typeof StoryRecentStore === 'function' ? new StoryRecentStore() : null;
+    this.recentEntries = [];
     this.demoOpened = false;
     this.demoRefreshing = false;
     this.demoRunning = false;
@@ -35,6 +38,7 @@ class StoryToolsUI {
     this._thicknessFrame = null;
     this._bind();
     this.unsubscribe = controller.subscribe((view) => this.render(view));
+    this._refreshRecent();
   }
 
   _bind() {
@@ -78,6 +82,10 @@ class StoryToolsUI {
       });
     }
 
+    this._on('story-recent-clear', 'click', async () => {
+      if (this.recentStore) await this.recentStore.clear();
+      this._refreshRecent();
+    });
     this._on('story-replace-file', 'click', choose);
     this._on('story-remove-file', 'click', () => this._safe(() => this.controller.removeFile()));
     this._on('story-remove-background', 'click', () => this.controller.removeBackground());
@@ -111,9 +119,6 @@ class StoryToolsUI {
     this._on('story-play-pause', 'click', () => this._togglePlayback());
     this._on('story-restart', 'click', () => this._safe(() => this.controller.restart()));
     this._on('story-stop', 'click', () => this._safe(() => this.controller.stop()));
-    this._on('story-restore-baseline', 'click', () => this._safe(() => this.controller.restoreBaseline()));
-    this._on('story-keep-partial', 'click', () => this.controller.keepResult());
-    this._on('story-keep-result', 'click', () => this.controller.keepResult());
     this._on('story-paint-remaining', 'click', () => this._safe(() => this.controller.playEarliestRemaining()));
     this._on('story-previous-frame', 'click', () => this._safe(() => this.controller.previousUnpaintedFrame()));
     this._on('story-next-frame', 'click', () => this._safe(() => this.controller.nextFrame()));
@@ -122,10 +127,104 @@ class StoryToolsUI {
   async _load(file) {
     try {
       const result = await this.controller.loadFile(file);
-      if ((!result || result.kind !== 'background') && this.toolPanel) {
+      const isBackground = result && result.kind === 'background';
+      // Switch tabs FIRST: remembering is bookkeeping, and making the visible
+      // response wait on an IndexedDB write would delay the Player tab behind
+      // storage that may be slow, or blocked and never settle at all.
+      if (!isBackground && this.toolPanel) {
         this.toolPanel.selectExtensionTab('player', true);
       }
+      // Only stories go in the list: a PNG background is not something the
+      // player can reopen, and it would push a real story out of three slots.
+      if (!isBackground) await this._remember(file);
     } catch (_) { /* controller state renders the contextual error */ }
+  }
+
+  /* Store the text AFTER the controller accepted it, so the list never offers
+   * a file that fails to open. */
+  async _remember(file) {
+    if (!this.recentStore || !file || typeof file.text !== 'function') return;
+    try {
+      await this.recentStore.remember(file.name, file.size, await file.text());
+    } catch (_) { /* a full or blocked quota must not fail the load */ }
+    this._refreshRecent();
+  }
+
+  /*
+   * Reopen a stored story.
+   *
+   * The controller's own loadFile() is reused by rebuilding a File from the
+   * stored text, so a reopened story travels exactly the path a picked one
+   * does -- same preflight, same errors, same recency bump. Reconstructing the
+   * File rather than calling parse() directly is what keeps those paths from
+   * drifting apart.
+   */
+  async _openRecent(id) {
+    if (!this.recentStore) return;
+    let entry = null;
+    try {
+      entry = await this.recentStore.read(id);
+    } catch (_) { /* treated as missing below */ }
+    if (!entry) {
+      // Evicted by the browser, or cleared in another tab.
+      await this.recentStore.forget(id);
+      this._refreshRecent();
+      return;
+    }
+    await this._load(new File([entry.text], entry.name, { type: 'application/json' }));
+  }
+
+  async _refreshRecent() {
+    if (!this.recentStore) {
+      if (this.recentCard) this.recentCard.hidden = true;
+      return;
+    }
+    let entries = [];
+    try {
+      entries = await this.recentStore.list();
+    } catch (_) { entries = []; }
+    this.recentEntries = entries;
+    this._renderRecent();
+  }
+
+  _renderRecent() {
+    if (!this.recentCard || !this.recentList) return;
+    const entries = this.recentEntries || [];
+    this.recentCard.hidden = entries.length === 0;
+    this.recentList.textContent = '';
+    for (const entry of entries) {
+      const item = document.createElement('li');
+      const button = document.createElement('button');
+      button.type = 'button';
+      // textContent, never innerHTML: the name comes from a user's filesystem.
+      const name = document.createElement('span');
+      name.className = 'story-recent-name';
+      name.textContent = entry.name;
+      const meta = document.createElement('span');
+      meta.className = 'story-recent-meta';
+      meta.textContent = StoryToolsUI.formatRecentMeta(entry);
+      button.append(name, meta);
+      button.addEventListener('click', () => this._openRecent(entry.id));
+      item.append(button);
+      this.recentList.append(item);
+    }
+  }
+
+  static formatRecentMeta(entry) {
+    const megabytes = (Number(entry.size) || 0) / (1024 * 1024);
+    const size = megabytes >= 0.1 ? `${megabytes.toFixed(1)} MB`
+      : `${Math.max(1, Math.round((Number(entry.size) || 0) / 1024))} KB`;
+    return `${size} · ${StoryToolsUI.formatRecentAge(entry.openedAt)}`;
+  }
+
+  static formatRecentAge(openedAt, now = Date.now()) {
+    const minutes = Math.floor((now - (Number(openedAt) || 0)) / 60000);
+    if (!Number.isFinite(minutes) || minutes < 1) return 'just now';
+    if (minutes < 60) return `${minutes} min ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours} h ago`;
+    const days = Math.floor(hours / 24);
+    return days === 1 ? 'yesterday' : `${days} days ago`;
   }
 
   _on(id, eventName, handler) {
@@ -178,14 +277,7 @@ class StoryToolsUI {
 
   async _runDemo() {
     if (!this._demoAvailable() || this.demoRunning || this.demoRefreshing || !this.demoSelect.value || !this.demoCatalog.index) return;
-    if (!['empty', 'ready', 'file-error'].includes(this.controller.state)) {
-      this.demoMessage = 'Finish or resolve the current playback in Player before running another demo.';
-      this.demoError = true;
-      this._renderDemo();
-      return;
-    }
     const slug = this.demoSelect.value;
-    const previousModel = this.controller.model;
     const serial = ++this.demoRunSerial;
     this.demoRunning = true;
     this.demoMessage = 'Loading and validating story…';
@@ -194,10 +286,6 @@ class StoryToolsUI {
     try {
       const loaded = await this.demoCatalog.fetchStory(slug);
       if (serial !== this.demoRunSerial || slug !== this.demoSelect.value) return;
-      if (this.controller.model !== previousModel ||
-          !['empty', 'ready', 'file-error'].includes(this.controller.state)) {
-        throw new Error('Finish or resolve the current playback in Player before running another demo.');
-      }
       const entry = this.demoCatalog.index.stories.find((story) => story.slug === slug);
       loaded.summary.fileName = entry?.title || `${slug}.json`;
       loaded.summary.slug = slug;
@@ -258,13 +346,13 @@ class StoryToolsUI {
           ? view.backgroundError.message
           : busy
             ? 'Reading and validating file…'
-            : view.state === 'file-error' && view.error
-              ? view.error.message
+            : view.fileError
+              ? view.fileError.message
               : hasFile ? 'Story file is ready for playback.'
                 : background ? 'PNG background is ready for painting.' : '';
       this.fileStatus.classList.toggle(
         'is-error',
-        view.state === 'file-error' || !!view.backgroundError
+        !!view.fileError || !!view.backgroundError
       );
     }
     if (summary) this._renderSummary(summary);
@@ -295,7 +383,7 @@ class StoryToolsUI {
     for (const playPause of [document.getElementById('story-play-pause')]) {
       if (!playPause) continue;
       playPause.textContent = playPauseText;
-      playPause.disabled = ['stop-decision', 'player-error'].includes(view.state);
+      playPause.disabled = false;
     }
     const stop = document.getElementById('story-stop');
     if (stop) stop.disabled = !['playing', 'paused'].includes(view.state);
@@ -312,7 +400,7 @@ class StoryToolsUI {
     const colorModel = document.getElementById('story-color-model');
     if (colorModel) {
       colorModel.value = view.colorModel;
-      colorModel.disabled = !['empty', 'ready', 'file-error'].includes(view.state);
+      colorModel.disabled = false;
     }
     if (speed && Number(speed.value) !== view.speed) speed.value = String(view.speed);
     const thickness = document.getElementById('story-thickness');
@@ -320,16 +408,8 @@ class StoryToolsUI {
     this._renderThicknessValue(view.thickness);
     document.querySelectorAll('input[name="story-canvas"]').forEach((input) => {
       input.checked = input.value === view.canvasPolicy;
-      input.disabled = ['playing', 'paused', 'stop-decision', 'completed', 'completed-with-gaps'].includes(view.state);
+      input.disabled = false;
     });
-    const showResultDecision = ['stop-decision', 'completed', 'player-error'].includes(view.state);
-    if (this.stopDecision) this.stopDecision.hidden = !showResultDecision;
-    const resultTitle = document.getElementById('story-result-decision-title');
-    const keepPartial = document.getElementById('story-keep-partial');
-    if (resultTitle) resultTitle.textContent = view.state === 'completed'
-      ? 'Playback complete. Keep the result?'
-      : view.state === 'player-error' ? 'Playback failed. Keep the painted part?' : 'Keep the partial painting?';
-    if (keepPartial) keepPartial.textContent = view.state === 'completed' ? 'Keep result' : 'Keep partial';
     if (this.gaps) this.gaps.hidden = view.state !== 'completed-with-gaps';
   }
 
@@ -363,7 +443,6 @@ class StoryToolsUI {
     if (view.state === 'completed-with-gaps') {
       return `${view.progress.pendingRanges || view.pendingRanges.length} unpainted ranges remain.`;
     }
-    if (view.state === 'stop-decision') return 'Playback stopped. Restore the canvas or keep the partial result.';
     if (view.state === 'player-error') return view.error ? view.error.message : 'Playback failed.';
     if (view.state === 'ready' && view.error) return `Could not start playback: ${view.error.message}`;
     return 'Ready.';

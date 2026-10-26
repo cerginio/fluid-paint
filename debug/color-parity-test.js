@@ -135,7 +135,7 @@ function loadGlobals(files, names) {
 
 const sut = loadGlobals(
   ['common.js', 'app/ui/ryb.js'],
-  ['hsvToRyb', 'hsvToPigmentRgb', 'rybToRgbDisplay', 'cssRgb', 'assertMatchesShader'],
+  ['hsvToRyb', 'hsvToPigmentRgb', 'rybToRgbDisplay', 'rgbToPickerPigment', 'cssRgb', 'assertMatchesShader'],
 );
 
 const to8 = (rgb) => rgb.map((c) => Math.round(Math.max(0, Math.min(1, c)) * 255));
@@ -286,6 +286,18 @@ group('[composition] display is exactly rybToRgbDisplay(hsvToRyb(...))');
 }
 
 group('[cube] the JS corners still match the production shaders');
+
+group('[picker inverse] exact RGB maps back to the displayed palette');
+for (const additive of [false, true]) {
+  let worst = 0;
+  for (const pigment of [[0.8, 0.2, 0.1], [0.15, 0.7, 0.4], [0.45, 0.35, 0.75]]) {
+    const rgb = sut.rybToRgbDisplay(pigment, additive);
+    const inverse = sut.rgbToPickerPigment(rgb, additive);
+    worst = Math.max(worst, maxErr(to8(sut.rybToRgbDisplay(inverse, additive)), to8(rgb)));
+  }
+  check(`${additive ? 'Digital' : 'Natural'} inverse reproduces reachable RGB`, worst <= 2,
+    `worst deviation ${worst}/255`);
+}
 
 /* painting.frag's v111 is the u_pigmentBlack uniform since the black-pigment
  * flag, so its value is checked against renderer.js -- where both the default

@@ -589,6 +589,14 @@ class Paint {
         // local patch, marked LOCAL PATCH in the file and recorded in
         // docs/UI-COMPONENTS.md.
         this.pointerDispatcher = new PointerDispatcher(canvas);
+        canvas.addEventListener('pointerdown', (event) => {
+            if (!event.altKey || event.button !== 0 || event.pointerType !== 'mouse') return;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            this.pickCanvasColor(event.clientX, event.clientY).catch((error) => {
+                console.error('Could not sample canvas color:', error);
+            });
+        }, { capture: true });
 
         this.pointerDispatcher
             .on('panstart', this.onGestureStart)
@@ -2076,6 +2084,14 @@ class Paint {
         if (this.paletteMode === mode) return false;
         this.paletteMode = mode;
         this.modelButtons?.setIndex(mode === 'digital' ? 1 : 0);
+        if (this.exactPaintRgb) {
+            const rgb = this.exactPaintRgb.slice();
+            const hsva = this._rgbToHsva(rgbToPickerPigment(rgb, mode === 'digital'));
+            this.brushColorHSVA.splice(0, 4, ...hsva);
+            this.colorControl?.setHSVA(hsva);
+            this.colorControl?.setExactRgb(rgb);
+            this.toolPanel?.setHue(hsva[0]);
+        }
         this.colorControl?.setAdditive();
         this.toolPanel?.paintHueStripe(mode === 'digital');
         this.needsRedraw = true;
@@ -2097,6 +2113,37 @@ class Paint {
         return [hue, max ? delta / max : 0, max, alpha];
     }
 
+    /** Alt+click samples the visible canvas in either palette mode. */
+    async pickCanvasColor(clientX, clientY) {
+        const rect = this.canvas.getBoundingClientRect();
+        if (!rect.width || !rect.height) return false;
+        const x = (clientX - rect.left) * this.canvas.width / rect.width;
+        const y = (clientY - rect.top) * this.canvas.height / rect.height;
+        const world = this._toWorld(x, y);
+        const painting = this.paintingRectangle;
+        const u = (world.x - painting.left) / painting.width;
+        const v = (world.y - painting.bottom) / painting.height;
+        if (u < 0 || u >= 1 || v < 0 || v >= 1) return false;
+
+        // Finish an in-flight story stroke before reading the rendered paint.
+        if (this.storyPlaybackController) await this.storyPlaybackController.yieldToManualInput();
+        const width = Math.max(1, Math.round(painting.width));
+        const height = Math.max(1, Math.round(painting.height));
+        const pixels = this.engine.exportPixels({
+            width, height, resolutionScale: this.resolutionScale,
+            colorModel: FluidEngine.COLOR_MODEL.RGB,
+        });
+        // SAVE renders the painting vertically flipped for PNG encoding;
+        // readPixels is bottom-up, so its row zero contains the painting top.
+        const row = height - 1 - Math.min(height - 1, Math.floor(v * height));
+        const offset = (row * width +
+            Math.min(width - 1, Math.floor(u * width))) * 4;
+        const hex = '#' + Array.from(pixels.subarray(offset, offset + 3), (channel) =>
+            channel.toString(16).padStart(2, '0')).join('');
+        this.setPaintColor(hex);
+        return hex.toUpperCase();
+    }
+
     setPaintColor(value) {
         if (value === 'white' || value === 'black') {
             this.adhocPaintColor = value;
@@ -2108,7 +2155,8 @@ class Paint {
         const hex = typeof value === 'string' ? value : value?.hex;
         if (hex !== undefined) {
             const rgb = PaintColorAdapter.hexRgb(hex);
-            const normalized = this._rgbToHsva(rgb);
+            const normalized = this._rgbToHsva(
+                rgbToPickerPigment(rgb, this.paletteMode === 'digital'));
             this.brushColorHSVA.splice(0, 4, ...normalized);
             this.adhocPaintColor = null;
             this.exactPaintRgb = rgb.slice();

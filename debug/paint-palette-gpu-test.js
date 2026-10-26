@@ -389,11 +389,14 @@ async function exportState(page) {
         p.colorControl.picker.color.alpha = .4;
         check(same(p._paintRgb(), rgb), 'endpoint alpha');
       }
-      p.setPaintColor('#123456'); p.colorControl.picker.color.hue = 90;
+      p.setPaintColor('#123456'); p.colorControl.picker.color.hue =
+        (p.colorControl.picker.color.hue + 90) % 360;
       check(p.exactPaintRgb === null && p.adhocPaintColor === null, 'H change replaces exact RGB');
-      p.setPaintColor('#123456'); p.colorControl.picker.color.saturation = 60;
+      p.setPaintColor('#123456'); p.colorControl.picker.color.saturation =
+        p.colorControl.picker.color.saturation > 50 ? 20 : 80;
       check(p.exactPaintRgb === null, 'S change replaces exact RGB');
-      p.setPaintColor('#123456'); p.colorControl.picker.color.value = 80;
+      p.setPaintColor('#123456'); p.colorControl.picker.color.value =
+        p.colorControl.picker.color.value > 50 ? 20 : 80;
       check(p.exactPaintRgb === null, 'V change replaces exact RGB');
       api.dispose();
       return { pass: true, previews: draws, frozenStroke: frozen,
@@ -421,16 +424,17 @@ async function exportState(page) {
       const expected = PaintColorAdapter.encodeRgb(PaintColorAdapter.hexRgb('#3B82F6'));
       await c.play();
       const completed = c.state;
-      const refused = c.setColorModel('digital') === false;
+      const changed = c.setColorModel('digital') === true;
       await c.restart();
       const restarted = c.state;
       await c.loadModel(model); c.setColorModel('digital'); await c.play(); await c.restart();
       p.engine.beginStroke = begin;
-      if (!refused || colors.length !== 4 || colors.some((color) => JSON.stringify(color) !== JSON.stringify(expected)))
-        throw new Error('Story HEX/restart/restrictions failed: ' + JSON.stringify({ colors, refused, completed, restarted }));
-      return { pass: true, completed, restarted, refused, colors };
+      if (!changed || colors.length !== 4 * TilecraftStrokePlayer._spotPaintLoad() ||
+          colors.some((color) => JSON.stringify(color) !== JSON.stringify(expected)))
+        throw new Error('Story HEX/restart failed: ' + JSON.stringify({ colors, changed, completed, restarted }));
+      return { pass: true, completed, restarted, changed, colors };
     });
-    assert.equal(await ui.page.locator('#story-color-model').isDisabled(), true);
+    assert.equal(await ui.page.locator('#story-color-model').isEnabled(), true);
     await ui.page.evaluate(() => window.__painter.toolPanel.selectExtensionTab('player'));
     await ui.page.click('#panel-extension-toggle');
     await ui.page.click('#story-player-tab');

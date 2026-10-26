@@ -137,18 +137,31 @@ const model = { frames: Array.from({ length: 8 }, (_, n) => ({ id: n + 1 })), la
     });
     await probe.locator('#story-demo-run').click();
     await page.waitForFunction(() => document.getElementById('app').contentWindow.__painter?.storyPlaybackController.state === 'completed');
-    await probe.locator('#story-keep-partial').click();
     await probe.locator('#story-speed').selectOption('0.25');
     await probe.locator('#story-demo-tab').click();
     await probe.locator('#story-demo-run').click();
     await page.waitForFunction(() => document.getElementById('app').contentWindow.__painter?.storyPlaybackController.state === 'playing');
+    await page.evaluate(() => {
+      const painter = document.getElementById('app').contentWindow.__painter;
+      painter.__storyClears = 0;
+      const clear = painter.engine.clear.bind(painter.engine);
+      painter.engine.clear = (...args) => { painter.__storyClears++; return clear(...args); };
+    });
+    await probe.locator('#story-demo-tab').click();
+    await probe.locator('#story-demo-select').selectOption(slugs[2]);
+    await probe.locator('#story-demo-run').click();
+    await page.waitForFunction((slug) => {
+      const controller = document.getElementById('app').contentWindow.__painter?.storyPlaybackController;
+      return controller?.modelSummary?.slug === slug && controller.state === 'playing';
+    }, slugs[2]);
+    assert.equal(await page.evaluate(() => document.getElementById('app').contentWindow.__painter.__storyClears), 0,
+      'running another demo keeps partial painting in the default overlay mode');
     await probe.locator('#story-play-pause').click();
     assert.equal(await probe.locator('#story-player-status').textContent(), 'Playback paused.');
     await probe.locator('#story-play-pause').click();
     await page.waitForFunction(() => document.getElementById('app').contentWindow.__painter?.storyPlaybackController.state === 'playing');
     await probe.locator('#story-stop').click();
-    await page.waitForFunction(() => document.getElementById('app').contentWindow.__painter?.storyPlaybackController.state === 'stop-decision');
-    await probe.locator('#story-restore-baseline').click();
+    await page.waitForFunction(() => document.getElementById('app').contentWindow.__painter?.storyPlaybackController.state === 'ready');
     assert.equal(await probe.locator('#story-player-status').textContent(), 'Ready.');
     await page.evaluate(() => {
       const controller = document.getElementById('app').contentWindow.__painter.storyPlaybackController;

@@ -33,6 +33,7 @@ class Brush {
     /* Drawn once per press by initialize(), never per frame, per bristle or
      * per splat -- a redraw mid-stroke would make one press wander. */
     this.strokeVariation = 0;
+    this.randomizeBristles = false;
 
     /* Bristle footprint for the current press. Like strokeVariation this is
      * brush state, not per-draw state: setbristles runs again every simulation
@@ -314,6 +315,7 @@ class Brush {
       .uniform1f('u_verticesPerBristle', VERTICES_PER_BRISTLE)
       .uniform1f('u_jitter', BRISTLE_JITTER)
       .uniform1f('u_strokeVariation', this.strokeVariation)
+      .uniform1f('u_randomizeBristles', this.randomizeBristles ? 1 : 0)
       .uniform2f('u_resolution', this.maxBristleCount, VERTICES_PER_BRISTLE)
       .uniformTexture('u_randomsTexture', 2, wgl.TEXTURE_2D, this.randomsTexture))
       .vertexAttribPointer(
@@ -364,6 +366,7 @@ class Brush {
         .uniform1f('u_verticesPerBristle', VERTICES_PER_BRISTLE)
         .uniform1f('u_jitter', BRISTLE_JITTER)
         .uniform1f('u_strokeVariation', this.strokeVariation)
+        .uniform1f('u_randomizeBristles', this.randomizeBristles ? 1 : 0)
         .uniform2f('u_resolution', this.maxBristleCount, VERTICES_PER_BRISTLE)
         .uniformTexture('u_randomsTexture', 2, wgl.TEXTURE_2D, this.randomsTexture))
         .vertexAttribPointer(
@@ -460,6 +463,7 @@ class Brush {
       .uniform1f('u_jitter', BRISTLE_JITTER)
       .uniform1f('u_verticesPerBristle', VERTICES_PER_BRISTLE)
       .uniform1f('u_strokeVariation', this.strokeVariation)
+      .uniform1f('u_randomizeBristles', this.randomizeBristles ? 1 : 0)
       .uniform2f('u_resolution', this.maxBristleCount, VERTICES_PER_BRISTLE)
       .uniformTexture('u_randomsTexture', 2, wgl.TEXTURE_2D, this.randomsTexture))
       .vertexAttribPointer(

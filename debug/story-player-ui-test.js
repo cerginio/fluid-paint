@@ -328,8 +328,14 @@ const server = http.createServer((request, response) => {
     assert.equal(await page.locator('#story-playhead-label').textContent(), 'Frame — · Group —');
     assert.equal(await page.locator('#story-thickness').getAttribute('min'), '0.1',
       'thickness range starts at 0.1');
+    assert.equal(await page.locator('#story-thickness').getAttribute('max'), '2.5',
+      'thickness range reaches 2.5');
     assert.equal(await page.locator('#story-thickness').inputValue(), '1',
       'thickness multiplier defaults to 1');
+    await page.locator('#story-thickness').fill('2.5');
+    await page.waitForFunction(() => window.__painter.storyPlaybackController.thickness === 2.5);
+    await page.locator('#story-thickness').fill('1');
+    await page.waitForFunction(() => window.__painter.storyPlaybackController.thickness === 1);
     await page.locator('#story-color-model').selectOption('digital');
     assert.equal(await page.evaluate(() => window.__painter.storyPlaybackController.colorModel), 'digital',
       'Digital import mode can be chosen before playback');
@@ -340,8 +346,8 @@ const server = http.createServer((request, response) => {
     })), { min: 0.1, max: 0.9 }, 'fluidity slider covers the 0.1–0.9 range');
     assert.equal(await page.locator('#story-player-gaps').isHidden(), true,
       'remaining-ranges callout is hidden while the story is ready');
-    assert.equal(await page.locator('#story-stop-decision').isHidden(), true,
-      'result-decision callout is hidden while the story is ready');
+    assert.equal(await page.locator('input[name="story-canvas"][value="overlay"]').isChecked(), true,
+      'painting over the current canvas is the default');
     const optionStyle = await page.locator('#story-speed option').first().evaluate((option) => {
       const style = getComputedStyle(option);
       return { color: style.color, backgroundColor: style.backgroundColor };
@@ -385,8 +391,8 @@ const server = http.createServer((request, response) => {
       'manual pointer targets never leak into Story-owned brush updates');
     assert.equal(await page.locator('#story-player-gaps').isHidden(), true,
       'remaining-ranges callout stays hidden during playback');
-    assert.equal(await page.locator('#story-stop-decision').isHidden(), true,
-      'result-decision callout stays hidden during playback');
+    assert.equal(await page.locator('input[name="story-canvas"][value="replace"]').isEnabled(), true,
+      'canvas policy remains selectable during playback');
     const panelBeforeExtensionDrag = await page.locator('#ui').boundingBox();
     const extensionGrip = await page.locator('#panel-extension-grip').boundingBox();
     await page.mouse.move(extensionGrip.x + extensionGrip.width / 2, extensionGrip.y + extensionGrip.height / 2);
@@ -433,7 +439,7 @@ const server = http.createServer((request, response) => {
     });
     assert.equal(await page.locator('#panel-body').evaluate((element) => element.inert), false,
       'story playback never makes paint controls inert');
-    await page.waitForFunction(() => window.__painter.engine.strokeActive);
+    await page.waitForFunction(() => window.__painter.storyPlaybackController.progress.paintedOperations > 0);
     const disabledTouch = await page.evaluate(async () => {
       const painter = window.__painter;
       painter.setManualPaintingEnabled(false);
@@ -447,8 +453,8 @@ const server = http.createServer((request, response) => {
       painter.setManualPaintingEnabled(true);
       return result;
     });
-    assert.deepEqual(disabledTouch, { state: 'playing', strokeActive: true, error: null },
-      'disabled touch cannot close a player-owned stroke or enter player-error');
+    assert.deepEqual(disabledTouch, { state: 'playing', strokeActive: false, error: null },
+      'disabled touch cannot interrupt the continuous path pass or enter player-error');
     const manualTakeover = await page.evaluate(async () => {
       const painter = window.__painter;
       await painter.storyPlaybackController.yieldToManualInput();
@@ -480,9 +486,29 @@ const server = http.createServer((request, response) => {
     await page.click('#story-play-pause');
     await page.waitForFunction(() => window.__painter.storyPlaybackController.state === 'playing');
     await page.click('#story-stop');
-    await page.waitForFunction(() => window.__painter.storyPlaybackController.state === 'stop-decision');
-    await page.click('#story-restore-baseline');
     await page.waitForFunction(() => window.__painter.storyPlaybackController.state === 'ready');
+    assert.equal(await page.locator('#story-stop-decision').count(), 0,
+      'stopping keeps partial paint without a decision dialog');
+    await page.click('#story-play-pause');
+    await page.waitForFunction(() => window.__painter.storyPlaybackController.state === 'playing');
+    await page.setInputFiles('#story-file-input', fixture);
+    await page.waitForFunction(() => window.__painter.storyPlaybackController.state === 'ready');
+    assert.equal(await page.evaluate(() => window.__painter.storyPlaybackController.canvasPolicy), 'overlay',
+      'loading another file during playback retains the overlay policy');
+    await page.evaluate(() => {
+      const painter = window.__painter;
+      painter.__storyClears = 0;
+      const clear = painter.engine.clear.bind(painter.engine);
+      painter.engine.clear = (...args) => { painter.__storyClears++; return clear(...args); };
+    });
+    await page.locator('input[name="story-canvas"][value="replace"]').check();
+    await page.click('#story-play-pause');
+    await page.waitForFunction(() => window.__painter.storyPlaybackController.state === 'playing');
+    assert.equal(await page.evaluate(() => window.__painter.__storyClears), 1,
+      'replace policy clears the canvas on the next run');
+    await page.click('#story-stop');
+    await page.waitForFunction(() => window.__painter.storyPlaybackController.state === 'ready');
+    await page.locator('input[name="story-canvas"][value="overlay"]').check();
 
     await page.evaluate(async () => {
       const model = {
@@ -498,8 +524,8 @@ const server = http.createServer((request, response) => {
     await page.selectOption('#story-speed', '16');
     await page.click('#story-play-pause');
     await page.waitForFunction(() => window.__painter.storyPlaybackController.state === 'completed');
-    assert.equal(await page.locator('#story-stop-decision').isVisible(), true,
-      'completed playback requires an explicit keep or restore decision');
+    assert.equal(await page.locator('#story-stop-decision').count(), 0,
+      'completed playback keeps paint without a decision dialog');
     assert.equal(await page.locator('#story-player-gaps').isHidden(), true,
       'completed playback does not show the mutually exclusive gaps callout');
     assert.equal(await page.evaluate(() => window.__painter.storyPlaybackController.canPaintManually), true,
@@ -564,6 +590,148 @@ const server = http.createServer((request, response) => {
 
     assert.deepEqual(errors, []);
     assert.equal(await page.evaluate(() => window.__painter.wgl.gl.getError()), 0);
+
+    const parameterPage = await browser.newPage();
+    await parameterPage.goto(`http://127.0.0.1:${server.address().port}/index.html?debug=none&pathMode=bristle&spotPaintLoad=2&pathPaintLoad=3&spotScatter=0.25&pathJoinCorrection=1&spotBristleVariation=0`);
+    await parameterPage.waitForFunction(() => window.__painter?.storyPlaybackController);
+    assert.deepEqual(await parameterPage.evaluate(() => {
+      const controller = window.__painter.storyPlaybackController;
+      return [controller.pathMode, controller.spotPaintLoad,
+        controller.pathPaintLoad, controller.spotScatter, controller.pathJoinCorrection,
+        controller.spotBristleVariation];
+    }), ['bristle', 2, 3, 0.25, true, false], 'URL painting parameters reach the controller');
+    const pickerMarkers = await parameterPage.evaluate(() => {
+      const painter = window.__painter;
+      const results = [];
+      for (const mode of ['natural', 'digital']) {
+        const source = hsvToPigmentRgb(0.12, 0.72, 0.83, mode === 'digital');
+        const hex = '#' + source.map((channel) => Math.round(channel * 255)
+          .toString(16).padStart(2, '0')).join('');
+        painter.setPaletteMode(mode);
+        painter.setPaintColor(hex);
+        const hsva = painter.brushColorHSVA;
+        const markerRgb = hsvToPigmentRgb(hsva[0], hsva[1], hsva[2], mode === 'digital');
+        const marker = painter.colorControl.picker.color.hsv;
+        results.push({ mode, error: Math.max(...source.map((channel, index) =>
+          Math.abs(channel - markerRgb[index]))),
+        markerMatches: Math.abs(marker.h / 360 - hsva[0]) < 1e-4 &&
+          Math.abs(marker.s / 100 - hsva[1]) < 1e-4 &&
+          Math.abs(marker.v / 100 - hsva[2]) < 1e-4 });
+      }
+      painter.setPaintColor('#AF681D');
+      painter.setPaletteMode('natural');
+      const naturalHue = painter.brushColorHSVA[0];
+      const naturalMarker = hsvToPigmentRgb(...painter.brushColorHSVA.slice(0, 3), false);
+      painter.setPaletteMode('digital');
+      const digitalHue = painter.brushColorHSVA[0];
+      const digitalMarker = hsvToPigmentRgb(...painter.brushColorHSVA.slice(0, 3), true);
+      return { results, naturalHue, digitalHue, naturalMarker, digitalMarker,
+        exact: painter.exactPaintRgb };
+    });
+    assert.ok(pickerMarkers.results.every((result) => result.error < 0.025 && result.markerMatches),
+      `picker markers follow both colour spaces: ${JSON.stringify(pickerMarkers.results)}`);
+    assert.ok(Math.abs(pickerMarkers.naturalHue - pickerMarkers.digitalHue) > 0.05,
+      'changing palette remaps the marker of an exact RGB selection');
+    assert.deepEqual(pickerMarkers.exact.map((channel) => Math.round(channel * 255)), [175, 104, 29],
+      'palette switching preserves the exact picked paint colour');
+    assert.ok([pickerMarkers.naturalMarker, pickerMarkers.digitalMarker].every((marker) =>
+      marker.every((channel, index) => Math.abs(channel - pickerMarkers.exact[index]) < 0.015)),
+    'brown sampled RGB appears at the matching wheel point in both palettes');
+    const backgroundSamples = await parameterPage.evaluate(async () => {
+      const painter = window.__painter;
+      const background = document.createElement('canvas');
+      background.width = 2;
+      background.height = 2;
+      const context = background.getContext('2d');
+      context.fillStyle = '#0000ff';
+      context.fillRect(0, 0, 2, 1);
+      context.fillStyle = '#ff0000';
+      context.fillRect(0, 1, 2, 1);
+      painter.engine.setBackgroundImage(background);
+      const sampleAt = async (fractionY) => {
+        const painting = painter.paintingRectangle;
+        const screen = painter.viewport.worldToScreen(
+          painting.left + painting.width / 2,
+          painting.bottom + painting.height * fractionY);
+        const css = painter.viewport.screenToCss(screen.x, screen.y);
+        const rect = painter.canvas.getBoundingClientRect();
+        return painter.pickCanvasColor(rect.left + css.x, rect.top + css.y);
+      };
+      return [await sampleAt(0.25), await sampleAt(0.75)];
+    });
+    assert.deepEqual(backgroundSamples, ['#FF0000', '#0000FF'],
+      'Alt+click coordinates match distinct bottom and top canvas colours');
+    const wetSample = await parameterPage.evaluate(async () => {
+      const painter = window.__painter;
+      const painting = painter.paintingRectangle;
+      const point = { x: painting.left + painting.width / 2,
+        y: painting.bottom + painting.height * 0.75 };
+      painter.engine.paintPathSegment({ from: point, to: point,
+        fromRadius: 36, toRadius: 36, paintingRectangle: painting,
+        color: PaintColorAdapter.strokeColor([0, 1, 0], 1), paintLoad: 1 });
+      const screen = painter.viewport.worldToScreen(point.x, point.y);
+      const css = painter.viewport.screenToCss(screen.x, screen.y);
+      const rect = painter.canvas.getBoundingClientRect();
+      return painter.pickCanvasColor(rect.left + css.x, rect.top + css.y);
+    });
+    const wetRgb = [1, 3, 5].map((offset) => parseInt(wetSample.slice(offset, offset + 2), 16) / 255);
+    assert.ok(wetRgb[1] > wetRgb[0] + 0.3 && wetRgb[1] > wetRgb[2] + 0.3,
+      'unbaked wet green paint is sampled instead of the blue background');
+    for (const mode of ['natural', 'digital']) {
+      const expected = await parameterPage.evaluate((palette) => {
+        const painter = window.__painter;
+        painter.setPaletteMode(palette);
+        painter.setPaintColor('#ff0000');
+        const rect = painter.canvas.getBoundingClientRect();
+        const clientX = rect.left + rect.width / 2;
+        const clientY = rect.top + rect.height / 2;
+        const world = painter._toWorld(painter.canvas.width / 2, painter.canvas.height / 2);
+        const painting = painter.paintingRectangle;
+        const width = Math.round(painting.width), height = Math.round(painting.height);
+        const x = Math.floor((world.x - painting.left) / painting.width * width);
+        const y = Math.floor((world.y - painting.bottom) / painting.height * height);
+        const pixels = painter.engine.exportPixels({ width, height, resolutionScale: 1,
+          colorModel: FluidEngine.COLOR_MODEL.RGB });
+        const offset = ((height - 1 - y) * width + x) * 4;
+        painter.canvas.dispatchEvent(new PointerEvent('pointerdown', {
+          bubbles: true, cancelable: true, altKey: true, button: 0,
+          pointerType: 'mouse', clientX, clientY,
+        }));
+        return Array.from(pixels.slice(offset, offset + 3));
+      }, mode);
+      await parameterPage.waitForFunction((rgb) =>
+        JSON.stringify(window.__painter.exactPaintRgb?.map((value) => Math.round(value * 255))) === JSON.stringify(rgb), expected);
+      assert.equal(await parameterPage.evaluate(() => window.__painter.engine.strokeActive), false,
+        `Alt+click samples ${mode} without painting`);
+    }
+    await parameterPage.setInputFiles('#story-file-input', fixture);
+    await parameterPage.waitForFunction(() => window.__painter.storyPlaybackController.state === 'ready');
+    await parameterPage.evaluate(() => {
+      const painter = window.__painter;
+      painter.storyPlaybackController.setSpeed(0.25);
+      painter.storyPlaybackController.play();
+    });
+    await parameterPage.waitForFunction(() => window.__painter.storyPlaybackController.state === 'playing');
+    await parameterPage.evaluate(() => {
+      const canvas = window.__painter.canvas;
+      const rect = canvas.getBoundingClientRect();
+      canvas.dispatchEvent(new PointerEvent('pointerdown', {
+        bubbles: true, cancelable: true, altKey: true, button: 0,
+        pointerType: 'mouse', clientX: rect.left + rect.width / 2,
+        clientY: rect.top + rect.height / 2,
+      }));
+    });
+    await parameterPage.waitForFunction(() => window.__painter.storyPlaybackController.state === 'paused');
+    assert.equal(await parameterPage.evaluate(() => window.__painter.engine.strokeActive), false,
+      'Alt+click pauses story playback and leaves the engine idle');
+    const canvasBounds = await parameterPage.locator('#canvas-cell canvas').boundingBox();
+    await parameterPage.keyboard.down('Alt');
+    await parameterPage.mouse.click(canvasBounds.x + canvasBounds.width / 2,
+      canvasBounds.y + canvasBounds.height / 2);
+    await parameterPage.keyboard.up('Alt');
+    assert.equal(await parameterPage.evaluate(() => window.__painter.manualStrokeActive), false,
+      'a real Alt+click never starts a manual stroke');
+    await parameterPage.close();
     console.log('story player UI: PASS (live speed/thickness, manual takeover, jumps, registry, mobile layout)');
   } finally {
     await browser.close();

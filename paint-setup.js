@@ -65,6 +65,49 @@ const PaintState = {
     console.log('[viewport] dpr override:', raw);
 })();
 
+/*
+ * Bristle count used while replaying imported Tilecraft spots, independent of
+ * the brush slider, when the page is opened with `?bristles=auto`.
+ *
+ * 160 was the measured knee for the earlier jittered sunflower layout.
+ * Imported spots now randomize the layout per contact, so coverage should be
+ * remeasured. Raising the count remains an opt-in way to fill sparse stamps.
+ *
+ * It is deliberately not the slider's value: the slider is the user's choice
+ * for THEIR brush, and silently moving it would change their manual painting
+ * too. It is restored after playback.
+ */
+const STORY_SPOT_BRISTLE_COUNT = 160;
+
+/*
+ * `?bristles=auto` opts imported story playback into STORY_SPOT_BRISTLE_COUNT.
+ * Any other value, or no parameter, leaves playback on the brush slider --
+ * the denser layout costs GPU work per stamp, so it stays opt-in until the
+ * visual calibration is signed off.
+ */
+const StoryBristlePolicy = { auto: false };
+
+(function parseStoryBristlePolicy() {
+    if (typeof window === 'undefined') return;
+    const raw = new URLSearchParams(window.location.search).get('bristles');
+    if (raw === null) return;
+
+    if (raw !== 'auto') {
+        console.warn('[story] ignoring unknown bristles value:', raw, '(expected "auto")');
+        return;
+    }
+    StoryBristlePolicy.auto = true;
+    console.log('[story] spot playback bristle count:', STORY_SPOT_BRISTLE_COUNT);
+})();
+
+/* Published explicitly: a top-level `const` in a classic script is NOT a
+ * property of the global object, and story-playback-controller.js is
+ * concatenated before this file, so it reads both through globalThis. */
+if (typeof globalThis !== 'undefined') {
+    globalThis.StoryBristlePolicy = StoryBristlePolicy;
+    globalThis.STORY_SPOT_BRISTLE_COUNT = STORY_SPOT_BRISTLE_COUNT;
+}
+
 const ResizingSide = {
     NONE: 0,
     LEFT: 1,
@@ -109,9 +152,24 @@ const MIN_PAINTING_WIDTH = 300;
 const MAX_PAINTING_WIDTH = 4096; //this is further constrained by the maximum texture size
 
 //brush parameters
-const MAX_BRISTLE_COUNT = 100;
+/*
+ * Ceiling for the bristle count, and the width of the six RGBA-FLOAT bristle
+ * state textures -- so this is an allocation, not just a slider bound.
+ *
+ * 160 rather than 100 because STORY_SPOT_BRISTLE_COUNT needs it: story
+ * playback is silently clamped to this value, so a lower ceiling would cap
+ * imported stamp coverage and leave strokes streaky no matter what the
+ * playback policy asks for. The cost is 6 x 160 x 10 RGBA floats = 150 KB,
+ * up from 94 KB; the per-splat GPU work that actually matters is paid only
+ * while a story replays, which is opt-in behind `?bristles=auto`.
+ *
+ * The UI sliders are unaffected: they run to MAX_BRISTLE_COUNT only through
+ * their own range, and INITIAL_BRISTLE_COUNT is unchanged.
+ */
+const MAX_BRISTLE_COUNT = 160;
 const MIN_BRISTLE_COUNT = 10;
 const INITIAL_BRISTLE_COUNT = 12;
+
 const INITIAL_FLUIDITY = 0.7;
 const INITIAL_BRUSH_SCALE = 32;
 const MIN_BRUSH_SCALE = 5;

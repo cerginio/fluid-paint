@@ -5,6 +5,12 @@ Scope: local Story Model import and visible Fluid Paint playback controls
 Target shell: `#panel-extension` with the existing **File** and **Player** tabs  
 Primary runtime: `TilecraftStrokePlayer` + the existing `Paint` RAF loop
 
+**Current UX update:** `Add over current painting` is the default. `Stop`
+keeps partial paint immediately. File and Demo may replace the active source
+while it is playing; the next run follows the selected canvas policy. The
+Restore/Keep decision flow described later in this historical specification
+has been removed. See `TILECRAFT-STORY-PLAYBACK.md` for current behavior.
+
 ## 1. Product goal
 
 Let a user load a local Tilecraft Story Model JSON file, verify what will be
@@ -441,7 +447,7 @@ Do not silently skip model points to reach the selected multiplier.
 ### 9.5 Thickness control
 
 Speed and Thickness share one responsive control row. Thickness is an
-accessible range input with `min="0.1"`, `max="1.2"`, `step="0.05"` and default
+accessible range input with `min="0.1"`, `max="2.5"`, `step="0.05"` and default
 `1`. Its adjacent output displays the current value as a multiplier.
 
 The final size for both polygon spots and polyline segments is
@@ -1044,7 +1050,7 @@ It keeps the existing shell IDs and `data-extension-*` tab hooks.
       <label>Speed <select id="story-speed"><!-- supported speeds --></select></label>
       <label>Thickness
         <output id="story-thickness-value">1.00×</output>
-        <input id="story-thickness" type="range" min="0.1" max="1.2"
+        <input id="story-thickness" type="range" min="0.1" max="2.5"
                step="0.05" value="1">
       </label>
     </div>

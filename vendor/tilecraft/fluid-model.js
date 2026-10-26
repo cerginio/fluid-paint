@@ -9,16 +9,21 @@
      *   FOOTPRINT -- what shape is each individual mark? (the renderer's
      *                concern; see tilecraft-stroke-player.js)
      *
-     * `square` is a PATH whose marks are square. Its tiles carry `g` groups and
-     * `b` breaks exactly like polyline, and their spacing matches a polyline
-     * layer at the same gridSize -- so it replays as strokes, not as one tap
-     * per tile.
+     * `square` is a SPOT shape: render.js draws it with one `fillRect` per
+     * tile from inside the per-tile loop, while `connectPoints()` runs only
+     * under `if (tileShape === 'polyline')`. It was classified as a path here
+     * once, on the grounds that its tiles carry `g`/`b` and space like a
+     * polyline -- but `getGroupedRanges()` builds groups for EVERY layer
+     * regardless of tileShape, so `g`/`b`/`gd` carry the group scale and say
+     * nothing about topology, and tile spacing is set by the input device
+     * rather than by the renderer. Only the `connectPoints()` call site
+     * decides topology.
      *
      * `rectangle` is a tolerated alias for `square`: no observed Tilecraft
      * export writes it, so nothing may depend on it being present.
      */
-    const FLUID_PATH_SHAPES = new Set(["polyline", "square", "rectangle"]);
-    const FLUID_SPOT_SHAPES = new Set(["polygon", "circle", "slash"]);
+    const FLUID_PATH_SHAPES = new Set(["polyline"]);
+    const FLUID_SPOT_SHAPES = new Set(["polygon", "circle", "slash", "square", "rectangle"]);
     const SUPPORTED_FLUID_LAYER_SHAPES = new Set([...FLUID_PATH_SHAPES, ...FLUID_SPOT_SHAPES]);
     const TILE_FIELDS = ["x", "y", "c", "f", "g", "b", "gd", "gz", "s", "v", "a", "sa"];
     const LAYER_FIELDS = ["id", "tag", "visible", "tileShape", "gridSize", "polygonSize", "scale", "opacity", "mod"];

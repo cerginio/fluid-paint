@@ -82,6 +82,11 @@ class Simulator {
       shaderSources['shaders/splat.frag']
     );
 
+    this.pathProgram = wgl.createProgram(
+      shaderSources['shaders/path.vert'],
+      shaderSources['shaders/path.frag']
+    );
+
     this.velocitySplatProgram = wgl.createProgram(
       '#define VELOCITY \n' + shaderSources['shaders/splat.vert'],
       '#define VELOCITY \n' + shaderSources['shaders/splat.frag']
@@ -565,20 +570,60 @@ class Simulator {
     return simulationArea;
   }
 
+  /** A filled antialiased capsule for imported paths, independent of bristle density. */
+  paintPathSegment(from, to, fromRadius, toRadius, brushRectangle, color, overlapWith = null) {
+    const pixelX = brushRectangle.width / this.resolutionWidth;
+    const pixelY = brushRectangle.height / this.resolutionHeight;
+    const padding = Math.max(fromRadius, toRadius) + Math.hypot(pixelX, pixelY);
+    const left = Math.min(from.x, to.x) - padding;
+    const right = Math.max(from.x, to.x) + padding;
+    const bottom = Math.min(from.y, to.y) - padding;
+    const top = Math.max(from.y, to.y) + padding;
+    const area = new Rectangle(left, bottom, right - left, top - bottom);
+    area.translate(-brushRectangle.left, -brushRectangle.bottom);
+    area.scale(this.resolutionWidth / brushRectangle.width,
+      this.resolutionHeight / brushRectangle.height);
+    area.round();
+    area.intersectRectangle(new Rectangle(0, 0, this.resolutionWidth, this.resolutionHeight));
+    if (area.width <= 0 || area.height <= 0) return;
+
+    const wgl = this.wgl;
+    wgl.framebufferTexture2D(this.simulationFramebuffer, wgl.FRAMEBUFFER,
+      wgl.COLOR_ATTACHMENT0, wgl.TEXTURE_2D, this.paintTexture, 0);
+    const drawState = wgl.createDrawState()
+      .bindFramebuffer(this.simulationFramebuffer)
+      .viewport(0, 0, this.resolutionWidth, this.resolutionHeight)
+      .enable(wgl.SCISSOR_TEST)
+      .scissor(area.left, area.bottom, area.width, area.height)
+      .enable(wgl.BLEND)
+      .blendEquation(wgl.FUNC_ADD)
+      .blendFuncSeparate(wgl.SRC_ALPHA, wgl.ONE_MINUS_SRC_ALPHA, wgl.ONE, wgl.ONE)
+      .vertexAttribPointer(this.quadVertexBuffer,
+        this.pathProgram.getAttribLocation('a_position'), 2, wgl.FLOAT, wgl.FALSE, 0, 0)
+      .useProgram(this.pathProgram)
+      .uniform2f('u_boundsMin', left, bottom)
+      .uniform2f('u_boundsMax', right, top)
+      .uniform2f('u_paintingDimensions', brushRectangle.width, brushRectangle.height)
+      .uniform2f('u_paintingPosition', brushRectangle.left, brushRectangle.bottom)
+      .uniform2f('u_from', from.x, from.y)
+      .uniform2f('u_to', to.x, to.y)
+      .uniform1f('u_hasOverlap', overlapWith ? 1 : 0)
+      .uniform2f('u_overlapFrom', overlapWith ? overlapWith.from.x : from.x,
+        overlapWith ? overlapWith.from.y : from.y)
+      .uniform2f('u_overlapTo', overlapWith ? overlapWith.to.x : from.x,
+        overlapWith ? overlapWith.to.y : from.y)
+      .uniform1f('u_overlapRadius', overlapWith ? overlapWith.radius : 0)
+      .uniform2f('u_pixelSize', pixelX, pixelY)
+      .uniform1f('u_fromRadius', fromRadius)
+      .uniform1f('u_toRadius', toRadius)
+      .uniform4f('u_color', color[0], color[1], color[2], color[3]);
+    wgl.drawArrays(drawState, wgl.TRIANGLE_STRIP, 0, 4);
+    this.splatAreas.splice(0, 0, new SplatArea(area, this.frameNumber));
+  }
+
   /**
    * Deposit paint and velocity where the brush's bristles cross the canvas.
-   *
-   * `brushRectangle` is the painting's extent **in the same space as the
-   * brush's own coordinates** (brush.positionX/Y and the position textures).
-   * The engine does not know or care what that space is -- an engine that
-   * assumed "the screen" would not be UI-independent.
-   *
-   * @param {Brush} brush
-   * @param {number} zThreshold
-   * @param {Rectangle} brushRectangle the painting, in brush coordinates
-   * @param {number[]} splatColor
-   * @param {number} splatRadius
-   * @param {number} velocityScale
+   * `brushRectangle` uses the same coordinate space as the brush.
    */
   splat(brush, zThreshold, brushRectangle, splatColor, splatRadius, velocityScale, offset = [0, 0, 0], stationary = false) {
     // the area we need to simulate for this set of splats

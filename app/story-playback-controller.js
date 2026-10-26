@@ -13,8 +13,20 @@ class StoryPlaybackController {
     this.progress = this._emptyProgress();
     this.speed = 1;
     this.thickness = 1;
-    this.canvasPolicy = 'replace';
+    this.canvasPolicy = 'overlay';
     this.colorModel = 'natural';
+    /* Contacts per imported stamp. `undefined` takes the player's calibrated
+     * default; this is the single point to retune spot coverage without
+     * touching brush radius, colour alpha or any global physics constant. It
+     * is read at compile time and frozen into the plan, so changing it needs a
+     * recompile rather than affecting a run already in flight. */
+    this.spotPaintLoad = undefined;
+    this.pathPaintLoad = undefined;
+    this.spotScatter = undefined;
+    this.pathMode = undefined;
+    this.pathJoinCorrection = undefined;
+    this.spotBristleVariation = undefined;
+    this._readPaintingParameters();
     this.listeners = new Set();
     this.baseline = null;
     this.baselineValid = false;
@@ -32,10 +44,39 @@ class StoryPlaybackController {
     this.backgroundSummary = null;
     this.backgroundError = null;
     this.backgroundLoading = false;
+    this.fileError = null;
   }
 
   get canPaintManually() {
     return true;
+  }
+
+  /** Optional URL overrides for comparing imported story rendering. */
+  _readPaintingParameters() {
+    if (typeof window === 'undefined' || !window.location) return;
+    const params = new URLSearchParams(window.location.search);
+    const values = [
+      ['pathMode', (raw) => TilecraftStrokePlayer._pathMode(raw)],
+      ['spotPaintLoad', (raw) => TilecraftStrokePlayer._spotPaintLoad(Number(raw))],
+      ['pathPaintLoad', (raw) => TilecraftStrokePlayer._spotPaintLoad(Number(raw))],
+      ['spotScatter', (raw) => TilecraftStrokePlayer._spotScatter(Number(raw))],
+      ['spotBristleVariation', (raw) => {
+        if (raw !== '0' && raw !== '1') throw new TypeError('expected 0 or 1');
+        return raw === '1';
+      }],
+      ['pathJoinCorrection', (raw) => {
+        if (raw !== '0' && raw !== '1') throw new TypeError('expected 0 or 1');
+        return raw === '1';
+      }],
+    ];
+    for (const [name, parse] of values) {
+      if (!params.has(name)) continue;
+      try {
+        this[name] = parse(params.get(name));
+      } catch (error) {
+        console.warn(`[story] ignoring ${name}:`, error.message);
+      }
+    }
   }
 
   getModelViewport(padding = 24) {
@@ -55,13 +96,13 @@ class StoryPlaybackController {
   async loadFile(file) {
     const isPng = file && (file.type === 'image/png' || /\.png$/i.test(file.name || ''));
     if (isPng) return this.loadBackgroundFile(file);
-    this._setState('loading');
     try {
       const loaded = await StoryFileLoader.load(file);
       await this.loadModel(loaded.model, loaded.summary);
     } catch (error) {
-      this.error = error;
-      this._setState('file-error');
+      this.fileError = error;
+      if (this.model) this._emit();
+      else this._setState('file-error');
       throw error;
     }
   }
@@ -121,6 +162,7 @@ class StoryPlaybackController {
     this.elapsed = 0;
     this.estimatedRemaining = 0;
     this.error = null;
+    this.fileError = null;
     this.baselineValid = false;
     this._setState('ready');
   }
@@ -151,13 +193,13 @@ class StoryPlaybackController {
     this.playheadIndex = 0;
     this.progress = this._emptyProgress();
     this.error = null;
+    this.fileError = null;
     this.baselineValid = false;
     this._setState('ready');
   }
 
   async removeFile() {
     await this._cancelRun();
-    if (this.baselineValid) await this.restoreBaseline();
     this.model = null;
     this.modelSummary = null;
     this.plan = null;
@@ -165,6 +207,7 @@ class StoryPlaybackController {
     this.playheadIndex = 0;
     this.progress = this._emptyProgress();
     this.baselineValid = false;
+    this.fileError = null;
     this._setState('empty');
   }
 
@@ -186,8 +229,8 @@ class StoryPlaybackController {
   }
 
   setThickness(multiplier) {
-    if (!Number.isFinite(multiplier) || multiplier < 0.1 || multiplier > 1.2) {
-      throw new RangeError('Story thickness must be between 0.1 and 1.2.');
+    if (!Number.isFinite(multiplier) || multiplier < 0.1 || multiplier > 2.5) {
+      throw new RangeError('Story thickness must be between 0.1 and 2.5.');
     }
     const normalized = Math.round(multiplier * 100) / 100;
     if (this.thickness === normalized) return Promise.resolve(false);
@@ -200,7 +243,6 @@ class StoryPlaybackController {
     if (policy !== 'replace' && policy !== 'overlay') {
       throw new TypeError('Canvas policy must be replace or overlay.');
     }
-    if (this.state === 'playing' || this.state === 'paused') return;
     this.canvasPolicy = policy;
     this._emit();
   }
@@ -209,7 +251,6 @@ class StoryPlaybackController {
     if (model !== 'natural' && model !== 'digital') {
       throw new TypeError('Story color model must be natural or digital.');
     }
-    if (!['empty', 'ready', 'file-error'].includes(this.state)) return false;
     this.colorModel = model;
     this._emit();
     return true;
@@ -279,23 +320,23 @@ class StoryPlaybackController {
   async restart() {
     if (!this.model) return false;
     await this._cancelRun();
-    this._applyColorModel();
-    if (this.baselineValid) this.painter.applySnapshot(this.baseline);
-    else this._captureBaseline();
-    if (this.canvasPolicy === 'replace') this.engine.clear();
-    this.painter.needsRedraw = true;
-    this.plan = this._compilePlan();
-    this.registry.reset(this.plan.operations.length);
-    this.playheadIndex = 0;
-    this.progress = this._emptyProgress(this.plan.operations.length);
-    this._resetTiming();
+    this.baselineValid = false;
+    try {
+      this._prepareFreshRun();
+    } catch (error) {
+      if (this.baselineValid) this.painter.applySnapshot(this.baseline);
+      this.baselineValid = false;
+      this.error = error;
+      this._setState('ready');
+      throw error;
+    }
     return this._runFrom(0);
   }
 
   async stop() {
     if (!['playing', 'paused'].includes(this.state)) return false;
     await this._cancelRun();
-    this._setState('stop-decision');
+    this.keepResult();
     return true;
   }
 
@@ -315,7 +356,7 @@ class StoryPlaybackController {
   }
 
   keepResult() {
-    if (!['stop-decision', 'completed', 'completed-with-gaps', 'player-error'].includes(this.state)) {
+    if (!['playing', 'paused', 'stop-decision', 'completed', 'completed-with-gaps', 'player-error'].includes(this.state)) {
       return false;
     }
     this.baselineValid = false;
@@ -383,6 +424,7 @@ class StoryPlaybackController {
     this.registry.reset(this.plan.operations.length);
     this.playheadIndex = 0;
     this.progress = this._emptyProgress(this.plan.operations.length);
+    this.error = null;
     this._resetTiming();
   }
 
@@ -422,6 +464,12 @@ class StoryPlaybackController {
         canvasColorFormat: 'encoded-rgb',
         encodeRgb: (rgb) => PaintColorAdapter.encodeRgb(rgb),
         alpha: this.painter._strokeColor().alpha,
+        spotPaintLoad: this.spotPaintLoad,
+        pathPaintLoad: this.pathPaintLoad,
+        spotScatter: this.spotScatter,
+        spotBristleVariation: this.spotBristleVariation,
+        pathMode: this.pathMode,
+        pathJoinCorrection: this.pathJoinCorrection,
         mapPoint: (tile) => ({
           x: target.left + tile.x,
           y: target.bottom + fit.height - tile.y,
@@ -446,6 +494,12 @@ class StoryPlaybackController {
       canvasColorFormat: 'encoded-rgb',
       encodeRgb: (rgb) => PaintColorAdapter.encodeRgb(rgb),
       alpha: this.painter._strokeColor().alpha,
+      spotPaintLoad: this.spotPaintLoad,
+      pathPaintLoad: this.pathPaintLoad,
+      spotScatter: this.spotScatter,
+      spotBristleVariation: this.spotBristleVariation,
+      pathMode: this.pathMode,
+      pathJoinCorrection: this.pathJoinCorrection,
       mapPoint: (tile) => ({
         x: offsetX + (tile.x - bounds.left) * scale,
         y: offsetY + (bounds.bottom - tile.y) * scale,
@@ -475,6 +529,12 @@ class StoryPlaybackController {
     const remainingFraction = total ? this.registry.pendingCount / total : 0;
     const runTargetDuration = this.targetDuration * remainingFraction;
     const runElapsedBase = this.elapsed;
+    /* Denser bristles for imported stamps, restored in the finally below.
+     * A stamp is one press, so its coverage is whatever a single sunflower of
+     * bristles paints; the brush slider is the user's choice for their own
+     * brush and must come back untouched. setBrush() refuses mid-stroke, so
+     * this has to straddle the whole run rather than wrap each stamp. */
+    const userBristleCount = this._applySpotBristleCount();
     const player = this.player || new TilecraftStrokePlayer(this.engine);
     const run = player.playPlan(this.plan, {
       startIndex,
@@ -513,14 +573,54 @@ class StoryPlaybackController {
     } catch (error) {
       if (error.name !== 'AbortError') {
         this.error = error;
-        this._setState('player-error');
+        this.baselineValid = false;
+        this.plan = null;
+        this._setState('ready');
         throw error;
       }
       return false;
     } finally {
+      this._restoreBristleCount(userBristleCount);
       if (this._abortController === abortController) this._abortController = null;
       if (this._runPromise === run) this._runPromise = null;
     }
+  }
+
+  /**
+   * Raise the bristle count for spot playback, returning the user's value to
+   * restore. Returns null when the policy is off or nothing needs changing.
+   */
+  _applySpotBristleCount() {
+    /* Read through globalThis, not the bare names. These are top-level `const`
+     * in paint-setup.js, which the bundle concatenates AFTER this file, and a
+     * `typeof` guard does not protect a const in its temporal dead zone -- it
+     * throws ReferenceError. Playback only ever starts after every script has
+     * run, but a property lookup states that independence instead of relying
+     * on it. */
+    const policy = globalThis.StoryBristlePolicy;
+    if (!policy || !policy.auto) return null;
+    const wanted = globalThis.STORY_SPOT_BRISTLE_COUNT;
+    if (!Number.isFinite(wanted)) return null;
+    // The brush's textures are sized at maxBristleCount; asking for more would
+    // sample outside them rather than fail loudly.
+    const target = Math.min(wanted, this.engine.maxBristleCount);
+    const previous = this.engine.bristleCount;
+    if (previous === target) return null;
+    try {
+      this.engine.setBrush({ bristleCount: target });
+    } catch (_) {
+      // A stroke was somehow active: playback is still correct at the user's
+      // count, so paint rather than abort the run over a density preference.
+      return null;
+    }
+    return previous;
+  }
+
+  _restoreBristleCount(previous) {
+    if (previous === null) return;
+    try {
+      this.engine.setBrush({ bristleCount: previous });
+    } catch (_) { /* restored on the next run; never fail a finished playback */ }
   }
 
   async _cancelRun() {
@@ -648,6 +748,7 @@ class StoryPlaybackController {
       canvasPolicy: this.canvasPolicy,
       colorModel: this.colorModel,
       error: this.error,
+      fileError: this.fileError,
       targetDuration: this.targetDuration,
       elapsed: this.elapsed,
       estimatedRemaining: this.estimatedRemaining,

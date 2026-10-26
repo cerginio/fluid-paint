@@ -16,6 +16,7 @@ uniform float u_jitter;
  * Perturbs each bristle's own jitter rather than rotating the brush rigidly --
  * a single shared angle would read as a stamp being visibly spun. */
 uniform float u_strokeVariation;
+uniform float u_randomizeBristles;
 
 /* Phase B: bristle footprint.
  *
@@ -66,6 +67,16 @@ void main () {
 
     float theta = (bristleIndex + (strokeRandom.x - 0.5) * u_jitter) * 2.0 * PI / (PHI * PHI);
     float r = sqrt(bristleIndex + (strokeRandom.y - 0.5) * u_jitter) / sqrt(u_bristleCount);
+    if (u_randomizeBristles > 0.5) {
+        // A new press seed changes every bristle independently. Keep the same
+        // equal-area footprint, but stop repeating the sunflower constellation.
+        vec2 fresh = fract(sin(vec2(
+            bristleIndex * 127.1 + u_strokeVariation * 311.7 + randoms.z * 74.7,
+            bristleIndex * 269.5 + u_strokeVariation * 183.3 + randoms.w * 246.1
+        )) * 43758.5453);
+        theta = fresh.x * 2.0 * PI;
+        r = sqrt(fresh.y);
+    }
 
     float spacing = u_bristleLength / (u_verticesPerBristle - 1.0);
     vec2 crossSection = vec2(r * cos(theta), r * sin(theta));

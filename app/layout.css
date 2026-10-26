@@ -621,6 +621,54 @@ html, body {
 .story-background-card span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .story-background-card small { color: rgba(255, 255, 255, 0.68); }
 
+/* Recently opened stories. One tap reopens, so each row is a full-width
+   target at the panel's 36px control height rather than a text link. */
+.story-recent-card {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.story-recent-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.story-recent-head strong { color: rgba(255, 255, 255, 0.82); }
+/* Quieter than the card's own actions -- clearing is not what this card is for
+   -- but still a full-size tap target: the panel's 36px, and 44px on a touch
+   viewport, where the mobile layout guard enforces it. */
+.story-recent-head button {
+  padding: 2px 8px !important;
+  border-color: transparent !important;
+  background: none !important;
+  color: rgba(255, 255, 255, 0.6) !important;
+  font-size: 11px;
+}
+.story-recent-head button:hover { color: rgba(255, 255, 255, 0.9) !important; }
+.story-recent-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.story-recent-list button {
+  display: grid;
+  width: 100%;
+  gap: 2px;
+  text-align: left;
+}
+.story-recent-list .story-recent-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.story-recent-list .story-recent-meta {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 11px;
+}
+
 .story-file-card { display: grid; gap: 12px; }
 .story-file-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .story-file-title > div { display: grid; min-width: 0; }

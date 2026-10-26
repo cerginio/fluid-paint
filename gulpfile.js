@@ -83,6 +83,8 @@ const paths = {
     'app/ui/preset-api.js',
     'app/ui/panel.js',
     'app/story-demo-catalog.js',
+    // Before story-tools.js, which constructs a StoryRecentStore.
+    'app/story-recent-store.js',
     'app/ui/story-tools.js',
     'paint-setup.js',
     'paint.js',

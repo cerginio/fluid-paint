@@ -56,6 +56,7 @@ const STROKE_MIN_SPACING = 1;         // never below one engine pixel
  */
 const ENGINE_SHADER_FILES = Object.freeze([
   'shaders/splat.vert', 'shaders/splat.frag',
+  'shaders/path.vert', 'shaders/path.frag',
   'shaders/fullscreen.vert',
   'shaders/advect.frag',
   'shaders/divergence.frag',
@@ -262,6 +263,7 @@ class FluidEngine {
     } else if (brushShape) {
       throw this._strokeError('FluidEngine: this brush does not support brushShape.');
     }
+    this.brush.randomizeBristles = false;
     this.brush.initialize(x, y, height, scale);
   }
 
@@ -274,6 +276,38 @@ class FluidEngine {
   splat(brushRectangle, { zThreshold, color, radius, velocityScale }) {
     this._assertNoStroke('splat()');
     this.simulator.splat(this.brush, zThreshold, brushRectangle, color, radius, velocityScale);
+  }
+
+  /** Paint a continuous imported path segment into the normal paint target. */
+  paintPathSegment({ from, to, fromRadius, toRadius, paintingRectangle, color,
+    paintLoad = 1, overlapWith = null }) {
+    this._assertNoStroke('paintPathSegment()');
+    if (!from || !to || !paintingRectangle || !color || color.space !== 'pigment') {
+      throw this._strokeError('paintPathSegment() requires endpoints, rectangle and pigment color.');
+    }
+    for (const value of [from.x, from.y, to.x, to.y, fromRadius, toRadius,
+      paintingRectangle.left, paintingRectangle.bottom, paintingRectangle.width,
+      paintingRectangle.height, color.alpha]) {
+      if (!Number.isFinite(value)) throw this._strokeError('paintPathSegment() requires finite values.');
+    }
+    if (fromRadius < 0 || toRadius < 0 || paintingRectangle.width <= 0 ||
+        paintingRectangle.height <= 0 || color.alpha < 0 || color.alpha > 1 ||
+        !Number.isInteger(paintLoad) || paintLoad < 1) {
+      throw this._strokeError('paintPathSegment() received an invalid radius, alpha or paint load.');
+    }
+    if (!Array.isArray(color.channels) || color.channels.length !== 3 ||
+        color.channels.some((channel) => !Number.isFinite(channel) || channel < 0 || channel > 1)) {
+      throw this._strokeError('paintPathSegment() requires three pigment channels in [0, 1].');
+    }
+    if (overlapWith && (!overlapWith.from || !overlapWith.to ||
+        [overlapWith.from.x, overlapWith.from.y, overlapWith.to.x, overlapWith.to.y,
+          overlapWith.radius].some((value) => !Number.isFinite(value)) ||
+        overlapWith.radius < 0)) {
+      throw this._strokeError('paintPathSegment() received invalid overlap geometry.');
+    }
+    const alpha = 1 - Math.pow(1 - color.alpha, paintLoad);
+    this.simulator.paintPathSegment(from, to, fromRadius, toRadius,
+      paintingRectangle, [...color.channels, alpha], overlapWith);
   }
 
   /** Advance the fluid one step. Returns whether anything actually moved. */
@@ -333,12 +367,13 @@ class FluidEngine {
    * time; legacy replay mode settles synchronously for offline compatibility.
    * @param {object} options Pass timing:'live' in interactive hosts.
    */
-  beginStroke({ x, y, pressure = 1, brushSize, paintingRectangle, color, resolutionScale = 1, spacing, timing = 'replay', brushShape = null }) {
+  beginStroke({ x, y, pressure = 1, brushSize, paintingRectangle, color, resolutionScale = 1, spacing, timing = 'replay', brushShape = null, randomizeBristles = false }) {
     if (this.strokeActive) {
       throw this._strokeError('FluidEngine: a stroke is already active; call endStroke() first.');
     }
 
     if (timing !== 'live' && timing !== 'replay') throw this._strokeError('Unknown stroke timing.');
+    if (typeof randomizeBristles !== 'boolean') throw this._strokeError('FluidEngine: randomizeBristles must be boolean.');
 
     // Everything below runs BEFORE any GPU mutation or random draw, so a
     // rejected begin leaves the engine idle and consumes no variation.
@@ -436,6 +471,7 @@ class FluidEngine {
       // worse than saying so: the caller asked for a shape it will not get.
       throw this._strokeError('FluidEngine: this brush does not support brushShape.');
     }
+    this.brush.randomizeBristles = randomizeBristles;
 
     if (timing === 'live') {
       try {

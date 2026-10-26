@@ -9,9 +9,12 @@ const STORY_FILE_MAX_TILES = 500000;
 // standalone (tests, workers) and must stay in step with
 // vendor/tilecraft/fluid-model.js.
 const STORY_FILE_PATH_SHAPES = (typeof globalThis !== 'undefined' && globalThis.FLUID_PATH_SHAPES) ||
-  new Set(['polyline', 'square', 'rectangle']);
+  new Set(['polyline']);
+// `slash` was missing here while the vendored copy carried it, so a slash
+// layer was counted as unsupported and silently dropped whenever this module
+// ran before fluid-model.js (tests, workers).
 const STORY_FILE_SPOT_SHAPES = (typeof globalThis !== 'undefined' && globalThis.FLUID_SPOT_SHAPES) ||
-  new Set(['polygon', 'circle']);
+  new Set(['polygon', 'circle', 'slash', 'square', 'rectangle']);
 const STORY_FILE_SUPPORTED_SHAPES = (typeof globalThis !== 'undefined' && globalThis.SUPPORTED_FLUID_LAYER_SHAPES) ||
   new Set([...STORY_FILE_PATH_SHAPES, ...STORY_FILE_SPOT_SHAPES]);
 
@@ -80,9 +83,11 @@ class StoryFileLoader {
         right = Math.max(right, tile.x);
         top = Math.min(top, tile.y);
         bottom = Math.max(bottom, tile.y);
-        // Count by TOPOLOGY, not by name: a `square` layer is a path, so its
-        // tiles are stroke points that share a group -- counting them as spots
-        // would report 46,899 "strokes" for a file holding ~2,200.
+        // Count by TOPOLOGY, not by name, and use the same sets the compiler
+        // uses: only `polyline` is a path. A `square` tile is one independent
+        // stamp, so it counts as a spot and gets its own navigable group --
+        // the preflight count must equal the number of operations the player
+        // will actually compile.
         if (STORY_FILE_PATH_SHAPES.has(layer.tileShape)) {
           polylinePoints++;
           groups.add(`${layerIndex}:${tile.f === undefined ? 'unassigned' : tile.f}:` +
@@ -91,7 +96,8 @@ class StoryFileLoader {
           // `polygonSpots` keeps its published name from the player spec; it
           // counts every spot shape, circle included.
           polygonSpots++;
-          groups.add(`${layerIndex}:${tile.f === undefined ? 'unassigned' : tile.f}:spot-${tileIndex}`);
+          groups.add(`${layerIndex}:${tile.f === undefined ? 'unassigned' : tile.f}:` +
+            `${tile.g === undefined ? `spot-${tileIndex}` : tile.g}`);
         }
       });
     });
