@@ -9,6 +9,71 @@ Fixture для сценаріїв лежить на диску: `D:\work\fluid-p
 Довідкові числа з desktop-QA (AMD Radeon 890M, D3D11, 2026-10-26), повний fixture:
 1× за планом — 43,0 с; 16× — 13,5 с (1 918 оп/с); Max — 3,8 с (6 838 оп/с).
 
+## Фаза 2 — гачки рушія і spike детермінізму (SPEC §2.3) — прийнято 2026-10-26
+
+Журнал: фаза без UI, тому всі сценарії CLI. Сервер не потрібен: кожна проба піднімає власний
+на випадковому порту й закриває його. Інтернет не потрібен. Агент виконав кроки в eval фази
+(SwiftShader і AMD 890M); власник пройшов QA-R1–R5 сам, усі з кодом 0, і прийняв фазу через
+`handoff:next`. Його числа: float `identicalBytes: 1`; float32 `maxDelta` 0 (SwiftShader) і 1
+(890M); `spec` 0,914, `fine` ≈ 0,931; контроль 0,82 / 0,76 / 255. Проба записує мазки на одній сторінці й повторює на свіжих, усі без
+`?seed=`; один прогін триває ≈ 60 с. Хеші між прогонами різні, бо `Math.random` дає іншу
+варіацію натискання. Порівнюється частка пікселів, хеш — ні.
+
+### QA-R1. Повтор після перезавантаження побітово точний
+
+**qa:mode:** cli
+**qa:open:** термінал, каталог `D:\work\fluid-paint\fluid-paint`.
+**qa:action:** `npm run test:session-replay:gpu`
+**qa:inspect:** рядки stdout `"variant":"float"` і `"variant":"float32 ticks"`; код виходу.
+**qa:expected:** для `float` — `"identicalBytes":1`, `"maxDelta":0`. Для `float32 ticks` —
+`"withinTwo":1` і `"maxDelta"` 0 або 1 (1 буває через CPU-межу splat-області у float64). Код виходу 0.
+
+### QA-R2. Те саме на справжньому GPU
+
+**qa:mode:** cli
+**qa:open:** термінал, каталог `D:\work\fluid-paint\fluid-paint`; машина з дискретним або
+інтегрованим GPU під Windows.
+**qa:action:** `node debug/session-replay-gpu-test.js --hardware`
+**qa:inspect:** поле `renderer` у рядку `"check":"recording"`; рядки `float` і `float32 ticks`.
+**qa:expected:** `renderer` називає справжній GPU (на desktop-QA —
+`ANGLE (AMD, AMD Radeon(TM) 890M Graphics … Direct3D11 …)`), а не `SwiftShader`. Числа ті самі,
+що в QA-R1. Код виходу 0.
+
+### QA-R3. Кванти SPEC не тримають AC-REC-5
+
+**qa:mode:** cli
+**qa:open:** термінал, каталог `D:\work\fluid-paint\fluid-paint`.
+**qa:action:** `npm run test:session-replay:gpu`
+**qa:inspect:** рядок `"check":"AC-REC-5 by quantum"`.
+**qa:expected:** `"spec"` ≈ 0,91 (91–92 % пікселів у межах ±2; AC-REC-5 вимагає ≥ 0,99),
+`"fine"` ≈ 0,93 (квант 1/65536 px — краще не стає), `"contactXY":1`. Це вимір, а не
+assert: тест від нього не падає. На цьому факті стоїть рішення про формат тіків.
+
+### QA-R4. Проба бачить різницю
+
+**qa:mode:** cli
+**qa:open:** термінал, каталог `D:\work\fluid-paint\fluid-paint`.
+**qa:action:** `npm run test:session-replay:gpu`
+**qa:inspect:** рядок `"variant":"control: float, no reseed"`.
+**qa:expected:** `"identicalBytes"` < 1 (≈ 0,82), `"withinTwo"` ≈ 0,76, `"maxDelta":255`.
+Без записаного bristle seed повтор інший — отже 100 % у QA-R1 не порожній збіг.
+
+### QA-R5. API обсервера і повтору на юніт-рівні
+
+**qa:mode:** cli
+**qa:open:** термінал, каталог `D:\work\fluid-paint\fluid-paint`.
+**qa:action:** `npm run test:timing`
+**qa:inspect:** останній рядок stdout.
+**qa:expected:** `live timing: PASS (hold, 30/60/144 Hz, bounded burst, cursor, endpoint, tap,
+overload, repeated resume, stepTick, session observer, replay)`, код виходу 0.
+
+### Відомо зламане / не реалізоване у фазі 2
+
+- `npm run test:bristle-shape` падає з `round footprint has a strong 3-fold harmonic (0.0895)` —
+  так само на `HEAD` до фази 1, не від цієї фази.
+- Запису, кодека й UI ще немає (фази 3–4): `.flus` зберегти чи відкрити поки нічим.
+- Формат тіків не вирішено: див. QA-R3 і рішення власника в HANDOFF.
+
 ## Фаза 1 — швидкість Max (SPEC §1) — прийнято 2026-10-26
 
 Журнал: фаза 1 прийнята власником через `handoff:next`. Кроки всіх сценаріїв виконані агентом

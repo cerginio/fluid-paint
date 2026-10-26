@@ -1,17 +1,22 @@
 # Handoff: fluid-session — швидкість Max і запис сесії малювання
 
-Стан на 2026-10-26, гілка `feat/pwa`. Фаза 1 закрита й закомічена: код теми,
+Стан на 2026-10-26, гілка `feat/pwa`. Фази 1 і 2 закриті й закомічені: код теми,
 `QA.md` і цей файл. Спека
 [`docs/PLAYER-MAX-SPEED-AND-SESSION-RECORDING-SPEC.md`](../../PLAYER-MAX-SPEED-AND-SESSION-RECORDING-SPEC.md)
 (далі — SPEC) закомічена в `a4009a1`.
 
-> **Далі:** фаза 2 — гачки рушія і spike детермінізму (пункт 2 нижче).
+> **Далі:** спершу рішення власника про формат тіків (пункт 2a) і про Resize під час запису
+> (відкрите питання 4), потім фаза 3. Без 2a кодек фази 3 будувати нема на чому.
 
 ## Що зроблено і працює
 
 | Файл | Стан |
 | --- | --- |
-| `fluid-engine/index.js` | `_tick(previous, current, t)` — один крок, спільний для `advance()` і `stepTick()`; `_finishTicks()` пише `timingStats`. `stepTick()` — рівно один крок із поточною live-ціллю (t = 1), годинник `_lastAdvance` не чіпає. Фаза 2 додає сюди `replayTick()` через той самий `_tick()`. |
+| `fluid-engine/index.js` | `_tick(previous, current, t)` — один крок, спільний для `advance()`, `stepTick()` і `replayTick()`; `_finishTicks()` пише `timingStats`. `stepTick()` — рівно один крок із поточною live-ціллю (t = 1), годинник `_lastAdvance` не чіпає. |
+| `fluid-engine/index.js` (фаза 2) | `setSessionObserver()`: `onTick(x,y,h,scale)` — інтерпольовані числа, які отримав `brush.update()`, а не ціль mailbox; `onIdleTick()` — крок поза мазком; `onBeginStroke(params, variation)`; `onContact(x,y,p)` — фінальний контакт `endStroke()`; `onEndStroke()`; `onPathSegment(segment)` — об'єкт викликача, recorder має скопіювати синхронно. Обсервер, що кинув, від'єднується з `console.error`. `replayTick(x,y,h,scale)` (без аргументів — холостий, лише рідина; у мазку ціль стає mailbox). `beginStroke({ variation })` у `[0,1)`. **Понад SPEC:** `endStroke({ contact })` — `null` без контакту, `{x,y,pressure}` рівно цей; без нього повтор неможливий, бо живе правило порівнює з mailbox. `reseedBristleRandoms(seed)` — u32, заборонено в мазку. Legacy `timing:'replay'` мазки шлють `onBeginStroke` з `timing:'replay'`, але їхні кроки не йдуть через `_tick()` — recorder фази 3 має їх відхиляти. |
+| `fluid-engine/brush.js` | `initialize(…, variation)`; `reseedRandoms(seed)` — mulberry32 → `rebuildTexture` текстури randoms, власний генератор, не чіпає `engine.random`. |
+| `debug/session-replay-gpu-test.js` (`npm run test:session-replay:gpu`, `--hardware` — ANGLE D3D11) | Запис 4 мазків через обсервер → повтор `replayTick` на свіжих сторінках без `?seed=`. Assert: float побітово, float32 ±1, u16 тиск контакту побітово, контроль без reseed відрізняється. Кванти лише міряє. `SESSION_REPLAY_DUMP=<файл>` пише сирі події для експериментів з кодеком. |
+| `debug/live-timing-test.js` | + юніти обсервера (порядок, інтерполяція, idle, від'єднання), `variation`, `endStroke({contact})`, guards `replayTick`/`reseedBristleRandoms`. Рушій там у `vm`-контексті: ловити його `console` через `vm.runInContext('console')`, помилки звіряти за `name`, об'єкти — через JSON (інший realm). |
 | `fluid-engine/tilecraft-stroke-player.js` | Top-level `FixedTickScheduler`, `BudgetTickScheduler` (+ статики `TilecraftStrokePlayer.*`). `_tickScheduler(options)` валідує `tickScheduler` / `ticksPerFrame`. `playPlan()`: два порядки тіків — legacy `ticksPerFrame` (тік ПІСЛЯ операції) і paced (тік ПЕРЕД наступною операцією: усі timeline-швидкості та Max); межі кадрів дає scheduler, для timeline типово `FixedTickScheduler(32)`. |
 | `app/story-playback-controller.js` | `setSpeed('max')`; Max — `targetDuration: null` + `BudgetTickScheduler`; `_advanceStoryTick()` = `engine.stepTick()`; `ownsEngineClock`; вимірювач `_startRateMeter/_sampleRate` → `maxRate {multiplier, ticksPerSecond}` і `estimatedRemaining` у view model. |
 | `paint.js` | `update()`: поки story грає і володіє пензлем (`ownsEngineClock`), хост лише `resetClock()`, без власних кроків. |
@@ -35,6 +40,32 @@ hash 16× == Max. *Доведено мутаціями:* повернення с
 +20 мс після `resetClock` друга мутація проходила — його не прибирати.
 
 ## Головні виміряні факти
+
+Фаза 2 (2026-10-26; SwiftShader і AMD Radeon 890M D3D11; власник повторив QA-R1–R5 —
+збіглося). Проба: 4 мазки, 163 тіки, 119 холостих, 3 фінальні контакти; сторінки без `?seed=`.
+
+| Що змінено при повторі | частка пікселів у ±2 | maxDelta |
+| --- | --- | --- |
+| нічого (float64) | 1, побітово | 0 |
+| тіки → float32 | 1 | 0 (SwiftShader) / ≤ 1 (2 з 4 прогонів SwiftShader; 890M у QA власника) |
+| тиск контакту → u16; xy контакту → 1/64 | 1, побітово | 0 |
+| кванти SPEC `xy:64/h:4096` (тіки + контакти) | 0,913–0,919 | 116–192 |
+| лише xy 1/64; лише h 1/4096 | 0,912; 0,916 | — |
+| xy 1/4096; xy 1/65536; h 1/65536 | 0,924; 0,926–0,932; 0,925 | 112–155 |
+| контроль: без `reseedBristleRandoms` | 0,76 | 255 |
+
+- **Повтор живого мазка можливий:** seed ворсинок + variation + float-тіки + явний фінальний
+  контакт = побітово той самий малюнок після перезавантаження. Жодних інших джерел недетермінізму.
+- **Спростовано:** «квантування `xy:64/h:4096` тримає AC-REC-5». Динаміка хаотична: зсув тіка на
+  ≈ 1 ulp float32 (1/65536 px) вже дає ≈ 7 % пікселів з відхиленням > 2. Достатньо малого кванта
+  нема — тільки точний float32.
+- float32 не завжди побітовий, бо `Simulator.splat()` ([simulation.js:630](../../../fluid-engine/simulation.js#L630))
+  рахує splat-область на CPU у float64 (`Math.ceil` швидкості) — область росте на піксель.
+- **Розмір float32 без втрат** (скрипт у scratchpad, не в репо: біти float32, прогноз 2-го порядку
+  `2p₁−p₂` → `fround` → залишок в ulp, zigzag-varint): **7,61 Б/тік, gzip 7,48**; 1-го порядку —
+  8,04. Медіанний залишок ≈ 33 тис. ulp на xy. Це ≈ 270 КБ / 10 хв проти бюджету SPEC 4 Б/тік,
+  150 КБ. Корпус синтетичний і швидкий (40 точок за ≈ 0,8 с); повільні ручні мазки не виміряні.
+- Recorder: тики, які `advance()` відкинув понад 5 кроків, у обсервер не потрапляють (за SPEC §2.2).
 
 Фаза 1 (2026-10-26, desktop-QA: AMD Radeon 890M, ANGLE D3D11, Chromium headed, 1280×800):
 
@@ -64,7 +95,9 @@ hash 16× == Max. *Доведено мутаціями:* повернення с
 
 **Гіпотези, ще не виміряні:**
 
-- Квантування `xy: 64`, `height: 4096` тримає AC-REC-5 (≥ 99 % пікселів у межах ±2). Фаза 2 вимірює.
+- ~~Квантування `xy: 64`, `height: 4096` тримає AC-REC-5~~ — спростовано фазою 2 (0,91).
+- Розмір float32-тіків на справжніх ручних мазках менший за 7,5 Б/тік. Міряти у фазі 3 на
+  QA-корпусі, якщо власник обере float32.
 
 ## НЕЗАКРИТЕ — почни звідси
 
@@ -82,7 +115,24 @@ AC-MAX-2 неможливий. Legacy `ticksPerFrame` лишився (тести
 з дедлайном. Зміна групування не змінює малюнок (INV-MAX-1), але змінює UX і `test:story-ui`
 терпимість до тривалостей. Вирішує людина, коли і чи брати.
 
-### 2. Фаза 2 — гачки рушія і spike детермінізму (SPEC §2.3)
+~~2. Фаза 2 — гачки рушія і spike детермінізму (SPEC §2.3)~~ — ЗАКРИТО 2026-10-26.
+Див. «Що зроблено», «Виміряні факти», `QA.md` §«Фаза 2». Відхилення від SPEC §2.3: додано
+`endStroke({ contact })`. Регресії фаза не виправляла — нового інваріанту немає.
+
+### 2a. Рішення власника: формат тіків (блокує фазу 3)
+
+Числа фази 2 кажуть: кванти SPEC §2.4 AC-REC-5 не тримають за жодного кроку. Варіанти:
+
+- **(рекомендація агента) float32 без втрат:** тіки — біти float32, прогноз 2-го порядку, залишок
+  в ulp. Повтор точний (±1). Переглянути в SPEC §2.4 бюджет і AC-REC-6 приблизно до 8 Б/тік і
+  300 КБ / 10 хв — SPEC сам велить переглядати бюджет у документі, не в коді.
+- **кванти + слабший AC-REC-5:** лишити ≈ 2–3 Б/тік, а критерій замінити візуальним
+  (≈ 91 % пікселів у ±2).
+
+Агент SPEC не правив: це рішення про AC. Після рішення — оновити SPEC §2.4, §3 (AC-REC-5/6),
+§7.3, потім фазу 3.
+
+<details><summary>Початковий план фази 2 (історія)</summary>
 
 **Контракт.** `setSessionObserver()`, `replayTick()` (через той самий `_tick()`),
 `beginStroke({ variation })`, `reseedBristleRandoms(seed)`. Без UI та без кодека.
@@ -105,17 +155,20 @@ AC-MAX-2 неможливий. Legacy `ticksPerFrame` лишився (тести
 «Виміряні факти» частку пікселів у межах ±2 для кожного. Обрати кванти
 (відкрите питання 3 SPEC) за числами.
 
-**QA-чернетка:** не потрібна людині — фаза без UI; достатньо GPU-проби.
+**QA-чернетка:** не потрібна людині — фаза без UI; достатньо GPU-проби. *(Виявилось хибно:
+фаза без UI теж пише QA.md — CLI-сценарії; див. QA-R1–R5.)*
+
+</details>
 
 ### 3. Фаза 3 — запис і Save (SPEC §2.1–2.4, §2.6, §2.7)
 
 **Контракт.** `app/session-codec.js` (контейнер `"FLUS"`, теги, zigzag-varint,
-прогноз 2-го порядку), `app/session-recorder.js` (typed-array блоки, команди
+прогноз 2-го порядку; кодування тіків — за рішенням 2a), `app/session-recorder.js` (typed-array блоки, команди
 Paint, ліміт 432 000 тіків), картка **Session recording** першою у State:
 Record/Stop, Save, Open… (поки disabled-заглушка або лише вибір файлу без
 програвання), чіп `● REC` на полотні, baseline PNG, unsaved guard + `beforeunload`.
 
-**Guard:** guard фази 2 + `test:story-ui`, `test:pwa-release` (нові файли
+**Guard:** guard фази 2 (guard фази 1 + `test:bake` + `test:session-replay:gpu`) + `test:story-ui`, `test:pwa-release` (нові файли
 мають бути в git і gulp-глобах до прогону). Нові: `debug/session-codec-test.js`
 (round-trip, розмір на синтетичному корпусі ≤ 4 Б/тік).
 
@@ -164,7 +217,8 @@ Restart на Max. Дивитись: темп 1× як у оригіналі, Max
 1. Чи приймати `.flus` і у вкладці File (drag-and-drop)? SPEC §7.1 — пропозиція
    «так, після фази 4»; не входить у жодну фазу, доки людина не вирішить.
 2. Перемикач «Skip idle pauses» для `1×` чи лише жорстке скорочення до 60 тіків? (SPEC §7.2)
-3. Остаточні кванти — вирішуються числами фази 2. (SPEC §7.3)
+3. Остаточні кванти (SPEC §7.3) — числа фази 2 є (див. «Виміряні факти»): жоден квант не
+   тримає AC-REC-5. Рішення — за власником, пункт 2a.
 4. SPEC не визначає, що робить запис, якщо під час нього змінюють розмір
    painting rectangle перетягуванням: координати в системі painting, але
    Resize змінює саму систему. Перед фазою 3 вирішити: записувати Resize як
