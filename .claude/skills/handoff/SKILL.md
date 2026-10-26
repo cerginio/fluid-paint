@@ -1,423 +1,531 @@
 ---
 name: handoff
-description: Веде роботу фазами з очищенням контексту між ними — читає handoff.md на початку фази, реалізує, проганяє eval, пише QA-сценарій для ручної перевірки, віддає на human review, дописує handoff і комітить. Викликати на старті фази ("handoff:start", "read handoff", "продовж роботу", "наступна фаза"), у кінці ("handoff:next", "запиши handoff", "закрий фазу") і на будь-якому коді "handoff:*". Одна фаза = один контекст.
+description: Runs work in phases with a context clear between them — reads handoff.md at the start of a phase, implements, runs the eval, writes QA scenarios for manual checking, hands the phase over for human review, updates the handoff and commits. Invoke at the start of a phase ("handoff:start", "read handoff", "continue the work", "продовж роботу", "next phase", "наступна фаза"), at the end ("handoff:next", "write the handoff", "запиши handoff", "close the phase", "закрий фазу") and on any "handoff:*" code. One phase = one context.
 ---
 
-# Handoff — робота фазами
+# Handoff — working in phases
 
-Довга робота ділиться на фази. Кожна фаза живе в **чистому контексті**:
-все, що має пережити `/clear`, лежить у `handoff.md`, а не в пам'яті сесії.
+Long work is split into phases. Each phase lives in a **clean context**:
+everything that has to survive `/clear` is in `handoff.md`, not in the
+session's memory.
 
-## Цикл
+## The cycle
 
 1. `/clear`
-2. прочитати `handoff.md`
-3. реалізувати
-4. eval (тести, проба, заміри)
-5. QA-документація (що відкрити, що клікнути, що має статись)
+2. read `handoff.md`
+3. implement
+4. eval (tests, probe, measurements)
+5. QA documentation (what to open, what to click, what should happen)
 6. human review
-7. дописати `handoff.md` + коміт
+7. update `handoff.md` + commit
 8. → 1
 
-## Коди
+## Codes
 
-Керування фазою — короткими кодами `handoff:*`. Цифра означає крок циклу,
-слово — дію над фазою. Код у повідомленні користувача виконується негайно,
-без перепитування «ви впевнені».
+A phase is driven by short `handoff:*` codes. A digit means a step of the
+cycle, a word means an action on the phase. A code in the user's message is
+carried out at once, without asking "are you sure".
 
-### Цифри — повернення на крок у цій же фазі
+### Digits — back to a step in the same phase
 
-Цифрами керує переважно автономний контролер `handoff-run` (він надсилає
-`handoff:5` сам); людина керує фазою словами. Приймати обидва джерела однаково.
+Digits mostly come from the autonomous controller `handoff-run` (it sends
+`handoff:5` itself); a person drives the phase with words. Accept both
+sources the same way.
 
-| код | що робити |
+| code | what to do |
 |---|---|
-| `handoff:3` | review не пройдено: вертайся в реалізацію. Далі йде текст, що саме не так |
-| `handoff:4` | перепрогони eval і дай свіжі числа |
-| `handoff:5` | перепиши або дороби `QA.md` |
+| `handoff:3` | review failed: go back to implementation. The text that follows says what is wrong |
+| `handoff:4` | rerun the eval and give fresh numbers |
+| `handoff:5` | rewrite or complete `QA.md` |
 
-`handoff:2` не існує: крок 2 — читання в **чистому** контексті. Вхід у фазу —
-`handoff:start`.
+`handoff:2` does not exist: step 2 is reading in a **clean** context. The
+entry into a phase is `handoff:start`.
 
-### Слова — дії над фазою
+### Words — actions on the phase
 
-| код | що робити |
+| code | what to do |
 |---|---|
-| `handoff:start [движок]` | прочитати `HANDOFF.md` і сказати, з чого починаєш. **Нічого не робити** |
-| `handoff:next` | усе ОК: крок 7 — дописати `HANDOFF.md`, закомітити, попросити `/clear` |
-| `handoff:qa <код> <що не так>` | сценарій QA не пройшов: `handoff:qa A5 діагностика порожня` |
-| `handoff:hold` | стоп, не комітити: користувач ще дивиться |
-| `handoff:split` | контекст закінчується: закрити фазу вужче, ніж планували, і записати як є. Краще вужче, ніж дійти до підсумовування контексту з незаписаним станом |
+| `handoff:start [topic]` | read `HANDOFF.md` and say where you start. **Do nothing else** |
+| `handoff:next` | all OK: step 7 — update `HANDOFF.md`, commit, ask for `/clear` |
+| `handoff:qa <code> <what is wrong>` | a QA scenario failed: `handoff:qa A5 diagnostics empty` |
+| `handoff:hold` | stop, do not commit: the user is still looking |
+| `handoff:split` | the context is running out: close the phase narrower than planned and record it as it is. Narrower is better than reaching context summarization with unrecorded state |
 
 ### `handoff:start`
 
-Аргумент — тема, а не движок: `handoff:start three`, `handoff:start fluid`.
-Знайти `HANDOFF.md` теми в [реєстрі](#реєстр-тем) цього репозиторію
-(`AGENTS.md`) і прочитати **цілком**. Теми немає в реєстрі — шукати
-`HANDOFF.md` у репо; без аргументу взяти єдиний, а якщо їх кілька — запитати,
-який, і не вгадувати.
+The argument is a topic, not an engine: `handoff:start three`,
+`handoff:start fluid`. Find the topic's `HANDOFF.md` in this repository's
+[registry](#topic-registry) (`AGENTS.md`) and read it **in full**. If the
+topic is not in the registry, search the repository for `HANDOFF.md`; with no
+argument take the only one, and if there are several, ask which — do not
+guess.
 
-Якщо `HANDOFF.md` теми **не знайдено взагалі**, а натомість є спека
-(`*-SPEC.md`) — це вхід до
-[нагадування про spec-to-handoff](#нагадування-про-spec-to-handoff), не
-привід реконструювати фази самостійно.
+If the topic's `HANDOFF.md` is **not found at all** but there is a spec
+(`*-SPEC.md`), that is the entry to the
+[spec-to-handoff reminder](#spec-to-handoff-reminder), not a reason to
+reconstruct the phases yourself.
 
-Відповідь: стан фази, з чого починаю, що незакрите. **Жодних правок коду** —
-це вхід у фазу, а не її виконання. Далі чекати на дозвіл почати.
+Reply: the state of the phase, where I start, what is open. **No code
+changes** — this is the entry into the phase, not its execution. Then wait
+for permission to start.
 
-Для крос-репозиторної теми додати до відповіді рядок: які пункти з незакритих
-живуть на нашому боці, а які — на чужому. Див. [крос-репо](#крос-репозиторні-теми).
+For a cross-repository topic add a line to the reply: which of the open items
+live on our side and which on the other. See
+[cross-repository topics](#cross-repository-topics).
 
-Якщо `HANDOFF.md` знайдено — заразом порахувати закреслені
-(`^~~<номер>.`) фази — див.
-[нагадування про архівацію](#нагадування-про-архівацію).
+If `HANDOFF.md` is found, count the struck-through (`^~~<number>.`) phases
+at the same time — see the [archiving reminder](#archiving-reminder).
 
 ### `handoff:next`
 
-`handoff:next` **і є** прямим проханням закомітити — вдруге не перепитувати:
-правило репозиторію «не комітити без прохання» цим задоволене.
+`handoff:next` **is** the direct request to commit — do not ask again: the
+repository rule "do not commit unless asked" is satisfied by it.
 
-Що зробити по черзі:
+In order:
 
-1. Дописати `HANDOFF.md`: зняти позначки на кшталт «власник QA не проходив»,
-   оновити журнал фаз у `QA.md`, закреслити закриті пункти.
-2. Закомітити. Без `Co-Authored-By`. Якщо змін кілька змістовних груп —
-   розділити на коміти, а не звалювати в один.
-3. Написати, що готово, і закінчити відповідь блоком `/clear` — див.
-   [«Команда в кінці звіту»](#команда-в-кінці-звіту).
+1. Update `HANDOFF.md`: remove notes like "the owner has not run QA",
+   update the phase log in `QA.md`, strike through the closed items.
+2. Commit. No `Co-Authored-By`. If the changes form several meaningful
+   groups, split them into commits rather than piling them into one.
+3. Say what is done and end the reply with the `/clear` block — see
+   ["The command at the end of the report"](#the-command-at-the-end-of-the-report).
 
-Після дописування — та сама перевірка, що й на `handoff:start`: чи не
-перевалило щойно закреслену кількість фаз за поріг.
+After the update, the same check as on `handoff:start`: whether the number of
+struck-through phases has just crossed the threshold.
 
-### Нагадування про сусідні скіли
+### Reminders about neighbouring skills
 
-`handoff-archive` і `spec-to-handoff` — окремі скіли, і **сам агент їх
-ніколи не запускає**. Нагадування про них живуть рівно на `handoff:start` і
-`handoff:next` — там файл і так відкритий — **і ніде більше**: не ходити по
-репозиторію в пошуках приводу нагадати.
+`handoff-archive` and `spec-to-handoff` are separate skills, and **the agent
+never runs them itself**. Reminders about them live exactly on
+`handoff:start` and `handoff:next` — the file is open there anyway — **and
+nowhere else**: do not walk the repository looking for a reason to remind.
 
-### Нагадування про spec-to-handoff
+### spec-to-handoff reminder
 
-Виникає лише на `handoff:start`, коли `HANDOFF.md` теми **не знайдено**.
-Чи є в тому ж каталозі `*-SPEC.md` без фазового плану (`intend.md` не
-рахується — це блокнот наміру, не спека)? Якщо є — одне речення в кінці
-відповіді: «у цієї спеки ще немає фазового плану, можна
-`spec-to-handoff <тема>`», далі звичайна поведінка для теми без HANDOFF.md
-(почати нема з чого, чекати рішення людини). Немає спеки — нічого не казати.
+Arises only on `handoff:start`, when the topic's `HANDOFF.md` is **not
+found**. Is there a `*-SPEC.md` without a phase plan in the same directory
+(`intend.md` does not count — it is a notebook of intent, not a spec)? If
+there is, one sentence at the end of the reply, in the report language: "this
+spec has no phase plan yet; `spec-to-handoff <topic>` can make one", then the
+usual behaviour for a topic without HANDOFF.md (nothing to start from, wait
+for the person's decision). No spec — say nothing.
 
-### Нагадування про архівацію
+### Archiving reminder
 
-Виникає на `handoff:start` (щойно прочитав) і на `handoff:next` (щойно
-дописав), коли `HANDOFF.md` знайдено. Порахувати закреслені пункти з обох
-файлів — за **початком пункту**, `^~~<номер>.`, а не за суцільним
-`~~...~~ — ЗАКРИТО`: закреслення й слово «ЗАКРИТО» майже завжди розділені
-переносом рядка, тож суцільний шаблон дає 0 на реальному файлі.
+Arises on `handoff:start` (just read) and on `handoff:next` (just updated),
+when `HANDOFF.md` is found. Count the struck-through items of both files by
+the **start of the item**, `^~~<number>.`, not by a whole
+`~~...~~ — ЗАКРИТО` / `~~...~~ — CLOSED`: the strike-through and the closed
+marker are almost always split by a line break, so the whole pattern gives 0
+on a real file.
 
-Якщо їх **більше 3**, або сам файл довелось читати частинами через розмір —
-додати одне речення в кінець відповіді: «у `HANDOFF.md` теми `<тема>` вже
-N закритих фаз, можна `handoff-archive <тема>`» — і продовжити звичайний
-хід кроку (start чи next), не чекаючи реакції на це речення. Нижче порога —
-нічого не казати, не звітувати «архівація не потрібна».
+If there are **more than 3**, or the file itself had to be read in parts
+because of its size, add one sentence at the end of the reply, in the report
+language: "the `HANDOFF.md` of topic `<topic>` already has N closed phases;
+`handoff-archive <topic>` can archive them" — and continue the step (start or
+next) as usual, without waiting for a reaction to that sentence. Below the
+threshold say nothing; do not report "no archiving needed".
 
-## На старті фази (кроки 2-3)
+## At the start of a phase (steps 2-3)
 
-Прочитати `handoff.md` цілком, а не по діагоналі. Далі — тільки ті файли,
-які він називає. Не реконструювати картину заново обходом дерева.
+Read `handoff.md` in full, not diagonally. After that, only the files it
+names. Do not reconstruct the picture by walking the tree.
 
-Якщо handoff не називає наступний крок однозначно — запитати, а не вгадати.
+If the handoff does not name the next step unambiguously, ask — do not guess.
 
-## Eval (крок 4)
+## Eval (step 4)
 
-Прогнати те, що handoff або спека називає перевіркою фази.
+Run what the handoff or the spec names as the phase's check.
 
-**Повний прогін не є доказом.** `npx vitest run` — рівень `full`: він дешевий,
-але сліпий до того, що людина бачить на екрані. Три регресії пройшли крізь
-зелені 1871 passed (`three`, 2026-09-19). Прогін цілком — не підстава закривати
-фазу і не те, з чого починають.
+**A full run is not proof.** `npx vitest run` is the `full` level: it is
+cheap but blind to what a person sees on screen. Three regressions passed
+through a green 1871 passed (`three`, 2026-09-19). A whole run is not a reason
+to close a phase and not where to start.
 
-Але **під час роботи** `full` — основний зворотний зв'язок разом із guard: він
-дешевший за пробу на порядок і ловить те, що ламає рефакторинг. Порівняти
-власні два числа й користуватись дешевшим. Проба відповідає на інше питання —
-«чи працює це руками» — і ставиться один раз, коли шви вже стоять.
+But **while working**, `full` is the main feedback together with guard: it is
+an order of magnitude cheaper than a probe and catches what a refactoring
+breaks. Compare your own two numbers and use the cheaper one. A probe answers
+another question — "does it work by hand" — and is run once, when the seams
+are in place.
 
-Якщо тема має `INVARIANTS.md` — він називає рівні й те, що на кожному падає:
+If the topic has an `INVARIANTS.md`, it names the levels and what fails on
+each:
 
-| рівень | коли | що |
+| level | when | what |
 |---|---|---|
-| **guard** | перед кожним комітом | статичні заборони + інваріантні юніти |
-| **probe** | перед `handoff:next` | браузерна проба — взаємодія, якої юніт не бачить |
-| **full** | перед merge / на вимогу | усе, включно з інвентаризацією |
+| **guard** | before every commit | static bans + invariant unit tests |
+| **probe** | before `handoff:next` | browser probe — an interaction a unit test does not see |
+| **full** | before merge / on request | everything, including the inventory |
 
-Падати і блокувати має право **лише guard**. Фазу закриває guard + probe.
+**Only guard** has the right to fail and block. A phase is closed by guard +
+probe.
 
-Команду кожного рівня агент бере з реєстру теми або з її `INVARIANTS.md`, не
-вгадує. Порядок незмінний: guard, далі проба, далі за потреби повний прогін.
+The agent takes each level's command from the topic registry or the topic's
+`INVARIANTS.md`; it does not guess. The order is fixed: guard, then the probe,
+then the full run if needed.
 
-Якщо відповідь на «чому перевірки мовчали» — «тест міряв те саме, що й код»
-або «мок підмінив конвенцію виклику», правильна дія — **виправити фікстуру**,
-а не додати guard-правило.
+If the answer to "why were the checks silent" is "the test measured the same
+thing as the code" or "the mock replaced the calling convention", the right
+action is to **fix the fixture**, not to add a guard rule.
 
-**Тест, що ламається від легальної зміни конфігу, — дефект тесту, не коду.**
-Не ремонтувати список — переписати на інваріант («enabled у конфізі ⟺
-присутній у DOM»). Інакше кожна фаза платить за чужу інвентаризацію.
+**A test that breaks on a legal config change is a defect of the test, not of
+the code.** Do not repair the list — rewrite it as an invariant ("enabled in
+the config ⟺ present in the DOM"). Otherwise every phase pays for someone
+else's inventory.
 
-У звіті — фактичні passed/failed, **окремо по рівнях**, не одним числом.
-Кількість тестів зі старого handoff не є поточним результатом. Незалежні
-падіння, що були до фази, позначити як такі.
+In the report — actual passed/failed, **per level**, not as one number. The
+test count from an old handoff is not a current result. Mark independent
+failures that existed before the phase as such.
 
-### Фаза, що виправила регресію, дописує інваріант
+### A phase that fixed a regression adds an invariant
 
-Тема з реєстром інваріантів не закривається без запису, якщо фаза виправляла
-регресію. **Куди саме — вирішує гейт реєстру теми, не цей скіл**: правило
-платформи, доменний контракт підсистеми й рішення однієї фази можуть жити в
-різних файлах. Прочитати гейт реєстру перед дописуванням.
+A topic with an invariant registry is not closed without a record if the
+phase fixed a regression. **Where exactly is decided by the topic registry's
+gate, not by this skill**: a platform rule, a subsystem's domain contract and
+one phase's decision may live in different files. Read the registry's gate
+before writing.
 
-**Сказати «це рішення фази, не інваріант» — правильний результат, не відмова.**
-Фаза зобов'язана регресію класифікувати, не обов'язково дописати інваріант.
+**Saying "this is a phase decision, not an invariant" is a correct result,
+not a refusal.** The phase must classify the regression, not necessarily add
+an invariant.
 
-Інваріант — формулювання, походження (який інцидент і коли), механізм,
-перевірюване твердження, де живе. Статичне правило — ще й у guard теми.
+An invariant is: the statement, its origin (which incident and when), the
+mechanism, a checkable assertion, where it lives. A static rule also goes
+into the topic's guard.
 
-Так досвід накопичується автоматично, а не тому, що хтось згадав. Інваріант
-без походження від інциденту — побажання, не інваріант. **Правило
-без названої мутації справжнього джерела, що валить конкретну перевірку, в
-реєстр не йде** — як її доводять, каже реєстр теми.
+That is how experience accumulates by itself rather than because someone
+remembered. An invariant without an origin in an incident is a wish, not an
+invariant. **A rule without a named mutation of the real source that fails a
+specific check does not go into the registry** — how it is proven is said by
+the topic's registry.
 
-## QA-документація (крок 5)
+## QA documentation (step 5)
 
-Автотести кажуть «зелено», але не кажуть, **що людина побачить**. Ручні
-сценарії — те, за чим власник перевіряє фазу очима.
+Automated tests say "green" but do not say **what a person will see**.
+Manual scenarios are what the owner checks the phase by, with their own eyes.
 
-Файл: `QA.md` поруч із кодом фази. Це накопичувальний журнал у зворотному
-хронологічному порядку: нову секцію фази вставляти згори, одразу після заголовка
-та незмінної преамбули (інструкцій запуску/деплою, якщо вона є), а не дописувати
-в кінець. Сценарії попередніх фаз лишаються нижче й мають далі проходити.
+The file is `QA.md` next to the phase's code. It is a cumulative log in
+reverse chronological order: insert the new phase section at the top, right
+after the heading and the unchanging preamble (run/deploy instructions, if
+any), not at the end. Scenarios of earlier phases stay below and must keep
+passing.
 
-### Формат сценарію
+### Scenario format
 
-Формат **один** — машинні ключі `qa:*`, і для ручної, і для автономної
-перевірки. Чотири поля, усі чотири обов'язкові в кожному сценарії:
+There is **one** format — the machine keys `qa:*`, for both manual and
+autonomous checking. Four fields, all four required in every scenario:
 
-| ключ | як писати |
+| key | how to write it |
 |---|---|
-| `**qa:open:**` | повний URL із параметрами, а не «стенд». Для CLI — термінал і каталог |
-| `**qa:action:**` | конкретний елемент у порядку натискання, або точна команда |
-| `**qa:inspect:**` | куди саме дивитись — панель, лічильник, ділянка сцени, потік виводу |
-| `**qa:expected:**` | що видно, з числом або точним текстом |
+| `**qa:open:**` | the full URL with parameters, not "the stand". For a CLI — the terminal and the directory |
+| `**qa:action:**` | the concrete element in clicking order, or the exact command |
+| `**qa:inspect:**` | where exactly to look — panel, counter, area of the scene, output stream |
+| `**qa:expected:**` | what is visible, with a number or exact text |
 
-Текст після ключа — будь-якою мовою; ключ — ні, він машинний.
+The text after a key is in the document language (see
+[Document language](#document-language)); the key is not — it is a machine
+key.
 
 ```markdown
-### QA-A3. Невідомий параметр не ламає сторінку
+### QA-A3. An unknown parameter does not break the page
 
 **qa:mode:** browser
 **qa:open:** `http://127.0.0.1:8080/viewer/engines/three/?camera=nonsuch`
-**qa:action:** нічого.
-**qa:inspect:** сцена + консоль браузера.
-**qa:expected:** сцена вантажиться в ізометрії (типове значення),
-у консолі попередження `Невідоме значення camera=nonsuch`, помилок немає.
+**qa:action:** nothing.
+**qa:inspect:** the scene + the browser console.
+**qa:expected:** the scene loads in isometric view (the default),
+the console shows the warning `Unknown value camera=nonsuch`, no errors.
 ```
 
-Правила, що валять автономний прогін, якщо їх порушити:
+Rules that fail an autonomous run if broken:
 
-- **Заголовок секції фази містить її ID.** `## V8. Операторський скіл` для
-  фази `V8`. Без ID контролер зупиняє фазу
-  (`QA section heading must identify phase <id>`), бо не знаходить секцію.
-- **ID сценарію унікальний на весь файл.** `QA-A1` у двох фазах — помилка
-  розбору всієї секції, не дрібниця: журнал накопичувальний, тож нумерувати
-  за фазою (`QA-A1`, `QA-B1`) — це і є спосіб не зіткнутись.
-- **`qa:mode:` — `cli` або `browser`, не більше одного разу.** Він не звільняє
-  від жодного з чотирьох полів: CLI-сценарій теж має `qa:open:` (термінал,
-  каталог, змінні оточення), просто без URL. Без `qa:mode:` режим вгадується з
-  `qa:open:` — надійніше вказати явно.
-- **`qa:inspect:` і `qa:expected:` не бувають порожні.** Для browser-сценарію
-  порожнє поле — `QA_UNEXECUTABLE: … has no bounded visual criteria`.
+- **The phase section heading contains its ID.** `## V8. Operator skill`
+  for phase `V8`. Without the ID the controller stops the phase
+  (`QA section heading must identify phase <id>`), because it cannot find
+  the section.
+- **A scenario ID is unique across the whole file.** `QA-A1` in two phases
+  is a parse error for the whole section, not a trifle: the log is
+  cumulative, so numbering by phase (`QA-A1`, `QA-B1`) is how to avoid a
+  collision.
+- **`qa:mode:` is `cli` or `browser`, at most once.** It does not exempt
+  from any of the four fields: a CLI scenario has `qa:open:` too (terminal,
+  directory, environment variables), just without a URL. Without `qa:mode:`
+  the mode is guessed from `qa:open:` — stating it is more reliable.
+- **`qa:inspect:` and `qa:expected:` are never empty.** For a browser
+  scenario an empty field is `QA_UNEXECUTABLE: … has no bounded visual criteria`.
 
-Старі назви полів (**Відкрити**, **Клікнути**, **Дивитись**, **Очікуваний
-результат** та англійські `Open`/`Action`/`Inspect`/`Expected Result`) парсер
-ще читає, щоб не ламати наявні файли. У новий сценарій їх не писати й наявні
-не переписувати заразом — тільки якщо фаза їх і так чіпає.
+The old field names (**Відкрити**, **Клікнути**, **Дивитись**,
+**Очікуваний результат** and the English
+`Open`/`Action`/`Inspect`/`Expected Result`) are still read by the parser so
+as not to break existing files. Do not write them
+in a new scenario, and do not rewrite existing ones in passing — only if the
+phase touches them anyway.
 
-### Докази в автономному `handoff-run`
+### Evidence in an autonomous `handoff-run`
 
-Каталог бере **з повідомлення контролера** (абсолютний шлях під
-`<repoRoot>/.agentic-loop/qa/<feature>/<phase>/` — це шаблон для звірки, не
-шлях, який складають самостійно). Звірити його з коренем репо й поточною
-фазою до першої команди чи скриншота; робочий каталог shell або Playwright
-місця запису не змінює. Усе — JSON, stdout, stderr, коди виходу, скриншоти,
-логи — лише всередину цього каталогу (для CLI обов'язкові stdout, stderr і код
-виходу, для браузера — справжні скриншоти); у звіті шляхи від кореня репо.
+Take the directory **from the controller's message** (an absolute path under
+`<repoRoot>/.agentic-loop/qa/<feature>/<phase>/` — a pattern to check
+against, not a path to compose yourself). Check it against the repository
+root and the current phase before the first command or screenshot; the
+working directory of the shell or Playwright does not change where things are
+written. Everything — JSON, stdout, stderr, exit codes, screenshots, logs —
+goes only inside that directory (for a CLI, stdout, stderr and the exit code
+are required; for a browser, real screenshots); in the report, paths relative
+to the repository root.
 
-**Паралельний `qa-evidence/` не створювати** — ні під QA, ні під фазовий eval,
-ні з `.gitignore` як способом приховати записи. Якщо eval потребує файлів —
-ігнорований каталог інструмента або тимчасовий каталог поза репо; у фазовому
-коміті лишаються тільки файли продукту й документації. Наданий каталог
-недоступний — не перенаправляти докази, а позначити сценарії `unexecutable` з
-`failureKind: environment` і вказати помилку доступу.
+**Do not create a parallel `qa-evidence/`** — not for QA, not for the phase
+eval, not with `.gitignore` as a way to hide the records. If the eval needs
+files, use a tool's ignored directory or a temporary directory outside the
+repository; the phase commit keeps only product and documentation files. If
+the given directory is unavailable, do not redirect the evidence: mark the
+scenarios `unexecutable` with `failureKind: environment` and state the access
+error.
 
-Правила:
+Rules:
 
-- **Один сценарій — одна перевірка.** Не зшивати п'ять кліків в один пункт.
-- **Очікуваний результат — перевірюваний.** «Виглядає добре» — не результат;
-  «3 draw calls», «4 шари в списку», «жовтий рядок діагностики» — результат.
-- **Очікуваний результат — стійкий стан.** Знімок робиться через секунди, а не
-  в мить кліку: QA не заморожує анімацію й таймери, тож сценарій лише з
-  миттєвим станом чесно не пройде. Проміжний стан описувати послідовністю:
-  «статус спершу `вперед`, за мить — `flying to …`».
-- **Кожен крок виконано до review.** Кожну консольну команду, URL і
-  селектор нових сценаріїв виконати самому (у eval, `.pw-probe` чи
-  браузері) до того, як віддати `QA.md` на review. Модуль, що не
-  резолвиться, чи хук, якого немає в коді, — дефект сценарію або стенду;
-  його знаходить автор, а не QA. Якщо для перевірки бракує тестового хука
-  чи debug-API, дороби їх у цій фазі, а не описуй обхідний шлях.
-- **Сервер, піднятий для перевірки, зупинити до кінця ходу.** Кожен
-  dev-сервер чи інший процес, який агент сам запустив для eval або прогону
-  кроків, зупинити до того, як віддати фазу на review, і так само після
-  коміту. Перевірити, що порт вільний. Процес, запущений не тобою, не чіпати.
-  Автономний контролер піднімає власний сервіс для QA на тому самому порту.
-  Якщо після ходу там хтось відповідає, контролер зупиняється з
-  `PHASE_LEFT_SERVICE_RUNNING`.
-- **Позначати покриті пробою.** Якщо сценарій вже перевіряє `.pw-probe`,
-  вказати це — людина дивиться очима те, що автомат перевірити не може
-  (пропорції, z-fighting, напрямок Y, миготіння).
-- **Спершу — як запустити локально.** Сервер, порт, адреса, потрібен інтернет
-  чи ні. Без цього документ непридатний.
-- Що зламано або ще не реалізовано — окремою секцією, щоб людина не шукала
-  баг там, де його свідомо лишили.
+- **One scenario — one check.** Do not stitch five clicks into one item.
+- **The expected result is checkable.** "Looks good" is not a result;
+  "3 draw calls", "4 layers in the list", "a yellow diagnostics row" are.
+- **The expected result is a steady state.** The snapshot is taken seconds
+  later, not at the moment of the click: QA does not freeze animations and
+  timers, so a scenario with only an instantaneous state will honestly fail.
+  Describe an intermediate state as a sequence: "the status first reads
+  `forward`, a moment later `flying to …`".
+- **Every step is executed before review.** Run every console command, URL
+  and selector of the new scenarios yourself (in the eval, `.pw-probe` or a
+  browser) before handing `QA.md` over for review. A module that does not
+  resolve, or a hook that does not exist in the code, is a defect of the
+  scenario or the stand; the author finds it, not QA. If a check lacks a test
+  hook or a debug API, build it in this phase rather than describing a
+  workaround.
+- **Stop a server started for checking before the end of the turn.** Every
+  dev server or other process the agent itself started for the eval or for
+  running the steps is stopped before the phase is handed over for review,
+  and likewise after the commit. Check that the port is free. Do not touch a
+  process you did not start. The autonomous controller starts its own QA
+  service on the same port. If something answers there after the turn, the
+  controller stops with `PHASE_LEFT_SERVICE_RUNNING`.
+- **Mark what a probe covers.** If a scenario is already checked by
+  `.pw-probe`, say so — the person looks with their eyes at what an automaton
+  cannot check (proportions, z-fighting, the direction of Y, flicker).
+- **First — how to run it locally.** Server, port, address, whether internet
+  is needed. Without this the document is unusable.
+- What is broken or not implemented yet goes in a separate section, so the
+  person does not look for a bug where it was left deliberately.
 
-### Автодеплой після QA.md
+### Auto-deploy after QA.md
 
-Одразу після заголовка `QA.md` перевірити рядок `**Деплой:** ...`. Якщо він
-є — виконати команду буквально, без правок і без читання `DEPLOY.md` за
-поясненнями: рядок самодостатній, це вже готова shell-команда.
+Right after the `QA.md` heading, check for a deploy line — the deploy marker
+from [Anchors](#anchors) at the start of a line, `**Деплой:** ...` or
+`**Deploy:** ...`. If it is there, run the command literally, without edits
+and without reading `DEPLOY.md` for explanations: the line is self-contained,
+it is a ready shell command.
 
 ```markdown
-**Деплой:** `<готова shell-команда збірки й викладки цієї теми>`
+**Deploy:** `<ready shell command that builds and deploys this topic>`
 ```
 
-Немає рядка — деплою не робити й не питати про нього: відсутність позначки
-означає, що для цієї теми деплой не налаштований чи не потрібен щофази.
-Не вгадувати команду з `DEPLOY.md` чи Gulpfile самостійно.
+No line — do not deploy and do not ask about it: the absence of the marker
+means deployment is not set up for this topic or not needed every phase. Do
+not guess the command from `DEPLOY.md` or a Gulpfile yourself.
 
-Деплой — до кроку 6 (human review): власник має побачити готовий стенд у
-звіті review, не чекати на нього окремо.
+Deploy before step 6 (human review): the owner should see the ready stand in
+the review report, not wait for it separately.
 
-## Human review (крок 6)
+## Human review (step 6)
 
-Доповісти й **зупинитися**. Не комітити до відмашки людини.
-Показати: що зроблено, що виміряно, що лишилось незакритим, і дати посилання
-на `QA.md` — далі перевіряє людина.
+Report and **stop**. Do not commit until the person gives the go-ahead.
+Show what was done, what was measured, what is still open, and give a link
+to `QA.md` — from there the person checks.
 
-### Команда в кінці звіту
+### The command at the end of the report
 
-`/context` і `/clear` — вбудовані команди CLI: їх виконує харнес, агент викликати
-їх не може. Тому фаза закінчується не описом, а **готовим блоком для копіювання**.
+`/context` and `/clear` are built-in CLI commands: the harness runs them, the
+agent cannot call them. So a phase ends not with a description but with a
+**ready block to copy**.
 
-Звіт review закінчується рівно цим — окремим code block, без тексту всередині:
+The review report ends with exactly this — a separate code block, with no
+text inside:
 
 ```
 /context
 handoff:next
 ```
 
-Після коміту (крок 7) — так само:
+After the commit (step 7) — likewise:
 
 ```
 /clear
-handoff:start <тема>
+handoff:start <topic>
 ```
 
-Правила блоку:
+Rules of the block:
 
-- Сам code block, щоб працювала кнопка copy; одна команда, нічого поруч.
-- **Останнім у відповіді**, щоб на телефоні не треба було скролити вгору.
-- Без «будь ласка, натисніть, якщо не важко» — команда говорить сама за себе.
-- **Нічого не коментувати.** Ні навіщо `/context`, ні що буде далі, ні
-  оцінок запасу контексту. Блок іде без супровідного тексту.
+- The code block on its own, so the copy button works; one command, nothing
+  next to it.
+- **Last in the reply**, so that on a phone there is no need to scroll up.
+- No "please press it if you don't mind" — the command speaks for itself.
+- **No commentary.** Not why `/context`, not what comes next, not estimates
+  of remaining context. The block comes without accompanying text.
 
-Відповідь користувача приходить кодом: `handoff:next` — усе ОК, закривай фазу;
-`handoff:3` або `handoff:qa <код>` — вертайся в роботу; `handoff:hold` — стоп.
+The user's answer comes as a code: `handoff:next` — all OK, close the phase;
+`handoff:3` or `handoff:qa <code>` — back to work; `handoff:hold` — stop.
 
-## Запис handoff (крок 7)
+## Writing the handoff (step 7)
 
-`handoff.md` — це вхід для агента з нульовим контекстом. Він має відповісти на:
-що вже працює, що зламано, що робити далі й чому саме так.
+`handoff.md` is the input for an agent with zero context. It must answer:
+what already works, what is broken, what to do next and why exactly so.
 
-Структура:
+Structure (shown with the English markers; a topic writes the forms of its
+document language from [Anchors](#anchors)):
 
 ```markdown
-# Handoff: <тема>
+# Handoff: <topic>
 
-Стан на <дата>. <гілка / що закомічено, а що ні>.
+State as of <date>. <branch / what is committed and what is not>.
 
-> **Далі:** <наступний файл або фаза>
+> **Next:** <the next file or phase>
 
-## Що зроблено і працює
-<таблиця файл | стан>
+## What works
+<table file | state>
 
-## Головні виміряні факти
-<числа, а не враження; спростовані гіпотези лишати явно>
+## Measured facts
+<numbers, not impressions; keep refuted hypotheses explicitly>
 
-## НЕЗАКРИТЕ — почни звідси
-<пронумеровані пункти; закриті закреслювати, не видаляти>
+## OPEN — start here
+<numbered items; strike closed ones through, do not delete them>
 ```
 
-Правила:
+Rules:
 
-- **Числа, не прикметники.** «7 fps на 47k тайлів», не «повільно».
-- **Спростовані гіпотези лишати.** Наступний агент інакше перевірятиме їх знову.
-- **Закрите закреслювати** (`~~1. ...~~ — ЗАКРИТО`), не стирати: видима історія.
-- Не переказувати те, що вже є в спеці — послатися на неї (`SPEC.md §7`).
-- Мова — українська, як решта документації.
+- **Numbers, not adjectives.** "7 fps on 47k tiles", not "slow".
+- **Keep refuted hypotheses.** Otherwise the next agent will check them again.
+- **Strike closed items through** (`~~1. ...~~ — CLOSED`, or the topic
+  language's form from [Anchors](#anchors)), do not erase them: visible
+  history.
+- Do not retell what is already in the spec — refer to it (`SPEC.md §7`).
+- Language — by the [document language rule](#document-language).
 
-Коміт — тільки після відмашки людини (`handoff:next`), без `Co-Authored-By`.
+Commit only after the person's go-ahead (`handoff:next`), without
+`Co-Authored-By`.
 
-## Де лежать документи
+## Document language
 
-Типове місце — поруч із кодом фази, а не в корені репозиторію.
-`HANDOFF.md` — для агента, `QA.md` — для людини, `README.md` — як запустити.
+The skills are written in English; the documents they write are not
+necessarily. This rule is stated here once — the other handoff skills refer
+to it and do not repeat it.
 
-Коли файл розрісся — архівація йде окремим скілом `handoff-archive` і кладе
-парні `_archive/HANDOFF-phases-<X>-<Y>.md` + `_archive/QA-phases-<X>-<Y>.md`.
-Датовані продовження поруч із живим файлом (`HANDOFF-2026-09-07.md`) —
-стара форма: наявні не чіпати, нові так не називати.
+**The document language** (a topic's `HANDOFF.md`, `QA.md` and
+`_archive/*`; a repository's `INVARIANTS.md`/`DECISIONS.md`) is decided by
+the first rule that applies:
 
-Виняток — крос-репозиторні теми: там «поруч із кодом» не існує, бо код
-розкиданий. Документи живуть у `docs/spec/<тема>/`.
+1. **An existing file** — the language of its prose. For a topic's documents
+   that is the language of the topic's `HANDOFF.md`; for a repository-level
+   file (`INVARIANTS.md`, `DECISIONS.md`) — the language of the file itself.
+   This beats the repository setting: appending never changes a file's
+   language.
+2. **The repository setting** — `AGENTS.md` → section `## Language`, line
+   `docs: <code>` (BCP 47: `uk`, `en`, `de`).
+3. **The language of the person's request** that creates the document
+   (`spec-to-handoff <topic>`, `invariant-guard:bootstrap`).
 
-### Реєстр тем
+There is no autonomous case for a new document: a topic is created only by
+`spec-to-handoff` and an invariant registry only by `invariant-guard`, both
+run only on a person's direct command. When `handoff-run` starts, the
+topic's `HANDOFF.md` already exists, so rule 1 applies.
 
-Реєстр тем — **у репозиторії**, не тут: секція «Реєстр тем» його `AGENTS.md`.
+**The report language** (what you tell the person): in an interactive
+session — the language of the person's last message; in an autonomous run —
+the topic's document language.
 
-Формат рядка — `тема | HANDOFF.md | код | інваріанти`.
+Mixing:
 
-Немає `AGENTS.md` або немає в ньому реєстру — знайти `HANDOFF.md` пошуком (див.
-[`handoff:start`](#handoffstart)), а рядок дописати тоді ж, коли створюється
-`HANDOFF.md` теми.
+- A topic's `QA.md` is always in the same language as the topic's
+  `HANDOFF.md`.
+- Existing sections are never translated as a side effect. Moving a topic to
+  another language happens only on the person's explicit command.
+- Code, identifiers and commits are unchanged (English).
+- **Markers** are not prose: write the form of the document language from
+  [Anchors](#anchors). For a language the table lacks, write the English
+  markers and the prose in the document language. **Never invent a
+  translated marker** — the controller and the skills read only the forms in
+  the table, so a made-up one (a Latvian `**Izvietošana:**` for the deploy
+  line) is silently not seen and switches the check off.
 
-## Крос-репозиторні теми
+## Anchors
 
-Тема крос-репозиторна, коли частина коду живе в чужому репо, а спека — не
-поруч із кодом. Цикл фаз той самий; змінюється чотири речі.
+The fixed markers of `HANDOFF.md`, `QA.md` and `AGENTS.md`. An agent
+**writes** the form of the document language; the skills and the controller
+**read** any form in this table, so a Ukrainian topic keeps `Далі` and
+`НЕЗАКРИТЕ` while an English one has `Next` and `OPEN`. A marker word is
+matched as a whole word. The controller keeps the same table as a constant
+(`DOCUMENT_ANCHORS`), and a test holds the two equal — change both together.
 
-**1. Handoff починається з карти, а не зі стану.** Одразу після заголовка —
-таблиця «що / де / який репозиторій», і окремо перелік vendored-файлів:
-канонічна копія тут, друга копія там, правка одного боку без другого ламає
-зв'язок.
+| role | `uk` | `en` |
+|---|---|---|
+| current phase | `> **Далі:**` | `> **Next:**` |
+| section of open items | `## НЕЗАКРИТЕ — почни звідси` | `## OPEN — start here` |
+| closed item | `~~N. …~~ — ЗАКРИТО` | `~~N. …~~ — CLOSED` |
+| what works | `## Що зроблено і працює` | `## What works` |
+| measured facts | `## Головні виміряні факти` | `## Measured facts` |
+| deliberately not done (QA) | `### Свідомо не зроблено в <phase>` | `### Deliberately not done in <phase>` |
+| deploy in `QA.md` | `**Деплой:**` | `**Deploy:**` |
+| topic registry in `AGENTS.md` | `## Реєстр тем` | `## Topic registry` |
 
-**2. Кожен незакритий пункт має сторону.** Перше, що робить фаза з пунктом, —
-визначає, на чиєму боці він живе. Пункт чужого боку ця фаза **не лагодить**:
-вона описує його як контракт і перевіряє на задеплоєному стенді. Не витрачати
-фазу на пошук коду, якого в цьому репо немає.
+## Where the documents live
 
-**3. Eval двоскладовий.** Наші тести (`npx vitest run`) кажуть лише, що
-контракт із нашого боку цілий. Що зв'язка справді працює — показує лише
-прогін на парі стендів. У звіті розділяти ці два числа, не змішувати.
+The usual place is next to the phase's code, not the repository root.
+`HANDOFF.md` is for the agent, `QA.md` for the person, `README.md` for how to
+run it.
 
-**4. Адреси стендів протухають.** Draft-деплої міняють URL. Не вписувати їх у
-`HANDOFF.md` як факт — посилатись на файл, де вони оновлюються (для `fluid` це
-`fluid-paint-vendor-manifest.md`).
+When a file has grown, archiving is done by the separate skill
+`handoff-archive`, which puts paired `_archive/HANDOFF-phases-<X>-<Y>.md` +
+`_archive/QA-phases-<X>-<Y>.md`. Dated continuations next to the live file
+(`HANDOFF-2026-09-07.md`) are the old form: do not touch existing ones, do
+not name new ones so.
 
-У `QA.md` крос-репо теми сценарії згруповані за стороною: спершу ті, що
-перевіряють зовнішній застосунок напряму, потім зв'язку через наш. Людина має
-бачити з номера сценарію, в якому репозиторії шукати баг.
+The exception is cross-repository topics: there "next to the code" does not
+exist, because the code is scattered. The documents live in
+`docs/spec/<topic>/`.
+
+### Topic registry
+
+The topic registry is **in the repository**, not here: the topic registry
+section of its `AGENTS.md` (either form from [Anchors](#anchors)).
+
+Row format — `topic | HANDOFF.md | code | invariants`.
+
+No `AGENTS.md`, or no registry in it — find `HANDOFF.md` by search (see
+[`handoff:start`](#handoffstart)), and add the row at the same time the
+topic's `HANDOFF.md` is created.
+
+## Cross-repository topics
+
+A topic is cross-repository when part of its code lives in another
+repository and the spec is not next to the code. The phase cycle is the
+same; four things change.
+
+**1. The handoff starts with a map, not with the state.** Right after the
+heading — a table "what / where / which repository", and separately a list
+of vendored files: the canonical copy here, the second copy there; editing
+one side without the other breaks the link.
+
+**2. Every open item has a side.** The first thing a phase does with an item
+is decide which side it lives on. An item of the other side is **not fixed**
+by this phase: it describes it as a contract and checks it on the deployed
+stand. Do not spend the phase looking for code that is not in this
+repository.
+
+**3. The eval has two parts.** Our tests (`npx vitest run`) only say that
+the contract is intact on our side. That the link actually works is shown
+only by a run on the pair of stands. In the report keep these two numbers
+apart, do not mix them.
+
+**4. Stand addresses go stale.** Draft deploys change URLs. Do not write
+them into `HANDOFF.md` as a fact — refer to the file where they are kept
+up to date (for `fluid` it is `fluid-paint-vendor-manifest.md`).
+
+In a cross-repository topic's `QA.md` the scenarios are grouped by side:
+first those that check the external application directly, then the link
+through ours. The person must see from the scenario number which repository
+to look for the bug in.
