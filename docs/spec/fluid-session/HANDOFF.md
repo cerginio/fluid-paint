@@ -1,65 +1,86 @@
 # Handoff: fluid-session — швидкість Max і запис сесії малювання
 
-Стан на 2026-10-26, гілка `feat/pwa`. Код теми ще не писався. Спека
+Стан на 2026-10-26, гілка `feat/pwa`. Фаза 1 закрита й закомічена: код теми,
+`QA.md` і цей файл. Спека
 [`docs/PLAYER-MAX-SPEED-AND-SESSION-RECORDING-SPEC.md`](../../PLAYER-MAX-SPEED-AND-SESSION-RECORDING-SPEC.md)
-(далі — SPEC) і цей файл ще не закомічені. Спирається на коміт `72cbcd7`
-(GPU-шлях `paintPathSegment`, `randomizeBristles`, recent files).
+(далі — SPEC) закомічена в `a4009a1`.
 
-> **Далі:** фаза 1 — `stepTick()` і швидкість Max.
+> **Далі:** фаза 2 — гачки рушія і spike детермінізму (пункт 2 нижче).
 
 ## Що зроблено і працює
 
 | Файл | Стан |
 | --- | --- |
-| `fluid-engine/index.js` | `advance()` — живий годинник 60 Гц, ≤ 5 кроків на виклик; тіло циклу ще не винесене в окремий `_tick()`. |
-| `app/story-playback-controller.js` | `setSpeed()` приймає `0.25…16`; fast-тік — `_advanceStoryTick()` з `max(storyClock, wallNow) + 1/60`. |
-| `fluid-engine/tilecraft-stroke-player.js` | Fast-path через `ticksPerFrame` + `advanceTick` + `resetAdvanceClock`; slow-path через `framesPerStep`. |
-| `index.html` | `#story-speed` має опції `0.25×…16×`; вкладка State (`#bake-page`) має картки Brush Angle і Bake. |
-| `paint.js` | `save()` — PNG через anchor `download`; цей механізм перевикористовується для `.flus`. |
+| `fluid-engine/index.js` | `_tick(previous, current, t)` — один крок, спільний для `advance()` і `stepTick()`; `_finishTicks()` пише `timingStats`. `stepTick()` — рівно один крок із поточною live-ціллю (t = 1), годинник `_lastAdvance` не чіпає. Фаза 2 додає сюди `replayTick()` через той самий `_tick()`. |
+| `fluid-engine/tilecraft-stroke-player.js` | Top-level `FixedTickScheduler`, `BudgetTickScheduler` (+ статики `TilecraftStrokePlayer.*`). `_tickScheduler(options)` валідує `tickScheduler` / `ticksPerFrame`. `playPlan()`: два порядки тіків — legacy `ticksPerFrame` (тік ПІСЛЯ операції) і paced (тік ПЕРЕД наступною операцією: усі timeline-швидкості та Max); межі кадрів дає scheduler, для timeline типово `FixedTickScheduler(32)`. |
+| `app/story-playback-controller.js` | `setSpeed('max')`; Max — `targetDuration: null` + `BudgetTickScheduler`; `_advanceStoryTick()` = `engine.stepTick()`; `ownsEngineClock`; вимірювач `_startRateMeter/_sampleRate` → `maxRate {multiplier, ticksPerSecond}` і `estimatedRemaining` у view model. |
+| `paint.js` | `update()`: поки story грає і володіє пензлем (`ownsEngineClock`), хост лише `resetClock()`, без власних кроків. |
+| `app/ui/story-tools.js` | `StoryToolsUI.parseSpeed()`; статус `Playing · Max (measuring…)` → `Playing · Max ≈ N× · T ticks/s · S s left`. |
+| `index.html` | Опція `Max` під `16×`; `?story=1&storySpeed=max`. |
+| `debug/story-max-scheduler-test.js` (`npm run test:story-max`) | AIMD на фейковому годиннику: старт 16, бюджет 10 мс, ×0,7 після двох довгих кадрів, стеля 256, підлога 1, скидання після паузи > 1 с. |
+| `debug/tilecraft-story-gpu-test.js` | AC-MAX-2/3: зріз fixture (150 тайлів/шар = 186 операцій), `seed=7`, тік +20 мс і ривок +20 мс після `resetClock`; hash 16× == Max, кожен тік = 1 крок, `simulate()`-викликів = тіків. |
+| `debug/story-player-ui-test.js`, `debug/live-timing-test.js` | AC-MAX-1/5 (опція, формат статусу); юніт `stepTick()`. |
+| `paint.js` `save()` | PNG через anchor `download`; фаза 3 перевикористовує для `.flus`. |
+
+## Інваріанти теми
+
+**INV-MAX-1.** Кожен story-тік — рівно один `simulate()`; поки story грає, хост не додає власних
+кроків. *Походження:* SPEC §1.4, фаза 1 (2026-10-26): старий `_advanceStoryTick()` давав
+`advance(max(storyClock, wall) + 1/60)`, і тік довший за 16,7 мс вставляв ще один інтерпольований
+крок; RAF хоста кроком `advance(wall)` між кадрами story додавав кроки на ривках кадру.
+*Механізм:* `engine.stepTick()` + `Paint.update()` пропускає `advance()` при `ownsEngineClock`.
+*Перевірка:* `npm run test:tilecraft:gpu` — `multiStepTicks === 0`, `simulateCalls === ticks`,
+hash 16× == Max. *Доведено мутаціями:* повернення старого годинника → 186 тіків по 2 кроки
+(падає); вимкнення придушення в `paint.js` → 191 `simulate()` на 186 тіків (падає). Без ривка
++20 мс після `resetClock` друга мутація проходила — його не прибирати.
 
 ## Головні виміряні факти
 
-Виміряне (статично, з коду та fixture 2026-10-26):
+Фаза 1 (2026-10-26, desktop-QA: AMD Radeon 890M, ANGLE D3D11, Chromium headed, 1280×800):
 
-- Fixture `docs/story-2026-09-08-4-frames.json`: 22 720 тайлів, 1 955 380 Б,
-  86 Б/точку; gzip — 360 649 Б (≈ 16 Б/точку). Це база для порівняння з AC-REC-6.
-- Один крок симуляції: `Brush.update` з `ITERATIONS = 20` (≈ 80–100 draw calls)
-  + 2 splat + 7 проходів рідини (divergence, clear, 2 jacobi, subtract, 2 advect).
-  Рідина обробляє union-прямокутник splat-областей за `FRAMES_TO_SIMULATE = 60` кроків.
+- Повний fixture `docs/story-2026-09-08-4-frames.json` = **25 871 операція** плану
+  (22 720 тайлів). 1× за планом (`targetPlaySeconds`) — 43,0 с ≈ 601 оп/с.
+- **16× — 13,5 с, 1 918 оп/с ≈ 3,2× реально.** Це стеля timeline-режиму: ≤ 32 оп/кадр × 60 Гц
+  = 1 920 оп/с. Медіанний кадр 16,7 мс — GPU не вузьке місце. Отже 4×, 8×, 16× на цьому fixture
+  обмежені тією самою стелею (з 4× — арифметично; виміряно лише 16×).
+- **Max — 3,8 с, 6 838 оп/с ≈ 9,5×**, медіанний кадр 16,7 мс, найдовший відрізок кадрів > 2·D —
+  50 мс (AC-MAX-4 ✓). Статус розганяється `≈ 4×` → `≈ 10×` за ~2 с (K +1/кадр).
+- Повний fixture, `seed=7`: hash `exportPixels()` 16× == Max (`4133746985`) — AC-MAX-2 на справжньому GPU.
+- SwiftShader (зріз 186 оп, штучні +20 мс): 16× 7,6 с, Max 11,4 с — на штучно повільному тіку
+  бюджет 10 мс дає 1 тік/кадр; це очікувано і не порушує AC-MAX-4 (він про desktop).
+- **Спростовано:** «вузьке місце на 16× — CPU-накладні draw calls щетинок». Вузьке місце —
+  стеля 32 оп/кадр у `waitTimeline()`. На Max ≈ 114 тіків/кадр при 60 Гц (≈ 0,09 мс CPU/тік).
+- `test:bristle-shape` падає і на чистому `HEAD` (`round footprint has a strong 3-fold harmonic
+  (0.0895)`) — до фази, не через неї.
+
+Виміряне раніше (статично, з коду та fixture):
+
+- Fixture: 1 955 380 Б, 86 Б/точку; gzip — 360 649 Б (≈ 16 Б/точку). База для AC-REC-6.
+- Один крок: `Brush.update` з `ITERATIONS = 20` (≈ 80–100 draw calls) + 2 splat + 7 проходів
+  рідини; рідина обробляє union-прямокутник splat-областей `FRAMES_TO_SIMULATE = 60` кроків
+  (після цього `simulate()` — no-op; GPU-тести «осаджують» 80 × `stepTick()`).
 - `randomsTexture` заповнюється один раз у конструкторі `Brush` з `engine.random`
   (`Math.random`, якщо не `?seed=`) — тому для повтору потрібен `reseedBristleRandoms`.
 
-**Гіпотези, ще не виміряні** (не цитувати як факт):
+**Гіпотези, ще не виміряні:**
 
-- Вузьке місце на 16× — CPU-накладні draw calls щетинок, а не fill рідини.
-  Фаза 1 має це підтвердити або спростувати (ticks/s Max на desktop-QA).
-- Квантування `xy: 64`, `height: 4096` тримає AC-REC-5 (≥ 99 % пікселів у межах ±2).
-  Фаза 2 вимірює.
+- Квантування `xy: 64`, `height: 4096` тримає AC-REC-5 (≥ 99 % пікселів у межах ±2). Фаза 2 вимірює.
 
 ## НЕЗАКРИТЕ — почни звідси
 
-### 1. Фаза 1 — `stepTick()` і швидкість Max (SPEC §1)
+~~1. Фаза 1 — `stepTick()` і швидкість Max (SPEC §1)~~ — ЗАКРИТО 2026-10-26.
+Див. «Що зроблено», INV-MAX-1, `QA.md` §«Фаза 1». Відхилення від SPEC §1.2: числові
+швидкості контролера ніколи не йшли через `ticksPerFrame` — вони timeline-режим; Max
+реалізовано тим самим paced-порядком тіків з `BudgetTickScheduler` замість стелі 32, інакше
+AC-MAX-2 неможливий. Legacy `ticksPerFrame` лишився (тести, `tilecraft-spot-gpu-test`).
 
-**Контракт.** Винести тіло циклу `advance()` у `_tick()`; публічний
-`engine.stepTick()` робить рівно один крок із поточною live-ціллю. Story fast-path
-переходить на інтерфейс `tickScheduler` (`FixedTickScheduler(N)`,
-`BudgetTickScheduler` з AIMD, SPEC §1.3). `setSpeed('max')`, опція `Max` під
-`16×`, `?storySpeed=max`, статус `Max ≈ N× · T ticks/s`, ETA з виміру.
+### 1a. Стеля 32 оп/кадр у timeline-режимі (знахідка фази 1, не в жодній фазі)
 
-**Guard:** `npm run test:timing`, `test:tilecraft`, `test:tilecraft:gpu`,
-`test:tilecraft:polyline:gpu`, `test:story-ui`, `test:live-gpu`, `build` —
-зелені без зміни очікувань. Нові: unit-тест scheduler (фейковий годинник:
-старт K=16, зменшення ×0,7 після двох довгих кадрів, стеля 256).
-
-**Probe:** GPU-тест, що для fixture `exportPixels()` після Max побітово
-дорівнює 16× (AC-MAX-2), і тест зі штучною затримкою тіку > 16,7 мс:
-`timingStats.steps === 1` (AC-MAX-3).
-
-**QA-чернетка.** Відкрити `?story=1` → Player → Speed `Max` → Play.
-Дивитись: статус показує `Max (measuring…)`, потім `Max ≈ N×`; Pause і ручний
-мазок реагують одразу. Результат: картинка як на 16×, без зависань > 1 с.
-
-**Новий інваріант:** INV-MAX-1 (fast-тік = рівно один `simulate()`).
+`waitTimeline()` у `playPlan()` віддає кадр після 32 операцій незалежно від дедлайну, тож на
+великих файлах 4×/8×/16× грають однаково (≈ 3,2× на fixture). Варіанти: стеля з
+`targetDuration` (оп/кадр = потрібний темп), або `BudgetTickScheduler` і для числових швидкостей
+з дедлайном. Зміна групування не змінює малюнок (INV-MAX-1), але змінює UX і `test:story-ui`
+терпимість до тривалостей. Вирішує людина, коли і чи брати.
 
 ### 2. Фаза 2 — гачки рушія і spike детермінізму (SPEC §2.3)
 
@@ -70,8 +91,13 @@
 відтворити живий мазок із записаних цілей. Якщо ні, формат A і фази 3–4
 треба переглядати, а не будувати поверх.
 
-**Guard:** усі guard фази 1 + `test:bristle-shape`, `test:bake`; обсервер `null`
-не змінює жодного наявного тесту.
+**Вже є з фази 1:** `_tick(previous, current, t)` і `stepTick()` — `replayTick()` має йти
+через той самий `_tick()`, а обсервер — чіплятися в `_tick()`/`_finishTicks()`, не в `advance()`.
+
+**Guard:** guard фази 1 (`test:story-max`, `test:timing`, `test:tilecraft`, `test:tilecraft:gpu`
+з AC-MAX-2/3, `test:tilecraft:polyline:gpu`, `test:story-ui`, `test:live-gpu`, `build`) +
+`test:bake`; `test:bristle-shape` падав до фази 1 — порівнювати з baseline, не вимагати зеленого.
+Обсервер `null` не змінює жодного наявного тесту.
 
 **Probe:** `debug/session-replay-gpu-test.js` — програмні live-мазки з
 обсервером → перезапуск engine з тим самим seed → `replayTick` у трьох
