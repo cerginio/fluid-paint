@@ -239,6 +239,7 @@
                                 <option value="4">4×</option>
                                 <option value="8" selected>8×</option>
                                 <option value="16">16×</option>
+                                <option value="max">Max</option>
                             </select>
                         </label>
                         <label class="story-thickness-field">
@@ -544,16 +545,18 @@
                         const framesPerStep = Number.isInteger(requestedSlowFrames) && requestedSlowFrames > 0
                             ? requestedSlowFrames
                             : 1;
-                        const requestedSpeed = Number(params.get('storySpeed'));
+                        const rawSpeed = params.get('storySpeed');
+                        const requestedSpeed = rawSpeed === 'max' ? 'max' : Number(rawSpeed);
                         const speed = !hasSlowMode
-                            ? (Number.isInteger(requestedSpeed) && requestedSpeed > 0 ? requestedSpeed : 8)
+                            ? (requestedSpeed === 'max' ||
+                                (Number.isInteger(requestedSpeed) && requestedSpeed > 0) ? requestedSpeed : 8)
                             : 1 / framesPerStep;
                         const controller = painter.storyPlaybackController;
                         await controller.loadModel(
                             story,
                             StoryFileLoader.summarize(story, 'story-2026-09-08-4-frames.json')
                         );
-                        controller.setSpeed([0.25, 0.5, 1, 2, 4, 8, 16].includes(speed) ? speed : 8);
+                        controller.setSpeed([0.25, 0.5, 1, 2, 4, 8, 16, 'max'].includes(speed) ? speed : 8);
                         const playback = controller.play();
                         window.__tilecraftStoryPlayer = controller.player;
                         window.__tilecraftStoryStarted = true;

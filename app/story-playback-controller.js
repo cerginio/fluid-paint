@@ -34,7 +34,8 @@ class StoryPlaybackController {
     this._runPromise = null;
     this._pauseResolve = null;
     this._paused = false;
-    this._storyClock = undefined;
+    this._storyTickCounter = null;
+    this.maxRate = null;
     this._configurationPromise = Promise.resolve();
     this.activeRunSettings = null;
     this.lastStats = null;
@@ -212,17 +213,24 @@ class StoryPlaybackController {
   }
 
   setSpeed(multiplier) {
-    if (![0.25, 0.5, 1, 2, 4, 8, 16].includes(multiplier)) {
+    if (![0.25, 0.5, 1, 2, 4, 8, 16, 'max'].includes(multiplier)) {
       throw new RangeError('Unsupported story playback speed.');
     }
     if (this.speed === multiplier) return Promise.resolve(false);
     this.speed = multiplier;
+    this.maxRate = null;
     if (this.plan) {
       const total = this.plan.operations.length;
-      this.targetDuration = TilecraftStrokePlayer.targetPlaySeconds(total) / this.speed;
       const painted = total - this.registry.pendingCount;
-      this.elapsed = total ? this.targetDuration * painted / total : 0;
-      this.estimatedRemaining = Math.max(0, this.targetDuration - this.elapsed);
+      if (this.speed === 'max') {
+        // Max promises no duration: its ETA comes only from measurement.
+        this.targetDuration = null;
+        this.estimatedRemaining = null;
+      } else {
+        this.targetDuration = TilecraftStrokePlayer.targetPlaySeconds(total) / this.speed;
+        this.elapsed = total ? this.targetDuration * painted / total : 0;
+        this.estimatedRemaining = Math.max(0, this.targetDuration - this.elapsed);
+      }
     }
     this._emit();
     return this._reconfigureActiveRun();
@@ -527,8 +535,10 @@ class StoryPlaybackController {
     this.activeRunSettings = runSettings;
     const total = this.plan.operations.length;
     const remainingFraction = total ? this.registry.pendingCount / total : 0;
-    const runTargetDuration = this.targetDuration * remainingFraction;
+    const max = runSettings.speed === 'max';
+    const runTargetDuration = max ? null : this.targetDuration * remainingFraction;
     const runElapsedBase = this.elapsed;
+    const meter = max ? this._startRateMeter(total) : null;
     /* Denser bristles for imported stamps, restored in the finally below.
      * A stamp is one press, so its coverage is whatever a single sunflower of
      * bristles paints; the brush slider is the user's choice for their own
@@ -543,6 +553,7 @@ class StoryPlaybackController {
       waitUntilResumed: (signal) => this._waitUntilResumed(signal),
       waitFrame: () => new Promise(requestAnimationFrame),
       targetDuration: runTargetDuration,
+      tickScheduler: max ? new TilecraftStrokePlayer.BudgetTickScheduler() : undefined,
       brushSizeMultiplier: runSettings.thickness,
       advanceTick: () => this._advanceStoryTick(),
       resetAdvanceClock: () => this._resetStoryClock(),
@@ -554,7 +565,11 @@ class StoryPlaybackController {
         this.elapsed = Number.isFinite(progress.timelineElapsed)
           ? runElapsedBase + progress.timelineElapsed
           : this.targetDuration * paintedFraction;
-        this.estimatedRemaining = Math.max(0, this.targetDuration - this.elapsed);
+        if (meter) {
+          this._sampleRate(meter, progress);
+        } else {
+          this.estimatedRemaining = Math.max(0, this.targetDuration - this.elapsed);
+        }
         this.painter.needsRedraw = true;
         this._emit();
       },
@@ -565,7 +580,7 @@ class StoryPlaybackController {
       this.lastStats = result.stats;
       this.playheadIndex = result.nextIndex;
       if (!abortController.signal.aborted) {
-        this.elapsed = runElapsedBase + (result.stats.actualDuration ?? runTargetDuration);
+        this.elapsed = runElapsedBase + (result.stats.actualDuration ?? runTargetDuration ?? 0);
         this.estimatedRemaining = 0;
         this._setState(this.registry.pendingCount ? 'completed-with-gaps' : 'completed');
       }
@@ -580,6 +595,7 @@ class StoryPlaybackController {
       }
       return false;
     } finally {
+      if (meter) this._storyTickCounter = null;
       this._restoreBristleCount(userBristleCount);
       if (this._abortController === abortController) this._abortController = null;
       if (this._runPromise === run) this._runPromise = null;
@@ -682,15 +698,56 @@ class StoryPlaybackController {
     }
   }
 
+  /* One story tick is exactly one engine step (INV-MAX-1). The former
+   * synthetic advance() clock let a slow tick add interpolated steps, so the
+   * painting depended on how ticks were grouped into frames. */
   _advanceStoryTick() {
-    const wallNow = performance.now() / 1000;
-    this._storyClock = Math.max(this._storyClock === undefined ? wallNow : this._storyClock, wallNow) + 1 / 60;
-    this.engine.advance(this._storyClock);
+    this.engine.stepTick();
+    if (this._storyTickCounter) this._storyTickCounter.ticks++;
   }
 
   _resetStoryClock() {
     this.engine.resetClock(performance.now() / 1000);
-    this._storyClock = undefined;
+  }
+
+  /** True while a run feeds the engine its ticks; the host must not add its own. */
+  get ownsEngineClock() {
+    return this.state === 'playing' && this._runPromise !== null;
+  }
+
+  /* Max reports what it measures: operations and ticks per second over a
+   * sliding one-second window, published at most twice a second. */
+  _startRateMeter(total) {
+    const counter = { ticks: 0 };
+    this._storyTickCounter = counter;
+    this.maxRate = null;
+    this.estimatedRemaining = null;
+    const start = performance.now();
+    return { counter, total, samples: [{ time: start, ticks: 0, operations: null }],
+      start, publishedAt: -Infinity };
+  }
+
+  _sampleRate(meter, progress) {
+    const time = performance.now();
+    const samples = meter.samples;
+    if (samples[0].operations === null) samples[0].operations = progress.paintedOperations;
+    samples.push({ time, ticks: meter.counter.ticks, operations: progress.paintedOperations });
+    while (samples.length > 2 && time - samples[1].time >= 1000) samples.shift();
+    if (time - meter.start < 1000 || time - meter.publishedAt < 500) return;
+    const first = samples[0];
+    const seconds = (time - first.time) / 1000;
+    if (seconds <= 0) return;
+    const operationsPerSecond = (progress.paintedOperations - first.operations) / seconds;
+    const ticksPerSecond = (meter.counter.ticks - first.ticks) / seconds;
+    const oneXSeconds = TilecraftStrokePlayer.targetPlaySeconds(meter.total);
+    const oneXRate = oneXSeconds > 0 ? meter.total / oneXSeconds : 0;
+    meter.publishedAt = time;
+    this.maxRate = {
+      multiplier: oneXRate > 0 ? operationsPerSecond / oneXRate : 0,
+      ticksPerSecond,
+    };
+    this.estimatedRemaining = operationsPerSecond > 0
+      ? progress.pendingOperations / operationsPerSecond : null;
   }
 
   _syncProgressPosition() {
@@ -721,8 +778,14 @@ class StoryPlaybackController {
 
   _resetTiming() {
     const count = this.plan?.operations?.length || 0;
-    this.targetDuration = TilecraftStrokePlayer.targetPlaySeconds(count) / this.speed;
+    this.maxRate = null;
     this.elapsed = 0;
+    if (this.speed === 'max') {
+      this.targetDuration = null;
+      this.estimatedRemaining = null;
+      return;
+    }
+    this.targetDuration = TilecraftStrokePlayer.targetPlaySeconds(count) / this.speed;
     this.estimatedRemaining = this.targetDuration;
   }
 
@@ -740,6 +803,7 @@ class StoryPlaybackController {
       modelSummary: this.modelSummary,
       progress: { ...this.progress },
       speed: this.speed,
+      maxRate: this.maxRate ? { ...this.maxRate } : null,
       thickness: this.thickness,
       activeRunSettings: this.activeRunSettings,
       backgroundSummary: this.backgroundSummary,

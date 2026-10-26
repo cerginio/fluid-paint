@@ -896,13 +896,20 @@ class Paint {
 
         if (!storyOwnsBrush) this._syncBrushToPointer();
 
-        const result = this.engine.advance(performance.now() / 1000,
-            this.brushInitialized && !storyOwnsBrush ? {
-                x: this.brushX, y: this.brushY,
-                height: BRUSH_HEIGHT * this.brushScale * this.brushPressure,
-                scale: this.brushScale,
-            } : undefined);
-        if (result.simulationUpdated) this.needsRedraw = true;
+        // A playing story ticks the engine itself, one step per tick. Wall-time
+        // steps here would land between its frames only when a frame is late,
+        // making the painting depend on frame timing (INV-MAX-1).
+        if (storyOwnsBrush && this.storyPlaybackController.ownsEngineClock) {
+            this.engine.resetClock(performance.now() / 1000);
+        } else {
+            const result = this.engine.advance(performance.now() / 1000,
+                this.brushInitialized && !storyOwnsBrush ? {
+                    x: this.brushX, y: this.brushY,
+                    height: BRUSH_HEIGHT * this.brushScale * this.brushPressure,
+                    scale: this.brushScale,
+                } : undefined);
+            if (result.simulationUpdated) this.needsRedraw = true;
+        }
 
         // Persistent painting geometry is world-space. Only these derived
         // rectangles are transformed for presentation.

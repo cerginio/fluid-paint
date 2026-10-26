@@ -437,6 +437,24 @@ const server = http.createServer((request, response) => {
       const controller = window.__painter.storyPlaybackController;
       return controller.state === 'playing' && controller.activeRunSettings.speed === 2;
     });
+    // AC-MAX-1 / AC-MAX-5: Max is the last option and reports what it measures.
+    assert.deepEqual(await page.locator('#story-speed option').evaluateAll(
+      (options) => options.slice(-2).map((option) => [option.value, option.textContent])),
+    [['16', '16×'], ['max', 'Max']], 'Max is the last speed, directly under 16×');
+    await page.selectOption('#story-speed', 'max');
+    await page.waitForFunction(() => {
+      const controller = window.__painter.storyPlaybackController;
+      return controller.state === 'playing' && controller.activeRunSettings.speed === 'max';
+    });
+    assert.match(await page.locator('#story-player-status').textContent(),
+      /^Playing · Max (\(measuring…\)|≈ \d+×)/, 'Max starts by measuring, not by promising');
+    await page.waitForFunction(() => /^Playing · Max ≈ \d+× · [\d ]+ ticks\/s · \d+ s left$/
+      .test(document.getElementById('story-player-status').textContent), null, { timeout: 15000 });
+    await page.selectOption('#story-speed', '2');
+    await page.waitForFunction(() => {
+      const controller = window.__painter.storyPlaybackController;
+      return controller.state === 'playing' && controller.activeRunSettings.speed === 2;
+    });
     assert.equal(await page.locator('#panel-body').evaluate((element) => element.inert), false,
       'story playback never makes paint controls inert');
     await page.waitForFunction(() => window.__painter.storyPlaybackController.progress.paintedOperations > 0);

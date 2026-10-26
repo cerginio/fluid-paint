@@ -49,6 +49,17 @@ for (const hz of [30,60,144]) {
  assert.equal(calls.splat.length,1, 'sub-tick tap paints without ten settling steps');
  assert.equal(calls.fluid,0); e.advance(1/60); assert.equal(calls.fluid,1,'fluid runs after lift');
 }
+// INV-MAX-1: stepTick() is one step with the live target, whatever the wall time.
+{
+ const {e,calls}=fixture();
+ e.strokeTo({x:30,y:0});
+ const r=e.stepTick();
+ assert.equal(r.steps,1); assert.equal(calls.fluid,1); assert.equal(calls.brush.length,1);
+ assert.equal(calls.brush[0][0],30,'the tick lands on the current target, not an interpolation');
+ e.resetClock(5); assert.equal(e.advance(5).steps,0,'stepTick leaves the host clock to resetClock()');
+ for(let i=0;i<4;i++) e.stepTick();
+ assert.equal(calls.fluid,5);
+}
 // Constant-speed input reaches the same tick positions at different display rates.
 const paths=[];
 for(const hz of [30,60,144]) {
@@ -57,4 +68,4 @@ for(const hz of [30,60,144]) {
  paths.push(calls.brush.map(p=>p[0]));
 }
 for(const path of paths) path.forEach((x,i)=>assert.ok(Math.abs(x-paths[0][i])<1e-8));
-console.log('live timing: PASS (hold, 30/60/144 Hz, bounded burst, cursor, endpoint, tap, overload, repeated resume)');
+console.log('live timing: PASS (hold, 30/60/144 Hz, bounded burst, cursor, endpoint, tap, overload, repeated resume, stepTick)');

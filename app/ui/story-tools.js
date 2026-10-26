@@ -97,7 +97,7 @@ class StoryToolsUI {
       choose();
     });
     this._on('story-speed', 'change', (event) => {
-      this._safe(() => this.controller.setSpeed(Number(event.target.value)));
+      this._safe(() => this.controller.setSpeed(StoryToolsUI.parseSpeed(event.target.value)));
     });
     this._on('story-color-model', 'change', (event) => {
       this._safe(() => this.controller.setColorModel(event.target.value));
@@ -402,7 +402,7 @@ class StoryToolsUI {
       colorModel.value = view.colorModel;
       colorModel.disabled = false;
     }
-    if (speed && Number(speed.value) !== view.speed) speed.value = String(view.speed);
+    if (speed && StoryToolsUI.parseSpeed(speed.value) !== view.speed) speed.value = String(view.speed);
     const thickness = document.getElementById('story-thickness');
     if (thickness && Number(thickness.value) !== view.thickness) thickness.value = String(view.thickness);
     this._renderThicknessValue(view.thickness);
@@ -436,7 +436,21 @@ class StoryToolsUI {
     }
   }
 
+  /** Select value to controller speed: a multiplier, or the string 'max'. */
+  static parseSpeed(value) {
+    return value === 'max' ? 'max' : Number(value);
+  }
+
   _statusText(view) {
+    if (view.state === 'playing' && view.speed === 'max') {
+      // Max shows only what it measured, never a promised multiplier.
+      if (!view.maxRate) return 'Playing · Max (measuring…)';
+      const multiplier = Math.round(view.maxRate.multiplier);
+      const ticks = Math.round(view.maxRate.ticksPerSecond).toLocaleString('en-US').replace(/,/g, ' ');
+      const eta = Number.isFinite(view.estimatedRemaining)
+        ? ` · ${Math.ceil(view.estimatedRemaining)} s left` : '';
+      return `Playing · Max ≈ ${multiplier}× · ${ticks} ticks/s${eta}`;
+    }
     if (view.state === 'playing') return 'Painting story…';
     if (view.state === 'paused') return 'Playback paused.';
     if (view.state === 'completed') return 'Playback completed.';

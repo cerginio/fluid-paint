@@ -665,27 +665,53 @@ class FluidEngine {
     const previous = this._previousLiveTarget || current;
     let simulationUpdated = false;
     for (let i = 0; i < steps; i++) {
-      if (current) {
-        const tickTime = now - this._accumulator - (steps - 1 - i) * dt;
-        const t = droppedSeconds > 0 || elapsed === 0 ? 1
-          : Math.max(0, Math.min(1, (tickTime - previousTime) / elapsed));
-        this.brush.update(
-          previous.x + (current.x - previous.x) * t,
-          previous.y + (current.y - previous.y) * t,
-          previous.height + (current.height - previous.height) * t,
-          current.scale
-        );
-        if (this.strokeActive) this._liveContact(false);
-      }
-      if (this.simulator.simulate()) simulationUpdated = true;
+      const tickTime = now - this._accumulator - (steps - 1 - i) * dt;
+      const t = droppedSeconds > 0 || elapsed === 0 ? 1
+        : Math.max(0, Math.min(1, (tickTime - previousTime) / elapsed));
+      if (this._tick(previous, current, t)) simulationUpdated = true;
     }
+    return this._finishTicks(current, steps, droppedSeconds, simulationUpdated);
+  }
+
+  /**
+   * Exactly one live step with the current mailbox target, independent of
+   * wall time (INV-MAX-1). Fast story playback uses this instead of advance()
+   * with a synthetic clock, which inserted extra interpolated steps whenever
+   * one tick took longer than 1/60 s. The engine clock is not touched: a host
+   * that also calls advance() should resetClock() before its next frame.
+   */
+  stepTick() {
+    if (this.strokeActive && this._stroke.timing !== 'live') {
+      throw this._strokeError('stepTick() cannot run a legacy replay stroke.');
+    }
+    const current = this._liveTarget;
+    const updated = this._tick(this._previousLiveTarget || current, current, 1);
+    return this._finishTicks(current, 1, 0, updated);
+  }
+
+  /* One brush/splat/fluid step, the body shared by advance() and stepTick(). */
+  _tick(previous, current, t) {
+    if (current) {
+      this.brush.update(
+        previous.x + (current.x - previous.x) * t,
+        previous.y + (current.y - previous.y) * t,
+        previous.height + (current.height - previous.height) * t,
+        current.scale
+      );
+      if (this.strokeActive) this._liveContact(false);
+    }
+    return this.simulator.simulate();
+  }
+
+  _finishTicks(current, steps, droppedSeconds, simulationUpdated) {
+    const dt = 1 / 60;
     this._previousLiveTarget = current;
     this._simulatedSeconds = (this._simulatedSeconds || 0) + steps * dt;
     this._droppedSeconds = (this._droppedSeconds || 0) + droppedSeconds;
     this.timingStats = {
       steps, stamps: this.strokeActive ? steps : 0, droppedSeconds,
       simulatedSeconds: this._simulatedSeconds, totalDroppedSeconds: this._droppedSeconds,
-      accumulator: this._accumulator, simulationUpdated,
+      accumulator: this._accumulator || 0, simulationUpdated,
     };
     return this.timingStats;
   }

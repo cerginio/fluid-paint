@@ -126,6 +126,102 @@ function operationVisualWeight(operation, previous) {
   return weight;
 }
 
+/*
+ * Tick schedulers group fast playback ticks into displayed frames. They decide
+ * only how many ticks share a frame, never which ticks run, so every scheduler
+ * produces the same painting (INV-MAX-1). Protocol per frame: beginFrame(),
+ * then shouldContinue() before each tick (true counts that tick), endFrame()
+ * before yielding to the display.
+ */
+class FixedTickScheduler {
+  constructor(ticksPerFrame) {
+    if (!Number.isInteger(ticksPerFrame) || ticksPerFrame < 1) {
+      throw new TypeError('FixedTickScheduler needs a positive integer tick count.');
+    }
+    this.limit = ticksPerFrame;
+    this.count = 0;
+  }
+
+  beginFrame() { this.count = 0; }
+
+  shouldContinue() {
+    if (this.count >= this.limit) return false;
+    this.count++;
+    return true;
+  }
+
+  endFrame() {}
+}
+
+/*
+ * As many ticks per frame as the device sustains (SPEC 1.3). A CPU budget
+ * bounds the JavaScript side; the ceiling K bounds the GPU side, which the CPU
+ * clock cannot see because WebGL only queues work: an overfull queue shows up
+ * as long display intervals, so two long ones in a row shrink K (AIMD).
+ */
+class BudgetTickScheduler {
+  constructor({ now = () => performance.now(), budgetMs = 10, initialLimit = 16,
+    maxLimit = 256, calibrationFrames = 10, suspendedMs = 1000 } = {}) {
+    this.now = now;
+    this.budgetMs = budgetMs;
+    this.initialLimit = initialLimit;
+    this.maxLimit = maxLimit;
+    this.calibrationFrames = calibrationFrames;
+    this.suspendedMs = suspendedMs;
+    this.limit = initialLimit;
+    this.displayInterval = null;
+    this.count = 0;
+    this._samples = [];
+    this._frameStart = undefined;
+    this._previousLong = false;
+  }
+
+  beginFrame() {
+    const start = this.now();
+    if (this._frameStart !== undefined) this._observeInterval(start - this._frameStart);
+    this._frameStart = start;
+    this.count = 0;
+  }
+
+  _observeInterval(interval) {
+    if (interval > this.suspendedMs) {
+      // A hidden tab or a pause stops RAF; what follows is a new device state.
+      this.limit = this.initialLimit;
+      this.displayInterval = null;
+      this._samples = [];
+      this._previousLong = false;
+      return;
+    }
+    if (this.displayInterval === null) {
+      this._samples.push(interval);
+      if (this._samples.length === this.calibrationFrames) {
+        const sorted = this._samples.slice().sort((a, b) => a - b);
+        this.displayInterval = sorted[Math.floor(sorted.length / 2)];
+      }
+      return;
+    }
+    const long = interval > 1.5 * this.displayInterval;
+    if (long && this._previousLong) {
+      this.limit = Math.max(1, Math.floor(this.limit * 0.7));
+      this._previousLong = false;
+    } else {
+      if (!long) this.limit = Math.min(this.limit + 1, this.maxLimit);
+      this._previousLong = long;
+    }
+  }
+
+  shouldContinue() {
+    if (this.count > 0 &&
+        (this.count >= this.limit || this.now() - this._frameStart >= this.budgetMs)) {
+      return false;
+    }
+    this.count++;
+    return true;
+  }
+
+  endFrame() {}
+}
+
 class TilecraftStrokePlayer {
   static targetPlaySeconds(operationCount) { return targetPlaySeconds(operationCount); }
 
@@ -229,29 +325,27 @@ class TilecraftStrokePlayer {
     if (!Number.isInteger(framesPerStep) || framesPerStep < 1) {
       throw new TypeError('Tilecraft live playback framesPerStep must be a positive integer.');
     }
-    const ticksPerFrame = options.ticksPerFrame === undefined ? 1 : options.ticksPerFrame;
-    if (!Number.isInteger(ticksPerFrame) || ticksPerFrame < 1) {
-      throw new TypeError('Tilecraft live playback ticksPerFrame must be a positive integer.');
-    }
-    if (ticksPerFrame > 1 && framesPerStep !== 1) {
-      throw new TypeError('Use either ticksPerFrame (fast) or framesPerStep (slow), not both.');
-    }
-    if (ticksPerFrame > 1 && typeof options.advanceTick !== 'function') {
-      throw new TypeError('Fast Tilecraft playback requires options.advanceTick().');
-    }
+    const scheduler = this._tickScheduler(options, framesPerStep);
     const waitStep = async () => {
       for (let i = 0; i < framesPerStep; i++) await waitFrame();
     };
     let ticksThisFrame = 0;
-    const fastTick = ticksPerFrame === 1 ? null : async () => {
+    if (scheduler) {
+      scheduler.beginFrame();
+      scheduler.shouldContinue();
+    }
+    const fastTick = !scheduler ? null : async () => {
       await options.advanceTick();
       ticksThisFrame++;
-      if (ticksThisFrame === ticksPerFrame) {
+      if (!scheduler.shouldContinue()) {
         // The host returns the engine clock to wall time before yielding, so
         // its ordinary RAF cannot see a synthetic future timestamp.
         if (typeof options.resetAdvanceClock === 'function') options.resetAdvanceClock();
         ticksThisFrame = 0;
+        scheduler.endFrame();
         await waitFrame();
+        scheduler.beginFrame();
+        scheduler.shouldContinue();
       }
     };
     const finishFastTicks = () => {
@@ -466,21 +560,27 @@ class TilecraftStrokePlayer {
     }
 
     const framesPerStep = options.framesPerStep === undefined ? 1 : options.framesPerStep;
-    const ticksPerFrame = options.ticksPerFrame === undefined ? 1 : options.ticksPerFrame;
     const brushSizeMultiplier = options.brushSizeMultiplier === undefined ? 1 : options.brushSizeMultiplier;
     const targetDuration = options.targetDuration;
     const timelineEnabled = Number.isFinite(targetDuration) && targetDuration >= 0;
-    if (!Number.isInteger(framesPerStep) || framesPerStep < 1 ||
-        !Number.isInteger(ticksPerFrame) || ticksPerFrame < 1 ||
-        (ticksPerFrame > 1 && framesPerStep !== 1)) {
+    if (!Number.isInteger(framesPerStep) || framesPerStep < 1) {
       throw new TypeError('Use positive integer framesPerStep or ticksPerFrame, not both.');
     }
     if (!Number.isFinite(brushSizeMultiplier) || brushSizeMultiplier <= 0) {
       throw new TypeError('Tilecraft brushSizeMultiplier must be a positive finite number.');
     }
-    if (ticksPerFrame > 1 && typeof options.advanceTick !== 'function') {
-      throw new TypeError('Fast Tilecraft playback requires options.advanceTick().');
+    const scheduler = this._tickScheduler(options, framesPerStep);
+    /* Two tick orders exist. The legacy ticksPerFrame order ticks AFTER each
+     * operation. The paced order -- every story speed, and Max -- ticks once
+     * before each following operation, and its frame breaks come from the
+     * timeline deadline and/or a tick scheduler. Max and 16x share the paced
+     * order, so they differ only in how ticks are grouped into frames. */
+    const legacyFast = scheduler !== null && options.tickScheduler === undefined;
+    if (legacyFast && timelineEnabled) {
+      throw new TypeError('A timed playPlan() takes tickScheduler, not ticksPerFrame.');
     }
+    const paced = timelineEnabled || (scheduler !== null && !legacyFast);
+    const frameScheduler = scheduler || (paced ? new FixedTickScheduler(32) : null);
 
     const registry = options.registry;
     const waitFrame = options.waitFrame || (() => new Promise((resolve) => {
@@ -494,7 +594,6 @@ class TilecraftStrokePlayer {
     let pendingIndex = null;
     let previousIndex = null;
     let nextIndex = startIndex;
-    let ticksThisFrame = 0;
     let pendingProgress = null;
     let operationsSinceFrame = 0;
     const now = options.now || (() => performance.now());
@@ -524,14 +623,20 @@ class TilecraftStrokePlayer {
       onProgress(pendingProgress);
       pendingProgress = null;
     };
+    const yieldFrame = async () => {
+      flushProgress();
+      if (typeof options.resetAdvanceClock === 'function') options.resetAdvanceClock();
+      frameScheduler.endFrame();
+      await waitFrame();
+      frameScheduler.beginFrame();
+    };
     const waitTimeline = async (index) => {
-      if (!timelineEnabled) return;
-      const deadline = targetDuration * 1000 * completedWeight / totalWeight;
-      while (now() - timelineStart - pausedMilliseconds < deadline || operationsSinceFrame >= 32) {
+      if (!paced) return;
+      const deadline = timelineEnabled
+        ? targetDuration * 1000 * completedWeight / totalWeight : -Infinity;
+      while (now() - timelineStart - pausedMilliseconds < deadline || !frameScheduler.shouldContinue()) {
         await waitUntilReady();
-        flushProgress();
-        if (typeof options.resetAdvanceClock === 'function') options.resetAdvanceClock();
-        await waitFrame();
+        await yieldFrame();
         operationsSinceFrame = 0;
         checkAbort();
       }
@@ -540,7 +645,7 @@ class TilecraftStrokePlayer {
       stats.maxCatchUpBatch = Math.max(stats.maxCatchUpBatch || 0, operationsSinceFrame);
     };
     const waitStep = async () => {
-      if (timelineEnabled) {
+      if (paced) {
         if (typeof options.advanceTick === 'function') {
           await options.advanceTick();
           if (typeof options.resetAdvanceClock === 'function') options.resetAdvanceClock();
@@ -558,21 +663,17 @@ class TilecraftStrokePlayer {
       stats.points++;
       if (operation.kind === 'polygon-spot') stats.spots++;
       const value = this._planProgress(plan, registry, index + 1, operation, stats);
-      if (timelineEnabled) {
-        value.timelineElapsed = Math.max(0, (now() - timelineStart - pausedMilliseconds) / 1000);
-        value.timelineTarget = targetDuration;
-      }
-      if (timelineEnabled) pendingProgress = value;
+      if (paced) value.timelineElapsed = Math.max(0, (now() - timelineStart - pausedMilliseconds) / 1000);
+      if (timelineEnabled) value.timelineTarget = targetDuration;
+      if (paced) pendingProgress = value;
       else onProgress(value);
     };
     const advanceFast = async () => {
       await options.advanceTick();
       checkAbort();
-      ticksThisFrame++;
-      if (ticksThisFrame === ticksPerFrame) {
-        if (typeof options.resetAdvanceClock === 'function') options.resetAdvanceClock();
-        ticksThisFrame = 0;
-        await waitFrame();
+      if (!frameScheduler.shouldContinue()) {
+        await yieldFrame();
+        frameScheduler.shouldContinue();
         checkAbort();
       }
     };
@@ -584,6 +685,11 @@ class TilecraftStrokePlayer {
       }
     };
 
+    if (frameScheduler) {
+      frameScheduler.beginFrame();
+      // The legacy order ticks before it asks, so its first tick is reserved here.
+      if (legacyFast) frameScheduler.shouldContinue();
+    }
     try {
       for (let index = startIndex; index < stopAt; index++) {
         nextIndex = index;
@@ -609,7 +715,7 @@ class TilecraftStrokePlayer {
             pendingIndex = null;
           }
           closeStroke();
-          if (ticksPerFrame === 1) await waitStep();
+          if (!legacyFast) await waitStep();
           /* All of a stamp's contacts belong to THIS operation index: the
            * registry marks an index painted exactly once, so splitting them
            * across indices would let frame navigation repaint part of a stamp
@@ -624,7 +730,7 @@ class TilecraftStrokePlayer {
           );
           markPainted(index, operation);
           onPaint();
-          if (ticksPerFrame > 1) await advanceFast();
+          if (legacyFast) await advanceFast();
           previousIndex = index;
           nextIndex = index + 1;
           continue;
@@ -641,7 +747,7 @@ class TilecraftStrokePlayer {
             (previousIndex === index - 1 ||
               (operation.pathJoinCorrection && previousPainted));
           if (!connected) stats.strokes++;
-          if (ticksPerFrame === 1) await waitStep();
+          if (!legacyFast) await waitStep();
           // render.js uses currentPoint's F and nextPoint's s for each line
           // segment. A constant radius across this capsule follows that rule.
           const segmentRadius = connected
@@ -673,7 +779,7 @@ class TilecraftStrokePlayer {
           });
           markPainted(index, operation);
           onPaint();
-          if (ticksPerFrame > 1) await advanceFast();
+          if (legacyFast) await advanceFast();
           previousIndex = index;
           nextIndex = index + 1;
           continue;
@@ -693,7 +799,7 @@ class TilecraftStrokePlayer {
           markPainted(index, operation); // beginStroke's live contact is immediate
           onPaint();
         } else {
-          if (pendingIndex !== null && ticksPerFrame === 1) {
+          if (pendingIndex !== null && !legacyFast) {
             await waitStep();
             markPainted(pendingIndex, plan.operations[pendingIndex]);
             pendingIndex = null;
@@ -702,7 +808,7 @@ class TilecraftStrokePlayer {
             x: operation.point.x, y: operation.point.y, pressure: operation.pressure,
           });
           onPaint();
-          if (ticksPerFrame > 1) {
+          if (legacyFast) {
             await advanceFast();
             markPainted(index, operation);
           } else {
@@ -730,16 +836,14 @@ class TilecraftStrokePlayer {
       if (timelineEnabled) {
         while (now() - timelineStart - pausedMilliseconds < targetDuration * 1000) {
           await waitUntilReady();
-          flushProgress();
-          if (typeof options.resetAdvanceClock === 'function') options.resetAdvanceClock();
-          await waitFrame();
+          await yieldFrame();
           checkAbort();
         }
-        flushProgress();
       }
+      flushProgress();
       closeStroke();
-      if (timelineEnabled) {
-        stats.targetDuration = targetDuration;
+      if (timelineEnabled) stats.targetDuration = targetDuration;
+      if (paced) {
         stats.actualDuration = Math.max(0, (now() - timelineStart - pausedMilliseconds) / 1000);
       }
       return { stats, nextIndex, completed: nextIndex >= plan.operations.length };
@@ -816,6 +920,31 @@ class TilecraftStrokePlayer {
       pendingOperations,
       pendingRanges: registry ? registry.ranges.length : (pendingOperations ? 1 : 0),
     };
+  }
+
+  /* The fast path's frame grouping: an explicit tickScheduler, or the legacy
+   * ticksPerFrame as a FixedTickScheduler. null means one tick per step. */
+  _tickScheduler(options, framesPerStep) {
+    const ticksPerFrame = options.ticksPerFrame === undefined ? 1 : options.ticksPerFrame;
+    if (!Number.isInteger(ticksPerFrame) || ticksPerFrame < 1) {
+      throw new TypeError('Tilecraft live playback ticksPerFrame must be a positive integer.');
+    }
+    if (options.tickScheduler && options.ticksPerFrame !== undefined) {
+      throw new TypeError('Use either tickScheduler or ticksPerFrame, not both.');
+    }
+    const scheduler = options.tickScheduler ||
+      (ticksPerFrame > 1 ? new FixedTickScheduler(ticksPerFrame) : null);
+    if (!scheduler) return null;
+    if (['beginFrame', 'shouldContinue', 'endFrame'].some((name) => typeof scheduler[name] !== 'function')) {
+      throw new TypeError('A tickScheduler needs beginFrame(), shouldContinue() and endFrame().');
+    }
+    if (framesPerStep !== 1) {
+      throw new TypeError('Use either ticksPerFrame (fast) or framesPerStep (slow), not both.');
+    }
+    if (typeof options.advanceTick !== 'function') {
+      throw new TypeError('Fast Tilecraft playback requires options.advanceTick().');
+    }
+    return scheduler;
   }
 
   _abortError() {
@@ -1623,6 +1752,8 @@ class TilecraftStrokePlayer {
 }
 
 TilecraftStrokePlayer.brushSizeCorrectionRate = TILECRAFT_BRUSH_SIZE_CORRECTION_RATE;
+TilecraftStrokePlayer.FixedTickScheduler = FixedTickScheduler;
+TilecraftStrokePlayer.BudgetTickScheduler = BudgetTickScheduler;
 
 if (typeof module !== 'undefined' && module.exports) module.exports = TilecraftStrokePlayer;
 if (typeof globalThis !== 'undefined') globalThis.TilecraftStrokePlayer = TilecraftStrokePlayer;
