@@ -113,8 +113,13 @@ Max змінює лише групування тіків за кадрами, �
   `resolutionScale`, painting rectangle, **варіація натискання**) і `endStroke`;
 - нерухомі контакти (`_liveContact(true)`: тап коротший за тік, фінальна точка на `endStroke`);
 - холості тіки, коли рідина ще тече після мазка (кодуються довжиною серії);
-- команди застосунку: Clear, Undo, Redo, Resize (commit), Bake, Natural/Digital,
-  fluidity, bristle count, brush angle/shape, `paintPathSegment` зі story playback.
+- команди застосунку: Clear, Undo, Redo, Bake, Natural/Digital, Quality,
+  fluidity, bristle count, `paintPathSegment` зі story playback, undo-знімки
+  (`snapshot`) і story baseline (`story-baseline` / `story-restore`). Форма
+  пензля й кут їдуть у `STROKE_BEGIN` (`brushShape`), окремих команд не треба.
+- **Не записуються, а завершують запис** (рішення власника 2026-10-26, фаза 3):
+  Resize (commit) і зміна фонового зображення (File, story-сцена). Resize
+  перевизначає систему координат painting; записане до нього зберігається.
 
 Не записуються: панорамування, zoom, hover без контакту (beginStroke однаково
 переініціалізує ворсинки), рухи UI-панелей.
@@ -143,9 +148,9 @@ PointerDispatcher ─► Paint (onGesturePan, _syncBrushToPointer)
 
 | ID | Вимога |
 |---|---|
-| PERF-REC-1 | Жодного об'єкта на тік. Тіки пишуться в struct-of-arrays блоки `Int32Array` по 4096 тіків (квантовані x, y, h). |
+| PERF-REC-1 | Жодного об'єкта на тік. Тіки пишуться в блоки `Float32Array` по 4096 тіків (x, y, h). |
 | PERF-REC-2 | Жодних нових слухачів pointer events і викликів `getCoalescedEvents()` для запису. |
-| PERF-REC-3 | Під час мазка — лише запис у typed array. Delta-кодування блоку виконується в `requestIdleCallback` (fallback `setTimeout(0)`) після `endStroke`; gzip — тільки на Save. |
+| PERF-REC-3 | Під час мазка — лише запис у typed array. Кодування й gzip — один раз, на Stop (фаза 3: ≈ 8 Б/тік, 36 000 тіків — мілісекунди; поштучне кодування в `requestIdleCallback` не знадобилось). |
 | PERF-REC-4 | Накладні витрати recorder ≤ 0,1 мс на кадр (p95) на desktop-QA пристрої; без recorder обсерватор — `null` і не коштує нічого. |
 | PERF-REC-5 | Ліміт сесії — 432 000 тіків активного малювання (2 год, ≈5 МБ RAM у сирих блоках). На ліміті запис зупиняється сам із повідомленням у картці; записане зберігається. |
 
@@ -180,45 +185,52 @@ PointerDispatcher ─► Paint (onGesturePan, _syncBrushToPointer)
      "painting": { "width": 1600, "height": 1000 }, "resolutionScale": 1,
      "paletteMode": "natural", "fluidity": 0.8, "bristleCount": 100,
      "bristleSeed": 2654435761,
-     "quantum": { "xy": 64, "height": 4096 },
+     "tickEncoding": "float32-pred2",
      "baseline": "empty | png",
-     "stats": { "strokes": 37, "ticks": 18342, "idleTicks": 2210 }
+     "stats": { "strokes": 37, "ticks": 18342, "idleTicks": 2210 },
+     "stopReason": "stop | limit | resize | background | error"
    }
    ```
+   `painting` також несе `left`/`bottom`: тіки записані в координатах світу,
+   повтор ставить painting rectangle туди ж (фаза 4).
 2. Якщо flags.0 — `u32` довжина + PNG baseline (див. 2.6).
 3. Потік записів `tag:u8` + payload:
 
 | Tag | Запис | Payload |
 |---|---|---|
-| `0x01` | STROKE_BEGIN | varint len + JSON: `x, y, pressure, brushSize, color, brushShape, randomizeBristles, resolutionScale, spacing, timing, variation` |
-| `0x02` | TICKS | varint `n`, далі `n` × (zigzag-varint `rx`, `ry`, `rh`) |
+| `0x01` | STROKE_BEGIN | varint len + JSON: `x, y, pressure, brushSize, color, brushShape, randomizeBristles, resolutionScale, paintingRectangle, spacing, timing, variation` |
+| `0x02` | TICKS | varint `n`, далі `n` × (zigzag-varint `rx`, `ry`, `rh`) — залишки в ulp float32 |
 | `0x03` | STROKE_END | — |
-| `0x04` | CONTACT | zigzag-varint квантовані `x, y`, `u16` pressure |
+| `0x04` | CONTACT | `f64` x, y, pressure (LE) — рідкісні, зберігаються точно |
 | `0x05` | IDLE | varint кількість холостих тіків |
 | `0x06` | COMMAND | varint len + JSON (`{"op":"undo"}`, `{"op":"resize","width":…}`, `{"op":"path", …}` …) |
 | `0x10` | KEYFRAMES | секція C, наприкінці файлу (2.5) |
 | `0xFF` | END | — |
 
-**Кодування тіків.** Координати — у системі painting (відносно лівого нижнього
-кута painting rectangle), квантовані: `X = round(x · 64)`, `Y = round(y · 64)`,
-`H = round(height / scale · 4096)`. Значення в блоці кодується як залишок від
-прогнозу другого порядку `p̂ᵢ = 2pᵢ₋₁ − pᵢ₋₂` (для першого тіку мазка прогноз —
-точка `STROKE_BEGIN`, для другого — перша різниця). Плавний рух дає залишок
-у межах кількох квантів, тобто 1 байт varint на компоненту. Квант зберігається в
-header, тому його можна змінити без нової версії формату.
+**Кодування тіків (рішення власника 2026-10-26, після фази 2).** Тіки — точні
+float32 у координатах світу, тобто ті числа, які отримав `brush.update()`
+(GPU однаково бачить лише float32). `scale` не зберігається: рушій завжди тікає з
+`brushSize` мазка. Кожна компонента прогнозується як `fround(2pᵢ₋₁ − pᵢ₋₂)` (для
+першого тіку мазка — точка `STROKE_BEGIN`, висота від 0; для другого — перший
+тік), а записується відстань між фактичним і прогнозованим float32 в ulp
+(монотонний ключ бітів float32), zigzag-varint.
 
-**Бюджет розміру** (перевіряється тестом на QA-корпусі, 2.8):
+Чому не кванти: фаза 2 виміряла, що динаміка хаотична — зсув тіка на ≈ 1 ulp
+float32 вже дає ≈ 7 % пікселів з відхиленням > 2; `xy: 64/h: 4096` — 91 %
+пікселів у ±2, жоден квант аж до 1/65536 px не дає 99 %.
 
-| Величина | Ціль |
-|---|---|
-| Середнє до gzip | ≤ 4 Б/тік |
-| Файл без baseline | ≤ 150 КБ на 10 хв активного малювання (36 000 тіків) |
-| Для порівняння | поточний story JSON — 86 Б/точку, 16 Б/точку після gzip |
+**Бюджет розміру** (перевіряється `debug/session-codec-test.js` на синтетичному
+корпусі; на ручному QA-корпусі — у фазі 4):
 
-**Точність.** Квантування робить повтор не побітовим відносно живого
-малювання, тому критерій — допуск (AC-REC-5). Якщо на QA-корпусі допуск не
-досягається, кванти збільшуються (`xy: 256`), і бюджет розміру
-переглядається — у цьому документі, не мовчки в коді.
+| Величина | Ціль | Виміряно (фаза 3, синтетика, 36 129 тіків) |
+|---|---|---|
+| Тіки до gzip | ≤ 9 Б/тік | 8,23 |
+| Файл без baseline | ≤ 300 КБ на 10 хв активного малювання (36 000 тіків) | 235 КБ (6,7 Б/тік) |
+| Для порівняння | поточний story JSON — 86 Б/точку, 16 Б/точку після gzip | |
+
+**Точність.** Повтор з файлу дорівнює повтору з float32-тіків: на GPU-пробі
+фази 3 — побітово (SwiftShader), у фазі 2 float32 давав ±1 через CPU-розмір
+splat-області. Критерій лишається AC-REC-5.
 
 ### 2.5. Формат C — опорні точки (похідний від A)
 
@@ -305,8 +317,12 @@ baseline стає фоном через `setBackgroundImage()`, як після 
   наявність baseline, і кнопку `Open in Player →`.
 - **Взаємодії.** Record вимкнений, поки Player програє `.flus`
   (запис власного повтору — рекурсія), з підказкою в `title`. Запис Tilecraft
-  story playback дозволений. Undo/Redo/Clear/Bake під час запису дозволені й
-  записуються командами.
+  story playback дозволений, якщо story стартує після Record: поки story грає
+  або на паузі, Record вимкнений (baseline story, взятий до запису, повтор не
+  мав би). Undo/Redo/Clear/Bake/Quality під час запису дозволені й
+  записуються командами. Resize і зміна фону завершують запис (2.1).
+- **Undo-історія починається з Record** (фаза 3): повтор стартує з порожнього
+  undo-кільця, тож Undo за межу Record не можна було б відтворити.
 - **Mobile (≤ 640 px).** Картка в тій самій bottom sheet; touch targets ≥ 44 px;
   кнопки Save/Open в один ряд, Record/Stop на всю ширину.
 - **Доступність.** Record/Stop — одна кнопка з `aria-pressed`; зміна стану
@@ -340,9 +356,9 @@ baseline стає фоном через `setBackgroundImage()`, як після 
 | AC-REC-1 | Record → кілька мазків → Stop → Save дає `.flus`, що відкривається через Open… і програється в Player. |
 | AC-REC-2 | Закриття панелі під час запису не зупиняє його; видно чіп `● REC`. |
 | AC-REC-3 | Ручний мазок, що почався до Record, у запис не потрапляє. Мазок, що триває під час Stop, записаний повністю до `endStroke`. |
-| AC-REC-4 | Undo, Redo, Clear, Resize, Bake і зміна Natural/Digital під час запису відтворюються при повторі. |
+| AC-REC-4 | Undo, Redo, Clear, Bake, Quality і зміна Natural/Digital під час запису відтворюються при повторі. Resize і зміна фону завершують запис, записане зберігається. |
 | AC-REC-5 | Exact-повтор на тому ж пристрої після перезавантаження сторінки: ≥ 99 % пікселів `exportPixels()` відрізняються від оригіналу на ≤ 2 у кожному каналі. |
-| AC-REC-6 | Розмір файлу на QA-корпусі: ≤ 4 Б/тік до gzip, ≤ 150 КБ на 36 000 тіків без baseline. |
+| AC-REC-6 | Розмір файлу на QA-корпусі: тіки ≤ 9 Б/тік до gzip, ≤ 300 КБ на 36 000 тіків без baseline. |
 | AC-REC-7 | PERF-REC-1…4: накладні витрати ≤ 0,1 мс/кадр p95; жодних об'єктів на тік. |
 | AC-REC-8 | Незбережена сесія не губиться мовчки: Record, Open… і закриття вкладки попереджають. |
 | AC-REC-9 | Файл з іншим `engineContract` відкривається у режимі `Vector — approximate` за секцією C; без секції C — зрозуміла помилка, жодних винятків у консолі. |
@@ -353,12 +369,12 @@ baseline стає фоном через `setBackgroundImage()`, як після 
 | Рівень | Що | Де |
 |---|---|---|
 | Unit | Кодек: round-trip усіх тегів, zigzag/varint, прогноз 2-го порядку, межі блоків | `debug/session-codec-test.js` |
-| Unit | Розмір на синтетичному корпусі (прямі, дуги, тремтіння, тапи) | там само |
+| Unit | Розмір на синтетичному корпусі (прямі, дуги, тремтіння, тапи); `SessionRecorder` на фейковому рушії | там само |
 | Unit | RDP + тиск: збережені кінці й екстремуми, `ε` | `debug/session-keyframes-test.js` |
 | Unit | `BudgetTickScheduler`: AIMD на фейковому годиннику, стеля 256, старт 16 | `debug/story-max-scheduler-test.js` |
 | GPU | AC-MAX-2/3 (Max == 16×, один крок на тік) | розширення `debug/tilecraft-story-gpu-test.js` |
 | GPU | AC-REC-5: запис програмних мазків через live-шлях → повтор → порівняння пікселів | `debug/session-replay-gpu-test.js` |
-| UI | Стани картки, чіп REC, unsaved guard, Open → Player, mobile layout | розширення `debug/story-player-ui-test.js` |
+| UI | Стани картки, чіп REC, unsaved guard, Save, Resize, Open…, mobile layout (фаза 3); Open → Player (фаза 4) | `debug/session-recording-ui-test.js` |
 
 Синтетичні PointerEvents мають порожній `getCoalescedEvents()`; запис від цього
 не залежить (він на межі рушія), але UI-тест має малювати через той самий
@@ -397,4 +413,6 @@ baseline стає фоном через `setBackgroundImage()`, як після 
    лишити Open тільки в State? Пропозиція: File теж, після P4.
 2. Чи потрібен перемикач «Skip idle pauses» для `1×`, чи досить жорсткого
    скорочення до 60 тіків?
-3. Кванти `xy: 64`, `height: 4096` — стартові; остаточні після вимірювань AC-REC-5/6.
+3. ~~Кванти `xy: 64`, `height: 4096` — стартові; остаточні після вимірювань AC-REC-5/6.~~
+   Вирішено 2026-10-26: квантів немає, тіки — float32 без втрат (2.4).
+4. ~~Що робить запис при Resize?~~ Вирішено 2026-10-26: Resize завершує запис (2.1).

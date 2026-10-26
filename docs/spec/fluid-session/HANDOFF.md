@@ -1,12 +1,12 @@
 # Handoff: fluid-session — швидкість Max і запис сесії малювання
 
-Стан на 2026-10-26, гілка `feat/pwa`. Фази 1 і 2 закриті й закомічені: код теми,
+Стан на 2026-10-26, гілка `feat/pwa`. Фази 1, 2 і 3 закриті й закомічені: код теми,
 `QA.md` і цей файл. Спека
 [`docs/PLAYER-MAX-SPEED-AND-SESSION-RECORDING-SPEC.md`](../../PLAYER-MAX-SPEED-AND-SESSION-RECORDING-SPEC.md)
 (далі — SPEC) закомічена в `a4009a1`.
 
-> **Далі:** спершу рішення власника про формат тіків (пункт 2a) і про Resize під час запису
-> (відкрите питання 4), потім фаза 3. Без 2a кодек фази 3 будувати нема на чому.
+> **Далі:** фаза 4 — Open у Player і повтор `.flus` (пункт 4). Формат файлу й команди, які
+> повтор має виконати, — «Контракт запису для фази 4» нижче.
 
 ## Що зроблено і працює
 
@@ -25,7 +25,15 @@
 | `debug/story-max-scheduler-test.js` (`npm run test:story-max`) | AIMD на фейковому годиннику: старт 16, бюджет 10 мс, ×0,7 після двох довгих кадрів, стеля 256, підлога 1, скидання після паузи > 1 с. |
 | `debug/tilecraft-story-gpu-test.js` | AC-MAX-2/3: зріз fixture (150 тайлів/шар = 186 операцій), `seed=7`, тік +20 мс і ривок +20 мс після `resetClock`; hash 16× == Max, кожен тік = 1 крок, `simulate()`-викликів = тіків. |
 | `debug/story-player-ui-test.js`, `debug/live-timing-test.js` | AC-MAX-1/5 (опція, формат статусу); юніт `stepTick()`. |
-| `paint.js` `save()` | PNG через anchor `download`; фаза 3 перевикористовує для `.flus`. |
+| `paint.js` `save()` | PNG через `downloadBlob(blob, name)` (anchor `download`); той самий шлях для `.flus`. |
+| `app/session-codec.js` (фаза 3) | `SessionCodec`: `encode/decode` (контейнер `FLUS` + gzip), `encodeBody/decodeBody` (синхронно, для тестів). Тіки — float32 без втрат: прогноз `fround(2p₁−p₂)`, залишок в ulp (монотонний ключ бітів), zigzag-varint; contacts — f64. Тег `KEYFRAMES` пропускається за довжиною. Ліміт 25 МБ. |
+| `app/session-recorder.js` (фаза 3) | `SessionRecorder`: обсервер рушія, стани idle → waiting → recording → stopping → stopped. Тіки в `Float32Array` по 4096, без алокацій на тік. Fluidity (на кожен тік) і bristleCount (на beginStroke) порівнює з рушієм і пише командами — так ловиться і `_applySpotBristleCount` story. Legacy `timing:'replay'` мазок → помилка в обсервері → рушій від'єднує, UI зупиняє запис з `error`. `toSession()` після stop. |
+| `app/ui/session-tools.js` (фаза 3) | `SessionToolsUI`: картка першою у State, чіп `#session-rec-chip`, unsaved guard (inline Discard/Cancel), `beforeunload`, Save, Open… (лише декодує й показує підсумок). На старті запису: reseed, baseline PNG, якщо `hasArtwork()`, **скидає undo-кільце**. Record вимкнений, поки story playing/paused (підписка `controller.subscribe`). |
+| `paint.js` (фаза 3) | `_recordSessionCommand()`; `saveSnapshot()` пише `snapshot`, внутрішній `_saveSnapshot()` — ні (undo, quality); команди `clear/undo/redo/bake/palette/quality`. `interruptSessionRecording(reason)`: `_commitResize` (якщо розмір змінився) і фон (`loadBackgroundImage`, `clearBackgroundImage`). `getUpdateSafety().active` враховує незбережений запис. |
+| `app/story-playback-controller.js` (фаза 3) | Clear при Replace → `clear`; `_captureBaseline` → `story-baseline`; `_restoreBaselineSnapshot()` → `story-restore`; фон зі сцени → `interruptSessionRecording('background')`. |
+| `debug/session-codec-test.js` (`npm run test:session-codec`) | 10 перевірок: varint/zigzag, ключі float, round-trip усіх тегів, пошкоджені файли, recorder на фейковому рушії (waiting/stopping/ліміт/legacy), розмір на синтетиці 36 129 тіків. |
+| `debug/session-recording-ui-test.js` (`npm run test:session-ui`) | 12 перевірок у справжній сторінці: картка, чіп, закриття панелі, Stop, guard, Save → decode, baseline, Resize, Open…, Record vs story, overhead, 320 px. CORS-помилки демо-каталогу відфільтровані (оточення). |
+| `debug/session-replay-gpu-test.js` | + варіант `.flus codec round trip`: події → `SessionCodec` → назад → повтор; assert як для float32. |
 
 ## Інваріанти теми
 
@@ -39,7 +47,38 @@ hash 16× == Max. *Доведено мутаціями:* повернення с
 (падає); вимкнення придушення в `paint.js` → 191 `simulate()` на 186 тіків (падає). Без ривка
 +20 мс після `resetClock` друга мутація проходила — його не прибирати.
 
+## Контракт запису для фази 4
+
+Повтор `.flus` виконує записи по порядку на свіжому стані:
+
+- **Старт:** `reseedBristleRandoms(header.bristleSeed)`; fluidity, bristleCount, paletteMode,
+  resolutionScale — з header; painting rectangle = `header.painting` (left/bottom/width/height:
+  тіки в координатах світу, зсув прямокутника ламає float32-точність); baseline PNG як фон;
+  undo-кільце порожнє.
+- `begin` → `engine.beginStroke({ ...params, variation })`; `ticks` → `replayTick(x, y, h,
+  params.brushSize)`; `contact` → тримати до `end`; `end` → `endStroke({ contact })` (`null`, якщо
+  contact не було); `idle` → `replayTick()` × count (SPEC §2.8: серії > 60 можна скоротити до 60).
+- Команди: `snapshot` → `painter.saveSnapshot()`; `undo`/`redo`/`clear`/`bake` → однойменні методи
+  Paint (вони самі беруть свої знімки); `palette` → `setPaletteMode`; `quality` → кнопка якості з
+  цим `resolutionScale`; `fluidity` → `setSimulation`; `bristles` → `setBrush`; `path` →
+  `paintPathSegment(segment)`; `story-baseline` → власний snapshot-слот повтору;
+  `story-restore` → `applySnapshot` з нього.
+- Повтор не пишеться в новий запис (SPEC §2.7: Record вимкнений під час повтору `.flus`).
+
 ## Головні виміряні факти
+
+Фаза 3 (2026-10-26; SwiftShader і AMD Radeon 890M D3D11; власник пройшов QA-S1–S11 на стенді):
+
+- **Кодек без втрат на GPU:** повтор через `.flus` побітово дорівнює повтору з float32-тіків —
+  `identicalBytes: 1`, `maxDelta: 0` і на SwiftShader, і на 890M (163 тіки, 4 мазки).
+- **Розмір, синтетика** (36 129 тіків, 324 мазки: лінії, дуги, тремтіння, повільні, тапи): тіки
+  **8,23 Б/тік** до gzip; тіло 11,43 Б/тік (JSON початку мазка ≈ 350 Б на мазок); файл
+  **6,69 Б/тік, 235 КБ / 10 хв**. Бюджет SPEC після 2a: тіки ≤ 9, файл ≤ 300 КБ.
+- QA-запис 4 ручних мазків: 324 тіки, 1,5 КБ; 3 мазки на `dist/` — 94 тіки, 943 Б.
+- Overhead recorder: ≈ 0,02 мкс/тік (мікробенчмарк у сторінці) — на порядки нижче 0,1 мс/кадр.
+- 320 px: overflow 0, кнопки 44 px, Save/Open в один ряд, Record на всю ширину.
+- Guard фази: 17 з 18 exit 0; `test:bristle-shape` — те саме `0.0895`, що до фази 1.
+
 
 Фаза 2 (2026-10-26; SwiftShader і AMD Radeon 890M D3D11; власник повторив QA-R1–R5 —
 збіглося). Проба: 4 мазки, 163 тіки, 119 холостих, 3 фінальні контакти; сторінки без `?seed=`.
@@ -96,8 +135,8 @@ hash 16× == Max. *Доведено мутаціями:* повернення с
 **Гіпотези, ще не виміряні:**
 
 - ~~Квантування `xy: 64`, `height: 4096` тримає AC-REC-5~~ — спростовано фазою 2 (0,91).
-- Розмір float32-тіків на справжніх ручних мазках менший за 7,5 Б/тік. Міряти у фазі 3 на
-  QA-корпусі, якщо власник обере float32.
+- Розмір float32-тіків на справжніх ручних мазках не більший за синтетику (8,2 Б/тік). Ручного
+  корпусу довшого за хвилину ще немає — міряти у фазі 4 на QA-записі.
 
 ## НЕЗАКРИТЕ — почни звідси
 
@@ -119,6 +158,11 @@ AC-MAX-2 неможливий. Legacy `ticksPerFrame` лишився (тести
 Див. «Що зроблено», «Виміряні факти», `QA.md` §«Фаза 2». Відхилення від SPEC §2.3: додано
 `endStroke({ contact })`. Регресії фаза не виправляла — нового інваріанту немає.
 
+~~2a. Рішення власника: формат тіків~~ — ЗАКРИТО 2026-10-26: float32 без втрат. SPEC §2.4,
+§3 (AC-REC-6), §7.3 оновлено у фазі 3.
+
+<details><summary>Варіанти, з яких обирали (історія)</summary>
+
 ### 2a. Рішення власника: формат тіків (блокує фазу 3)
 
 Числа фази 2 кажуть: кванти SPEC §2.4 AC-REC-5 не тримають за жодного кроку. Варіанти:
@@ -131,6 +175,8 @@ AC-MAX-2 неможливий. Legacy `ticksPerFrame` лишився (тести
 
 Агент SPEC не правив: це рішення про AC. Після рішення — оновити SPEC §2.4, §3 (AC-REC-5/6),
 §7.3, потім фазу 3.
+
+</details>
 
 <details><summary>Початковий план фази 2 (історія)</summary>
 
@@ -160,6 +206,15 @@ AC-MAX-2 неможливий. Legacy `ticksPerFrame` лишився (тести
 
 </details>
 
+~~3. Фаза 3 — запис і Save (SPEC §2.1–2.4, §2.6, §2.7)~~ — ЗАКРИТО 2026-10-26.
+Див. «Що зроблено», «Контракт запису для фази 4», `QA.md` §«Фаза 3». Рішення фази, яких не було в
+SPEC (внесені в SPEC §2.1/§2.2/§2.7): undo-історія починається з Record; Record вимкнений, поки
+story playing/paused; кодування й gzip один раз на Stop (не `requestIdleCallback`); contacts — f64;
+зміна фону завершує запис так само, як Resize. Регресій фаза не виправляла — нового інваріанту
+немає.
+
+<details><summary>Початковий план фази 3 (історія)</summary>
+
 ### 3. Фаза 3 — запис і Save (SPEC §2.1–2.4, §2.6, §2.7)
 
 **Контракт.** `app/session-codec.js` (контейнер `"FLUS"`, теги, zigzag-varint,
@@ -181,6 +236,8 @@ Record/Stop, Save, Open… (поки disabled-заглушка або лише �
 чіп REC поза панеллю, файл `painting-session-*.flus`. Спробувати Record знову
 без Save — inline-попередження Discard/Cancel.
 
+</details>
+
 ### 4. Фаза 4 — Open і повтор у Player (SPEC §2.7 Open, §2.8)
 
 **Контракт.** Open… парсить `.flus`, показує підсумок і `Open in Player →`.
@@ -189,7 +246,12 @@ Player програє сесію Exact-режимом через `replayTick`: �
 Prev/Next і Import colors вимкнені/приховані, Thickness вимкнений,
 IDLE-серії скорочуються до 60. Record вимкнений під час повтору сесії.
 
-**Guard:** guard фази 3 + `test:story-recent`, `test:story-demo:ui`.
+**Guard:** guard фази 3 — `test:session-codec`, `test:story-max`, `test:timing`, `test:tilecraft`,
+`test:tilecraft:gpu`, `test:tilecraft:polyline:gpu`, `test:story-ui`, `test:live-gpu`, `test:bake`,
+`test:session-replay:gpu`, `test:session-ui`, `test:story-recent`, `test:story-demo:ui`,
+`test:ui-preset`, `test:ui-preset:browser`, `build`, `test:pwa-release` (нові файли — у git і в
+gulp-глобах до прогону); `test:bristle-shape` порівнювати з `0.0895`. Open у Player розширює
+`debug/session-recording-ui-test.js`.
 
 **Probe:** AC-REC-5 наскрізно через UI: Record → мазки → Save → reload →
 Open → Play на Max → порівняння `exportPixels()` з PNG, збереженим до reload.
@@ -217,12 +279,10 @@ Restart на Max. Дивитись: темп 1× як у оригіналі, Max
 1. Чи приймати `.flus` і у вкладці File (drag-and-drop)? SPEC §7.1 — пропозиція
    «так, після фази 4»; не входить у жодну фазу, доки людина не вирішить.
 2. Перемикач «Skip idle pauses» для `1×` чи лише жорстке скорочення до 60 тіків? (SPEC §7.2)
-3. Остаточні кванти (SPEC §7.3) — числа фази 2 є (див. «Виміряні факти»): жоден квант не
-   тримає AC-REC-5. Рішення — за власником, пункт 2a.
-4. SPEC не визначає, що робить запис, якщо під час нього змінюють розмір
-   painting rectangle перетягуванням: координати в системі painting, але
-   Resize змінює саму систему. Перед фазою 3 вирішити: записувати Resize як
-   команду й перераховувати наступні тіки, чи зупиняти запис на Resize.
-5. SPEC §2.1 записує `paintPathSegment` зі story playback, але story під час
-   запису ще й змінює `bristleCount` (`_applySpotBristleCount`) на час прогону —
-   перевірити у фазі 3, що ця зміна теж потрапляє в запис командою.
+3. ~~Остаточні кванти (SPEC §7.3)~~ — вирішено 2026-10-26: квантів немає, float32 (пункт 2a).
+4. ~~Resize під час запису~~ — вирішено 2026-10-26: Resize завершує запис, записане зберігається.
+5. ~~`bristleCount` зі story у записі~~ — закрито фазою 3: recorder порівнює `engine.bristleCount`
+   на кожному `beginStroke` і пише команду `bristles` (юніт у `test:session-codec`).
+6. Повтор у Player при іншому розмірі вікна: тіки в координатах світу, тож фаза 4 ставить
+   painting rectangle у `header.painting`, а не зсуває тіки. Якщо він не влазить у вікно —
+   вирішити у фазі 4 (зум вигляду, не зсув координат).

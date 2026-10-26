@@ -9,6 +9,142 @@ Fixture для сценаріїв лежить на диску: `D:\work\fluid-p
 Довідкові числа з desktop-QA (AMD Radeon 890M, D3D11, 2026-10-26), повний fixture:
 1× за планом — 43,0 с; 16× — 13,5 с (1 918 оп/с); Max — 3,8 с (6 838 оп/с).
 
+## Фаза 3 — запис і Save (SPEC §2.1–2.4, §2.6, §2.7) — прийнято 2026-10-26
+
+Журнал: картка **Session recording** першою у вкладці State, чіп `● REC`, Save у `.flus`,
+unsaved guard, Open… поки лише читає файл і показує підсумок (програвання — фаза 4). Тіки —
+float32 без втрат (рішення 2a); Resize завершує запис (відкрите питання 4). Браузерні сценарії —
+на `npm run dev` (`http://127.0.0.1:3000/`), інтернет не потрібен (Demo-вкладка без інтернету
+порожня, це не стосується фази). Власник пройшов сценарії на стенді `npm run dev` і прийняв фазу
+через `handoff:next`. Покриття автоматом: S1–S9 проходить
+`npm run test:session-ui` (SwiftShader), S10 — `npm run test:session-replay:gpu`, S11 —
+`npm run test:session-codec`. Очима варто подивитись те, чого автомат не бачить: чіп над
+полотном, читабельність статусу, поведінку справжньої миші/пера.
+
+### QA-S1. Картка Session recording перша у State
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:3000/`
+**qa:action:** кнопка `+` на компактній панелі → вкладка `State`.
+**qa:inspect:** верх вкладки State.
+**qa:expected:** перша картка — `Session recording`, статус `Not recording`, широка зелена
+кнопка `● Record`, під нею `Save` (вимкнена) і `Open…` (увімкнена) в одному ряду. Нижче —
+`Brush Angle` і `Bake current painting`, як раніше. Блоку `Starts from` немає (полотно порожнє).
+
+### QA-S2. Record вмикає статус і чіп REC
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:3000/`
+**qa:action:** `+` → `State` → `● Record`.
+**qa:inspect:** статус картки; верх полотна по центру.
+**qa:expected:** кнопка стала `■ Stop`, статус червоний `● REC 00:00 · 0 strokes · ~1 KB`,
+таймер щосекунди росте; `Save` і `Open…` вимкнені; під кнопками — `Undo history starts here.`
+Над полотном по центру зверху — чіп `● REC` з червоною крапкою.
+
+### QA-S3. Закриття панелі не зупиняє запис
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:3000/` після QA-S2 (запис іде).
+**qa:action:** `×` у шапці панелі розширень → намалювати 3 мазки мишею → клавіша `Z` (Undo) →
+ще один мазок → клік по чіпу `● REC`.
+**qa:inspect:** чіп під час малювання; вкладка після кліку по чіпу; статус картки.
+**qa:expected:** чіп `● REC` видно весь час, поки панель закрита. Клік по чіпу відкриває панель
+одразу на вкладці State. Статус `● REC mm:ss · 4 strokes · ~N KB` (N — одиниці КБ).
+
+### QA-S4. Stop: записано, не збережено
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:3000/` після QA-S3.
+**qa:action:** `■ Stop`.
+**qa:inspect:** статус картки, кнопки, чіп.
+**qa:expected:** за мить статус `Recorded mm:ss · 4 strokes · N KB — not saved`, кнопка знову
+`● Record`, `Save` і `Open…` увімкнені, чіп зник. З'явився блок `Starts from` з двома
+варіантами: `current painting as background` (обраний) і `clear canvas first`.
+
+### QA-S5. Незбережений запис не губиться мовчки
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:3000/` у стані QA-S4 (`— not saved`).
+**qa:action:** `● Record` → `Cancel`; потім `Open…` → `Cancel`; потім закрити вкладку браузера.
+**qa:inspect:** картка після кожного кліку; діалог браузера при закритті.
+**qa:expected:** після `● Record` і після `Open…` у картці з'являється жовтий блок
+`Unsaved recording will be discarded` з `Discard` / `Cancel`; запис не почався, файловий діалог
+не відкрився. `Cancel` прибирає блок, статус лишається `— not saved`. Закриття вкладки показує
+стандартне браузерне попередження «Leave site?».
+
+### QA-S6. Save дає файл .flus
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:3000/` у стані QA-S4.
+**qa:action:** `Save`.
+**qa:inspect:** завантаження браузера; статус картки.
+**qa:expected:** завантажено `painting-session-YYYYMMDD-HHMM.flus` (дата й час початку запису),
+розмір — одиниці КБ на 4 мазки. Статус `Saved painting-session-….flus`. Тепер `● Record`
+стартує без попередження.
+
+### QA-S7. Record поверх намальованого — baseline
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:3000/` після QA-S6 (на полотні є фарба).
+**qa:action:** у `Starts from` лишити `current painting as background` → `● Record` → Undo-кнопка
+на панелі.
+**qa:inspect:** примітка під кнопками; полотно після Undo.
+**qa:expected:** примітка `Started over the current painting: it is kept as a flat background,
+so new paint will not mix wet with it. Undo history starts here.` Undo нічого не відкочує
+(історія почалась з Record), фарба до Record лишається.
+
+### QA-S8. Resize завершує запис і зберігає його
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:3000/` під час запису (QA-S7).
+**qa:action:** намалювати мазок → потягнути правий край painting rectangle й відпустити.
+**qa:inspect:** статус і примітка картки, чіп.
+**qa:expected:** запис зупинився сам: статус `Recorded mm:ss · 1 strokes · N KB — not saved`,
+примітка `Recording stopped: the painting was resized. What was recorded is kept.`, чіп зник.
+Розмір файлу більший, ніж у QA-S6: у ньому baseline PNG.
+
+### QA-S9. Open… показує підсумок файлу
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:3000/`
+**qa:action:** `+` → `State` → `Open…` (у стані `— not saved` спершу `Discard`) → обрати файл
+з QA-S6. Потім `Open…` → будь-який не-`.flus` файл, перейменований на `x.flus`.
+**qa:inspect:** текст під кнопками.
+**qa:expected:** для файлу з QA-S6:
+`painting-session-….flus: 00:mm · 4 strokes · N ticks · M KB · Exact · starts from an empty canvas.
+Playing it in the Player arrives in the next update.` Для підробленого — червоний
+`x.flus: Session file: this is not a Fluid Paint session (.flus) file.` Помилок у консолі немає.
+
+### QA-S10. Файл відтворюється так само точно, як float32-тіки
+
+**qa:mode:** cli
+**qa:open:** термінал, каталог `D:\work\fluid-paint\fluid-paint`.
+**qa:action:** `npm run test:session-replay:gpu` (на справжньому GPU —
+`node debug/session-replay-gpu-test.js --hardware`).
+**qa:inspect:** рядки `"check":"codec"` і `"variant":".flus codec round trip"`.
+**qa:expected:** `.flus codec round trip` — `"withinTwo":1`, `"maxDelta"` 0 або 1, хеш той самий,
+що у `float32 ticks`. Рядок `codec` — розмір файлу цього крихітного корпусу (163 тіки,
+≈ 11 Б/тік через заголовки мазків). Код виходу 0.
+
+### QA-S11. Кодек, recorder і бюджет розміру
+
+**qa:mode:** cli
+**qa:open:** термінал, каталог `D:\work\fluid-paint\fluid-paint`.
+**qa:action:** `npm run test:session-codec`
+**qa:inspect:** рядок `"check":"size"` і підсумок.
+**qa:expected:** `session-codec: 10 checks passed`; у `size`: `tickBytesPerTick` ≈ 8,2 (≤ 9),
+`fileBytesPerTick` ≈ 6,7, `fileKBper36000` ≈ 235 (≤ 300). Код виходу 0.
+
+### Свідомо не реалізовано у фазі 3
+
+- Програвання `.flus` у Player, Replace/Add, baseline як фон при повторі — фаза 4. Open… лише
+  перевіряє файл і показує підсумок.
+- Секція C (`KEYFRAMES`) і `Vector — approximate` — фаза 5. Open… файлу з іншим
+  `engineContract` поки каже, що наближеного повтору немає.
+- Record вимкнений, поки story грає або на паузі (підказка в `title`): запишіть Record → Play.
+- Зміна фону (File → background, story-сцена з PNG) завершує запис так само, як Resize.
+- Розмір на справжньому ручному корпусі ще не виміряний — лише синтетика й 4 мазки QA.
+
 ## Фаза 2 — гачки рушія і spike детермінізму (SPEC §2.3) — прийнято 2026-10-26
 
 Журнал: фаза без UI, тому всі сценарії CLI. Сервер не потрібен: кожна проба піднімає власний
