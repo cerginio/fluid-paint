@@ -68,4 +68,59 @@ for(const hz of [30,60,144]) {
  paths.push(calls.brush.map(p=>p[0]));
 }
 for(const path of paths) path.forEach((x,i)=>assert.ok(Math.abs(x-paths[0][i])<1e-8));
-console.log('live timing: PASS (hold, 30/60/144 Hz, bounded burst, cursor, endpoint, tap, overload, repeated resume, stepTick)');
+// Session observer (SPEC §2.3): ticks report what brush.update() received,
+// including advance()'s interpolated steps; outside a stroke a tick is idle.
+{
+ const {e,calls}=fixture(); const log=[];
+ e.setSessionObserver({
+  onTick:(...a)=>log.push(['tick',...a]), onIdleTick:()=>log.push(['idle']),
+  onContact:(x,y,p)=>log.push(['contact',x,y,p]), onEndStroke:()=>log.push(['end']),
+ });
+ e.strokeTo({x:30,y:0}); e.advance(3/60);
+ const ticks=log.filter(r=>r[0]==='tick');
+ assert.equal(ticks.length,3);
+ ticks.forEach((r,i)=>assert.deepEqual(r.slice(1,4),calls.brush[i]));
+ assert.ok(Math.abs(ticks[0][1]-10)<1e-9,'an interpolated step is recorded as interpolated');
+ e.strokeTo({x:40,y:0}); e.endStroke();
+ assert.deepEqual(log.slice(-2),[['contact',40,0,1],['end']]);
+ e.advance(4/60); assert.deepEqual(log.at(-1),['idle']);
+ e.setSessionObserver(null); e.advance(5/60); assert.equal(log.length,6);
+}
+// A throwing observer is detached; the stroke it watched goes on.
+{
+ // The engine runs in the vm context, so it logs to that context's console.
+ const engineConsole=vm.runInContext('console',context);
+ const {e,calls}=fixture(); const error=engineConsole.error; let errors=0; engineConsole.error=()=>errors++;
+ e.setSessionObserver({onTick(){throw new Error('boom');}});
+ e.strokeTo({x:30,y:0}); e.stepTick(); e.stepTick(); engineConsole.error=error;
+ assert.equal(errors,1); assert.equal(e._sessionObserver,null); assert.equal(calls.fluid,2);
+ assert.equal(e.strokeActive,true);
+ assert.throws(()=>e.setSessionObserver(()=>{}),{name:'TypeError'});
+}
+// Replay: recorded variation, explicit final contact, ticks bit for bit.
+{
+ const {e,calls}=fixture(); e.endStroke();
+ const rect={left:0,bottom:0,width:1000,height:1000}, color={space:'pigment',channels:[1,0,0],alpha:.8};
+ let begun; e.setSessionObserver({onBeginStroke:(params,variation)=>{begun={params,variation};}});
+ e.brush.initialize=function(x,y,z,scale,reset,variation){Object.assign(this,{positionX:x,positionY:y,positionZ:z,scale,strokeVariation:variation===undefined?.5:variation});};
+ for(const bad of [-0.1,1,NaN]) assert.throws(()=>e.beginStroke({timing:'live',x:0,y:0,brushSize:50,paintingRectangle:rect,color,variation:bad}));
+ assert.equal(e.strokeActive,false);
+ e.beginStroke({timing:'live',x:5,y:6,brushSize:50,paintingRectangle:rect,color,variation:.25});
+ assert.equal(e.brush.strokeVariation,.25); assert.equal(begun.variation,.25);
+ assert.equal(JSON.stringify(begun.params.paintingRectangle),JSON.stringify(rect)); assert.equal(begun.params.timing,'live');
+ assert.throws(()=>e.reseedBristleRandoms(1),/not allowed while a named stroke/);
+ const x=0.1+0.2, y=1/3;
+ e.replayTick(x,y,40,50); assert.deepEqual(calls.brush.at(-1),[x,y,40]);
+ assert.throws(()=>e.replayTick(x,y,40,0));
+ const splats=calls.splat.length;
+ e.endStroke({contact:null}); assert.equal(calls.splat.length,splats,'null: no final contact');
+ e.beginStroke({timing:'live',x:5,y:6,brushSize:50,paintingRectangle:rect,color,variation:.25});
+ e.replayTick(7,8,40,50); e.endStroke({contact:{x:9,y:8,pressure:.5}});
+ assert.equal(calls.splat.length,splats+3,'begin contact, tick contact, recorded final contact');
+ assert.equal(calls.splat.at(-1)[6][0],2);
+ assert.throws(()=>e.replayTick(1,2,3,4),/needs an active stroke/);
+ const fluid=calls.fluid; e.replayTick(); assert.equal(calls.fluid,fluid+1,'idle replay tick: fluid only');
+ assert.throws(()=>e.reseedBristleRandoms(-1),{name:'RangeError'});
+ assert.throws(()=>e.reseedBristleRandoms(2**32),{name:'RangeError'});
+}
+console.log('live timing: PASS (hold, 30/60/144 Hz, bounded burst, cursor, endpoint, tap, overload, repeated resume, stepTick, session observer, replay)');

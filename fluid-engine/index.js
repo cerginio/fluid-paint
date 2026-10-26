@@ -161,6 +161,9 @@ class FluidEngine {
     this.brush = new Brush(wgl, shaderSources, maxBristleCount, this.random);
     this.renderer = new PaintingRenderer(wgl, shaderSources, { blackPigment: blackPigment });
 
+    // See setSessionObserver(). Null costs one comparison per tick and nothing else.
+    this._sessionObserver = null;
+
     /* Hosts (and the UI's colour conversion) need to know which cube is live.
      * Same `=== false` care as the renderer: an omitted option means default. */
     this.blackPigment = blackPigment !== false;
@@ -279,8 +282,9 @@ class FluidEngine {
   }
 
   /** Paint a continuous imported path segment into the normal paint target. */
-  paintPathSegment({ from, to, fromRadius, toRadius, paintingRectangle, color,
-    paintLoad = 1, overlapWith = null }) {
+  paintPathSegment(segment) {
+    const { from, to, fromRadius, toRadius, paintingRectangle, color,
+      paintLoad = 1, overlapWith = null } = segment;
     this._assertNoStroke('paintPathSegment()');
     if (!from || !to || !paintingRectangle || !color || color.space !== 'pigment') {
       throw this._strokeError('paintPathSegment() requires endpoints, rectangle and pigment color.');
@@ -306,6 +310,9 @@ class FluidEngine {
       throw this._strokeError('paintPathSegment() received invalid overlap geometry.');
     }
     const alpha = 1 - Math.pow(1 - color.alpha, paintLoad);
+    // The caller's own object: a path segment is not per tick, and the
+    // recorder must see exactly the arguments a replay will pass back.
+    this._notify('onPathSegment', segment);
     this.simulator.paintPathSegment(from, to, fromRadius, toRadius,
       paintingRectangle, [...color.channels, alpha], overlapWith);
   }
@@ -314,6 +321,76 @@ class FluidEngine {
   frame() {
     this._assertNoStroke('frame()');
     return this.simulator.simulate();
+  }
+
+  // --- Session observer (SPEC §2.3) -------------------------------------
+  //
+  // What a session recorder needs, captured at the engine's own boundary:
+  // ticks are reported only when a step actually ran, so ticks advance()
+  // dropped past its five-step cap are not in a recording either.
+
+  /**
+   * Attach or detach (null) the observer. Every method is optional:
+   *   onTick(x, y, height, scale)   one step of an active stroke, the target
+   *                                 brush.update() received
+   *   onIdleTick()                  one step outside a stroke (fluid only)
+   *   onBeginStroke(params, variation)
+   *   onContact(x, y, pressure)     the stationary final contact of endStroke()
+   *   onEndStroke()
+   *   onPathSegment(segment)        the caller's paintPathSegment() argument
+   * Tick calls pass primitives only. An observer that throws is detached with
+   * a console error rather than breaking the stroke it was watching.
+   */
+  setSessionObserver(observer) {
+    if (observer !== null && typeof observer !== 'object') {
+      throw new TypeError('FluidEngine: the session observer must be an object or null.');
+    }
+    this._sessionObserver = observer;
+  }
+
+  _notify(method, a, b, c, d) {
+    const observer = this._sessionObserver;
+    if (!observer || typeof observer[method] !== 'function') return;
+    try {
+      observer[method](a, b, c, d);
+    } catch (error) {
+      this._sessionObserver = null;
+      console.error(`FluidEngine: session observer detached after an error in ${method}().`, error);
+    }
+  }
+
+  /* Once per press, so a plain object is fine here. Numbers are copied: the
+   * host's rectangle and colour may change after the stroke started. */
+  _notifyBeginStroke(x, y, pressure, color, spacing, timing, brushShape, randomizeBristles) {
+    if (!this._sessionObserver) return;
+    const stroke = this._stroke;
+    const rectangle = stroke.rectangle;
+    this._notify('onBeginStroke', {
+      x, y, pressure, timing, randomizeBristles, spacing,
+      brushSize: stroke.brushSize,
+      resolutionScale: stroke.resolutionScale,
+      paintingRectangle: {
+        left: rectangle.left, bottom: rectangle.bottom,
+        width: rectangle.width, height: rectangle.height,
+      },
+      color: { space: 'pigment', channels: stroke.color.slice(0, 3), alpha: stroke.color[3] },
+      brushShape: brushShape ? {
+        sides: brushShape.sides, aspect: brushShape.aspect, rotation: brushShape.rotation,
+      } : null,
+    }, this.brush.strokeVariation);
+  }
+
+  /**
+   * Refill the bristle jitter from a 32-bit seed. A recording stores the seed
+   * and a replay calls this with it before its first stroke; otherwise the
+   * jitter is whatever Math.random gave the Brush constructor on that page.
+   */
+  reseedBristleRandoms(seed) {
+    this._assertNoStroke('reseedBristleRandoms()');
+    if (!Number.isInteger(seed) || seed < 0 || seed > 0xFFFFFFFF) {
+      throw new RangeError(`FluidEngine: bristle seed must be a 32-bit unsigned integer, got ${seed}.`);
+    }
+    this.brush.reseedRandoms(seed);
   }
 
   // --- Named stroke API (Phase 9a) --------------------------------------
@@ -367,7 +444,7 @@ class FluidEngine {
    * time; legacy replay mode settles synchronously for offline compatibility.
    * @param {object} options Pass timing:'live' in interactive hosts.
    */
-  beginStroke({ x, y, pressure = 1, brushSize, paintingRectangle, color, resolutionScale = 1, spacing, timing = 'replay', brushShape = null, randomizeBristles = false }) {
+  beginStroke({ x, y, pressure = 1, brushSize, paintingRectangle, color, resolutionScale = 1, spacing, timing = 'replay', brushShape = null, randomizeBristles = false, variation }) {
     if (this.strokeActive) {
       throw this._strokeError('FluidEngine: a stroke is already active; call endStroke() first.');
     }
@@ -383,6 +460,12 @@ class FluidEngine {
     this._validateNumber(brushSize, 'brushSize', { positive: true });
     this._validateNumber(resolutionScale, 'resolutionScale', { positive: true });
     if (spacing !== undefined) this._validateNumber(spacing, 'spacing', { positive: true });
+    // A recorded press variation, for session replay. When given, this press
+    // draws nothing from the engine's random source.
+    if (variation !== undefined) {
+      this._validateNumber(variation, 'variation', { min: 0 });
+      if (variation >= 1) throw this._strokeError(`FluidEngine: variation must be < 1, got ${variation}.`);
+    }
     if (brushShape !== null && brushShape !== undefined) {
       if (typeof brushShape !== 'object') {
         throw this._strokeError('FluidEngine: brushShape must be an object or null.');
@@ -475,7 +558,7 @@ class FluidEngine {
 
     if (timing === 'live') {
       try {
-        this.brush.initialize(x, y, this._strokeHeight(pressure), brushSize, true);
+        this.brush.initialize(x, y, this._strokeHeight(pressure), brushSize, true, variation);
         this._liveTarget = { x, y, height: this._strokeHeight(pressure), scale: brushSize };
         this._previousLiveTarget = this._liveTarget;
         // A sub-tick tap makes one contact, without settling or fluid time.
@@ -484,6 +567,7 @@ class FluidEngine {
         this._stroke = null;
         throw error;
       }
+      this._notifyBeginStroke(x, y, pressure, color, spacing, timing, brushShape, randomizeBristles);
       return { steps: 0, simulationUpdated: true };
     }
     this._liveTarget = undefined;
@@ -495,7 +579,8 @@ class FluidEngine {
       // Private, not this.initializeBrush(): the public primitive is guarded
       // against reentry and _stroke is already set. This also draws the Phase
       // 8a variation -- exactly one per press.
-      this.brush.initialize(x, y, this._strokeHeight(pressure), brushSize);
+      this.brush.initialize(x, y, this._strokeHeight(pressure), brushSize, false, variation);
+      this._notifyBeginStroke(x, y, pressure, color, spacing, timing, brushShape, randomizeBristles);
       for (let i = 0; i < STROKE_SETTLE_STEPS; ++i) {
         if (this._strokeSample(x, y, pressure)) simulationUpdated = true;
         steps++;
@@ -574,8 +659,13 @@ class FluidEngine {
    * Lift. Flushes the final caller point if the stroke has not reached it yet,
    * then clears state. It adds no arbitrary settle frames: this bounds live lag
    * below one spacing interval without letting segmentation affect dynamics.
+   *
+   * `contact` is for session replay of a live stroke: `null` lifts with no
+   * final contact, `{ x, y, pressure }` makes exactly that one. Omitted, the
+   * live rule decides, and a replay cannot use it: the rule compares against
+   * the mailbox, which replayTick() never fills.
    */
-  endStroke() {
+  endStroke({ contact } = {}) {
     if (!this.strokeActive) {
       throw this._strokeError('FluidEngine: endStroke() called with no active stroke.');
     }
@@ -583,12 +673,34 @@ class FluidEngine {
     const pending = stroke.pending;
     const emitted = stroke.emitted;
 
+    if (contact !== undefined) {
+      if (stroke.timing !== 'live') throw this._strokeError('endStroke({ contact }) needs a live stroke.');
+      if (contact !== null) {
+        this._validateNumber(contact.x, 'contact.x');
+        this._validateNumber(contact.y, 'contact.y');
+        this._validateNumber(contact.pressure, 'contact.pressure', { min: 0, max: 1 });
+        stroke.pending = { x: contact.x, y: contact.y, pressure: contact.pressure };
+      }
+    }
+
     if (stroke.timing === 'live') {
-      const changed = pending.x !== emitted.x || pending.y !== emitted.y || pending.pressure !== emitted.pressure;
+      const changed = contact === undefined
+        ? pending.x !== emitted.x || pending.y !== emitted.y || pending.pressure !== emitted.pressure
+        : contact !== null;
       // Preserve the final endpoint even if pointerup precedes the next RAF.
       // A swept final contact does not integrate either physical system.
-      if (changed) this._liveContact(true);
+      if (changed) {
+        try {
+          this._liveContact(true);
+        } catch (error) {
+          this._stroke = null;
+          throw error;
+        }
+        const final = stroke.pending;
+        this._notify('onContact', final.x, final.y, final.pressure);
+      }
       this._stroke = null;
+      this._notify('onEndStroke');
       return { steps: 0, simulationUpdated: changed };
     }
 
@@ -606,6 +718,7 @@ class FluidEngine {
     } finally {
       this._stroke = null;
     }
+    this._notify('onEndStroke');
     return { steps, simulationUpdated };
   }
 
@@ -689,17 +802,57 @@ class FluidEngine {
     return this._finishTicks(current, 1, 0, updated);
   }
 
-  /* One brush/splat/fluid step, the body shared by advance() and stepTick(). */
-  _tick(previous, current, t) {
-    if (current) {
-      this.brush.update(
-        previous.x + (current.x - previous.x) * t,
-        previous.y + (current.y - previous.y) * t,
-        previous.height + (current.height - previous.height) * t,
-        current.scale
-      );
-      if (this.strokeActive) this._liveContact(false);
+  /**
+   * Session replay: one step with a recorded target, through the same _tick()
+   * the live clock uses. Call with no arguments for an idle tick -- fluid
+   * only, as a recorded tick outside a stroke was.
+   *
+   * The target is passed as both ends of the interpolation with t = 1, so
+   * brush.update() receives the recorded numbers bit for bit. Outside a
+   * stroke the brush is not moved at all: a hover only moves bristles that
+   * the next beginStroke() re-initialises, so it cannot change the paint.
+   */
+  replayTick(x, y, height, scale) {
+    if (this.strokeActive && this._stroke.timing !== 'live') {
+      throw this._strokeError('replayTick() cannot run a legacy replay stroke.');
     }
+    let target;
+    if (x !== undefined) {
+      if (!this.strokeActive) throw this._strokeError('replayTick(x, y, height, scale) needs an active stroke.');
+      this._validateNumber(x, 'x');
+      this._validateNumber(y, 'y');
+      this._validateNumber(height, 'height');
+      this._validateNumber(scale, 'scale', { positive: true });
+      target = this._replayTarget || (this._replayTarget = {});
+      target.x = x;
+      target.y = y;
+      target.height = height;
+      target.scale = scale;
+      // The replayed target is the mailbox, as a live tick's is: the bristle
+      // preview measures its display offset from it.
+      this._liveTarget = target;
+    }
+    const updated = this._tick(target, target, 1);
+    return this._finishTicks(target, 1, 0, updated);
+  }
+
+  /* One brush/splat/fluid step, shared by advance(), stepTick() and replayTick(). */
+  _tick(previous, current, t) {
+    let stroking = false;
+    if (current) {
+      const x = previous.x + (current.x - previous.x) * t;
+      const y = previous.y + (current.y - previous.y) * t;
+      const height = previous.height + (current.height - previous.height) * t;
+      this.brush.update(x, y, height, current.scale);
+      if (this.strokeActive) {
+        stroking = true;
+        this._liveContact(false);
+        // The interpolated numbers brush.update() received, which is what a
+        // replay must feed back -- not the mailbox target.
+        if (this._sessionObserver) this._notify('onTick', x, y, height, current.scale);
+      }
+    }
+    if (!stroking && this._sessionObserver) this._notify('onIdleTick');
     return this.simulator.simulate();
   }
 

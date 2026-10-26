@@ -236,6 +236,33 @@ class Brush {
   }
 
   /**
+   * Refill the per-bristle randoms from a 32-bit seed (mulberry32).
+   *
+   * The constructor fills this texture once from the engine source, which is
+   * Math.random unless the page has ?seed=, so two page loads jitter the
+   * bristles differently. A session replay after reload needs the same jitter
+   * as the recording, and the seed is the only thing a file can carry for it.
+   * The generator is private on purpose: it must not consume or depend on the
+   * engine's random(), which still draws each press's strokeVariation.
+   */
+  reseedRandoms(seed) {
+    let state = seed >>> 0;
+    const randoms = new Float32Array(this.maxBristleCount * VERTICES_PER_BRISTLE * 4);
+    for (let i = 0; i < randoms.length; ++i) {
+      state = (state + 0x6D2B79F5) >>> 0;
+      let t = state;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      randoms[i] = ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    }
+    const wgl = this.wgl;
+    wgl.rebuildTexture(
+      this.randomsTexture, wgl.RGBA, wgl.FLOAT, this.maxBristleCount, VERTICES_PER_BRISTLE,
+      randoms, wgl.CLAMP_TO_EDGE, wgl.CLAMP_TO_EDGE, wgl.NEAREST, wgl.NEAREST
+    );
+  }
+
+  /**
    * Choose the bristle footprint for subsequent presses.
    *
    * `null` (or a side count below 3) restores the round default. Sides are
@@ -289,9 +316,10 @@ class Brush {
   //
   // Also draws this press's bristle-layout variation (Phase 8a). Every call is
   // a new press: the caller of the low-level primitive owns that decision, and
-  // FluidEngine.beginStroke() calls this exactly once per stroke.
-  initialize(x, y, z, scale, resetDynamics = false) {
-    this.strokeVariation = this._nextRandom();
+  // FluidEngine.beginStroke() calls this exactly once per stroke. A replay
+  // passes the recorded variation instead, and then draws nothing.
+  initialize(x, y, z, scale, resetDynamics = false, variation) {
+    this.strokeVariation = variation === undefined ? this._nextRandom() : variation;
 
     this.positionX = x;
     this.positionY = y;
