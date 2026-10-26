@@ -331,16 +331,7 @@ class Paint {
             document.getElementById('qualities'),
             QUALITIES.map((q) => q.name),
             INITIAL_QUALITY,
-            (index) => {
-                this._saveSnapshot();
-                this.resolutionScale = QUALITIES[index].resolutionScale;
-                this._recordSessionCommand({ op: 'quality', resolutionScale: this.resolutionScale });
-                this.engine.changeResolution(
-                    this.getPaintingResolutionWidth(),
-                    this.getPaintingResolutionHeight()
-                );
-                this.needsRedraw = true;
-            }
+            (index) => this.setResolutionScale(QUALITIES[index].resolutionScale)
         );
 
         this.modelButtons = new Buttons(
@@ -348,7 +339,7 @@ class Paint {
             ['Natural', 'Digital'],
             0,
             (index) => {
-                if (this.storyPlaybackController?.plan &&
+                if ((this.storyPlaybackController?.plan || this.storyPlaybackController?.session) &&
                     !['empty', 'ready', 'file-error'].includes(this.storyPlaybackController.state)) {
                     this.modelButtons.setIndex(this.paletteMode === 'digital' ? 1 : 0);
                     return;
@@ -2067,37 +2058,10 @@ class Paint {
                 }
                 if (this.engine.strokeActive) this.engine.endStroke();
 
-                const width = Math.max(1, Math.round(this.paintingRectangle.width));
-                const height = Math.max(1, Math.round(this.paintingRectangle.height));
-                const pixels = this.engine.exportPixels({
-                    width,
-                    height,
-                    resolutionScale: this.resolutionScale,
-                    colorModel: FluidEngine.COLOR_MODEL.RGB,
-                });
-                const bakedCanvas = this._pixelsToCanvas(pixels, width, height);
-
-                // This is the commit point: the upload succeeds before wet paint
-                // and its dynamics are discarded by the same engine operation.
-                this.engine.bakeToBackground(bakedCanvas);
+                const { pixels, width, height } = this._bakeVisiblePainting();
                 this._recordSessionCommand({ op: 'bake' });
-                this.snapshotIndex = 0;
-                this.maxRedoIndex = 0;
-                this.undoing = false;
-                this.refreshDoButtons();
-                this.brushInitialized = false;
                 this.interactionState = InteractionMode.NONE;
-                this.needsRedraw = true;
-
-                if (this.storyPlaybackController) {
-                    this.storyPlaybackController.acceptBakedBackground({
-                        fileName: 'Baked artwork',
-                        byteSize: pixels.byteLength,
-                        sourceWidth: width,
-                        sourceHeight: height,
-                        baked: true,
-                    });
-                }
+                this._acceptBakeInStory(pixels, width, height);
                 const status = document.getElementById('bake-status');
                 if (status) status.textContent = 'Baked. Wet paint and Undo history were reset.';
                 return true;
@@ -2106,6 +2070,86 @@ class Paint {
             }
 
         } finally { this._updateOperations--; }
+    }
+
+    /**
+     * Commit the visible painting as the dry background: wet paint, its
+     * dynamics and the undo history start over. Shared by Bake, by Record over
+     * a painting and by a replayed `bake`; only the user's Bake records it.
+     */
+    _bakeVisiblePainting() {
+        const width = Math.max(1, Math.round(this.paintingRectangle.width));
+        const height = Math.max(1, Math.round(this.paintingRectangle.height));
+        const pixels = this.engine.exportPixels({
+            width,
+            height,
+            resolutionScale: this.resolutionScale,
+            colorModel: FluidEngine.COLOR_MODEL.RGB,
+        });
+        // This is the commit point: the upload succeeds before wet paint
+        // and its dynamics are discarded by the same engine operation.
+        this.engine.bakeToBackground(this._pixelsToCanvas(pixels, width, height));
+        this._resetUndoHistory();
+        this.brushInitialized = false;
+        this.needsRedraw = true;
+        return { pixels, width, height };
+    }
+
+    _acceptBakeInStory(pixels, width, height) {
+        if (!this.storyPlaybackController) return;
+        this.storyPlaybackController.acceptBakedBackground({
+            fileName: 'Baked artwork',
+            byteSize: pixels.byteLength,
+            sourceWidth: width,
+            sourceHeight: height,
+            baked: true,
+        });
+    }
+
+    _resetUndoHistory() {
+        this.snapshotIndex = 0;
+        this.maxRedoIndex = 0;
+        this.undoing = false;
+        this.refreshDoButtons();
+    }
+
+    /** The quality buttons' action; a replayed `quality` command runs it too. */
+    setResolutionScale(resolutionScale, { snapshot = true } = {}) {
+        const index = QUALITIES.findIndex((quality) => quality.resolutionScale === resolutionScale);
+        if (index < 0) throw new RangeError(`No quality has resolution scale ${resolutionScale}.`);
+        if (snapshot) this._saveSnapshot();
+        this.resolutionScale = resolutionScale;
+        this._recordSessionCommand({ op: 'quality', resolutionScale });
+        this.qualityButtons?.setIndex(index);
+        this.engine.changeResolution(
+            this.getPaintingResolutionWidth(),
+            this.getPaintingResolutionHeight()
+        );
+        this.needsRedraw = true;
+    }
+
+    /**
+     * Put the painting where a session recorded it (fluid-session phase 4).
+     * Ticks are world coordinates, so the rectangle moves to them rather than
+     * the ticks to the rectangle; the view zooms out if it does not fit
+     * (open question 6). Paint already there is resampled with the painting,
+     * as a resize would, for Add over the current painting.
+     */
+    placePaintingForReplay({ left, bottom, width, height }) {
+        const rectangle = this.paintingRectangle;
+        const resized = rectangle.width !== width || rectangle.height !== height;
+        rectangle.left = left;
+        rectangle.bottom = bottom;
+        rectangle.width = width;
+        rectangle.height = height;
+        if (resized) {
+            this.engine.changeResolution(
+                this.getPaintingResolutionWidth(),
+                this.getPaintingResolutionHeight()
+            );
+        }
+        if (this.viewport.showWorldRect(rectangle, INITIAL_PADDING)) this.rebuildProjectionMatrix();
+        this.needsRedraw = true;
     }
 
     async clear() {
@@ -2297,6 +2341,12 @@ class Paint {
 
     async undo() {
         if (this.storyPlaybackController) await this.storyPlaybackController.yieldToManualInput();
+        this._undoStep();
+    }
+
+    // The history steps themselves, without yielding to the Player: a session
+    // replay runs inside the Player and executes its recorded undo/redo here.
+    _undoStep() {
         this._recordSessionCommand({ op: 'undo' });
         if (!this.undoing) {
             this._saveSnapshot();
@@ -2316,6 +2366,10 @@ class Paint {
 
     async redo() {
         if (this.storyPlaybackController) await this.storyPlaybackController.yieldToManualInput();
+        this._redoStep();
+    }
+
+    _redoStep() {
         this._recordSessionCommand({ op: 'redo' });
         if (this.canRedo()) {
             this.applySnapshot(this.snapshots[this.snapshotIndex + 1]);

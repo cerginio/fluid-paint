@@ -8,8 +8,8 @@
  *   idle -> recording (recorder waiting/recording/stopping) -> finishing
  *        (encoding) -> recorded (not saved) -> saved
  *
- * Open… reads and validates a .flus and shows its summary; playing it in the
- * Player is phase 4.
+ * Open… reads and validates a .flus and shows its summary; Open in Player
+ * hands it to the Player, which replays it (SessionPlayer, phase 4).
  */
 class SessionToolsUI {
   constructor(painter, recorder, toolPanel) {
@@ -18,6 +18,7 @@ class SessionToolsUI {
     this.toolPanel = toolPanel;
     this.phase = 'idle';
     this.file = null;          // { bytes, name, durationSeconds, strokes }
+    this.openedSession = null; // { session, fileName, byteSize } of an Exact Open…
     this.savedName = null;
     this.note = '';
     this._pending = null;      // the action an unsaved-recording warning holds
@@ -36,6 +37,7 @@ class SessionToolsUI {
     this.noteElement = $('session-note');
     this.discard = $('session-discard');
     this.opened = $('session-opened');
+    this.openPlayerButton = $('session-open-player');
     this.chip = $('session-rec-chip');
     if (!this.card) return;
 
@@ -47,6 +49,9 @@ class SessionToolsUI {
       this.openInput.value = '';
       if (file) this._safe(() => this.open(file));
     });
+    if (this.openPlayerButton) {
+      this.openPlayerButton.addEventListener('click', () => this._safe(() => this.openInPlayer()));
+    }
     $('session-discard-confirm').addEventListener('click', () => this._confirmDiscard());
     $('session-discard-cancel').addEventListener('click', () => {
       this._pending = null;
@@ -147,6 +152,7 @@ class SessionToolsUI {
     this.savedName = null;
     this.note = '';
     this.opened.hidden = true;
+    this.openedSession = null;
     const seed = crypto.getRandomValues(new Uint32Array(1))[0];
     this.recorder.start({ bristleSeed: seed, prepare: () => this._prepare() });
     this._setPhase('recording');
@@ -158,20 +164,19 @@ class SessionToolsUI {
     const painter = this.painter;
     const rectangle = painter.paintingRectangle;
     let baselinePixels = null;
+    // The live session starts from exactly what a replay starts from: the
+    // visible painting as a dry background (or none), no wet paint and no
+    // velocity -- neither is in the file (fluid-session phase 4, AC-REC-5).
     if (painter.hasArtwork()) {
-      const width = Math.max(1, Math.round(rectangle.width));
-      const height = Math.max(1, Math.round(rectangle.height));
-      baselinePixels = { width, height, pixels: painter.engine.exportPixels({
-        width, height, resolutionScale: painter.resolutionScale, colorModel: FluidEngine.COLOR_MODEL.RGB,
-      }) };
+      baselinePixels = painter._bakeVisiblePainting();
+      painter._acceptBakeInStory(baselinePixels.pixels, baselinePixels.width, baselinePixels.height);
+    } else {
+      painter.engine.clear({ dynamics: true });
     }
     this._baseline = baselinePixels ? this._encodePng(baselinePixels) : Promise.resolve(null);
     // A replay starts with an empty undo ring, so the live one starts over
     // too: an Undo past Record could not be replayed.
-    painter.snapshotIndex = 0;
-    painter.maxRedoIndex = 0;
-    painter.undoing = false;
-    painter.refreshDoButtons();
+    painter._resetUndoHistory();
     this.note = baselinePixels
       ? 'Started over the current painting: it is kept as a flat background, so new paint will not mix wet with it. Undo history starts here.'
       : 'Undo history starts here.';
@@ -226,6 +231,8 @@ class SessionToolsUI {
   async open(file) {
     this.opened.hidden = false;
     this.opened.classList.remove('is-error');
+    this.openedSession = null;
+    this.render();
     if (file.size > SessionCodec.MAX_FILE_BYTES) {
       throw new Error(`${file.name} is larger than 25 MB.`);
     }
@@ -244,11 +251,22 @@ class SessionToolsUI {
     this.opened.textContent = mode
       ? `${file.name}: ${SessionToolsUI.clock(header.durationSec || 0)} · ${stats.strokes || 0} strokes · ` +
         `${(stats.ticks || 0).toLocaleString('en-US')} ticks · ${SessionToolsUI.kilobytes(file.size)} · ${mode} · ` +
-        `${session.baselinePng ? 'starts over a background' : 'starts from an empty canvas'}. ` +
-        'Playing it in the Player arrives in the next update.'
+        `${session.baselinePng ? 'starts over a background' : 'starts from an empty canvas'}.` +
+        (exact ? '' : ' Approximate replay arrives in a later update.')
       : `${file.name} was recorded by a different engine version and has no keyframes to replay approximately.`;
     if (!mode) this.opened.classList.add('is-error');
+    if (exact) this.openedSession = { session, fileName: file.name, byteSize: file.size };
+    this.render();
     return session;
+  }
+
+  /** Hand the opened file to the Player (SPEC §2.7 Open in Player →). */
+  async openInPlayer() {
+    const opened = this.openedSession;
+    const story = this.painter.storyPlaybackController;
+    if (!opened || !story) return;
+    await story.loadSession(opened.session, { fileName: opened.fileName, byteSize: opened.byteSize });
+    if (this.toolPanel) this.toolPanel.selectExtensionTab('player', true);
   }
 
   _setPhase(phase) {
@@ -297,9 +315,16 @@ class SessionToolsUI {
     this.recordButton.setAttribute('aria-pressed', recording ? 'true' : 'false');
     const storyBusy = !recording && this._storyBusy();
     this.recordButton.disabled = this.phase === 'finishing' || this.recorder.state === 'stopping' || storyBusy;
-    this.recordButton.title = storyBusy ? 'Stop story playback first, then start recording and play it.' : '';
+    // SPEC §2.7: recording a session's own replay would record itself.
+    const replaying = storyBusy && !!this.painter.storyPlaybackController.session;
+    this.recordButton.title = replaying ? 'A session is replaying in the Player: stop it first.'
+      : storyBusy ? 'Stop story playback first, then start recording and play it.' : '';
     this.saveButton.disabled = busy || !this.file;
     this.openButton.disabled = busy;
+    if (this.openPlayerButton) {
+      this.openPlayerButton.hidden = !this.openedSession || this.opened.hidden;
+      this.openPlayerButton.disabled = busy;
+    }
     if (this.chip) this.chip.hidden = !recording;
     this.noteElement.hidden = !this.note;
     this.noteElement.textContent = this.note;

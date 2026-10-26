@@ -213,6 +213,7 @@
                         <div id="story-player-progress-fill"></div>
                     </div>
                     <div id="story-player-coverage" class="story-progress-copy">0 / 0 operations</div>
+                    <div id="story-color-model-group">
                     <label class="story-field" for="story-color-model">Import colors
                         <select id="story-color-model">
                             <option value="natural">Natural / RYB</option>
@@ -220,6 +221,7 @@
                         </select>
                     </label>
                     <small class="story-warning">Choose before Play. Natural / Digital selects the palette for new paint; story HEX colors stay exact and existing wet paint does not change.</small>
+                    </div>
 
                     <nav class="story-boundary-navigation" aria-label="Story position">
                         <output id="story-playhead-label">Frame — · Group —</output>
@@ -301,6 +303,9 @@
                         </div>
                     </div>
                     <div id="session-opened" class="session-opened" hidden></div>
+                    <button id="session-open-player" class="story-primary story-wide" type="button" hidden>
+                        Open in Player →
+                    </button>
                 </section>
                 <div class="bake-card">
                     <strong>Brush Angle</strong>
@@ -390,6 +395,7 @@
     <script src="app/story-playback-controller.js"></script>
     <script src="app/session-codec.js"></script>
     <script src="app/session-recorder.js"></script>
+    <script src="app/session-player.js"></script>
     <!-- colorpicker.js is GONE (Phase 8): the GL hue ring, its two programs and
          its hand-written hit tests are replaced by the iro.js wheel below. -->
     <!-- ryb.js BEFORE iro.js, not merely before color.js: iro builds its hue

@@ -103,4 +103,37 @@ function harness(options = {}) {
   assert.throws(() => new FixedTickScheduler(0), TypeError);
 }
 
-console.log('story max scheduler: PASS (start 16, budget, AIMD x0.7, ceiling 256, floor 1, suspension)');
+// fluid-session phase 4: a session replay paces its heavy ticks by GPU fences.
+{
+  const { FenceTickScheduler } = require('../app/session-player.js');
+  const done = new Set();
+  let nextFence = 0;
+  const gl = {
+    SYNC_GPU_COMMANDS_COMPLETE: 1, TIMEOUT_EXPIRED: 2, ALREADY_SIGNALED: 3,
+    fenceSync() { return nextFence++; },
+    clientWaitSync(fence) { return done.has(fence) ? this.ALREADY_SIGNALED : this.TIMEOUT_EXPIRED; },
+    deleteSync() {}, flush() {},
+  };
+  assert.equal(FenceTickScheduler.supported(gl), true);
+  assert.equal(FenceTickScheduler.supported({}), false, 'WebGL1 falls back to BudgetTickScheduler');
+  const scheduler = new FenceTickScheduler(gl, { now: () => 0 });
+  const frame = () => {
+    scheduler.beginFrame();
+    let ticks = 0;
+    while (scheduler.shouldContinue()) ticks++;
+    scheduler.endFrame();
+    return ticks;
+  };
+  assert.equal(frame(), 4, 'starts at 4 ticks');
+  assert.equal(frame(), 4, 'a second batch may be in flight');
+  assert.equal(frame(), 0, 'two batches pending: no ticks until the GPU catches up');
+  assert.equal(frame(), 0, 'still pending');
+  done.add(0);
+  assert.equal(frame(), 2, 'a batch that had to be waited for shrinks the next to 0.7');
+  done.add(1); done.add(2);
+  assert.equal(frame(), 4, 'each batch done without a wait grows the limit by one (2 -> 3 -> 4)');
+  scheduler.dispose();
+  assert.equal(scheduler.fences.length, 0, 'dispose drops pending fences');
+}
+
+console.log('story max scheduler: PASS (start 16, budget, AIMD x0.7, ceiling 256, floor 1, suspension, fences)');

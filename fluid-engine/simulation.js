@@ -255,6 +255,13 @@ class Simulator {
    * Finish a wet-paint stage after its rendered appearance has been captured.
    * Unlike clear(), baking must leave no dynamics capable of changing the new
    * empty material on a later frame.
+   *
+   * That includes pressure and divergence. Each step clears and solves them
+   * only inside the simulated area, so outside it they keep what earlier
+   * strokes left, and the Jacobi pass reads those neighbours at the area's
+   * edge. A session replay starts on a fresh page where they are zero: without
+   * this, a recording started after any painting replayed 3 000+ pixels off
+   * by up to 108 (fluid-session phase 4).
    */
   clearPaintAndDynamics() {
     this.clearTextures([
@@ -262,6 +269,9 @@ class Simulator {
       this.paintTextureTemp,
       this.velocityTexture,
       this.velocityTextureTemp,
+      this.divergenceTexture,
+      this.pressureTexture,
+      this.pressureTextureTemp,
     ]);
     this.splatAreas.length = 0;
   }

@@ -337,6 +337,29 @@ class Viewport {
     );
   }
 
+  /**
+   * Make a world rectangle fully visible: unchanged when it already is,
+   * otherwise centred at the largest scale that fits, never above 1. A
+   * replayed session places its painting where it was recorded, which another
+   * window may not show. Returns whether the view changed.
+   */
+  showWorldRect(rectangle, padding = 0) {
+    const screen = this.worldRectToScreen(rectangle);
+    if (screen.left >= 0 && screen.bottom >= 0 &&
+        screen.left + screen.width <= this.width && screen.bottom + screen.height <= this.height) {
+      return false;
+    }
+    const fit = Math.min(1,
+      (this.width - 2 * padding) / rectangle.width,
+      (this.height - 2 * padding) / rectangle.height);
+    const scale = Math.max(this.minViewScale, fit);
+    this.focusIndicator = null;
+    this.viewScale = scale;
+    this.viewOffsetX = (this.width - rectangle.width * scale) / 2 - rectangle.left * scale;
+    this.viewOffsetY = (this.height - rectangle.height * scale) / 2 - rectangle.bottom * scale;
+    return true;
+  }
+
   panViewBy(dx, dy) {
     this.focusIndicator = null;
     this.viewOffsetX += dx;

@@ -7,6 +7,9 @@ class StoryPlaybackController {
     this.state = 'empty';
     this.model = null;
     this.modelSummary = null;
+    // An opened .flus (SessionPlayer): the Player's other source, replayed
+    // tick by tick instead of compiled into a plan. At most one of the two.
+    this.session = null;
     this.plan = null;
     this.registry = new UnpaintedRangeRegistry();
     this.playheadIndex = 0;
@@ -148,11 +151,38 @@ class StoryPlaybackController {
     this.estimatedRemaining = 0;
     this.backgroundSummary = summary;
     this.backgroundError = null;
-    this._setState(this.model ? 'ready' : 'empty');
+    this._setState(this._hasSource() ? 'ready' : 'empty');
+  }
+
+  _hasSource() {
+    return !!this.model || !!this.session;
+  }
+
+  /**
+   * An opened .flus (fluid-session phase 4). It replaces a loaded story; Play
+   * replays it exactly through SessionPlayer.
+   */
+  async loadSession(session, meta) {
+    const player = new SessionPlayer(this.painter, session, meta);
+    await player.load();
+    await this._cancelRun();
+    this.model = null;
+    this.modelSummary = null;
+    this.session = player;
+    this.plan = null;
+    this.registry.reset(0);
+    this.playheadIndex = 0;
+    this.progress = this._sessionProgress();
+    this.error = null;
+    this.fileError = null;
+    this.baselineValid = false;
+    this._resetTiming();
+    this._setState('ready');
   }
 
   async loadModel(model, summary) {
     await this._cancelRun();
+    this.session = null;
     this.model = model;
     this.modelSummary = summary || StoryFileLoader.summarize(model);
     this.plan = null;
@@ -188,6 +218,7 @@ class StoryPlaybackController {
       };
       this.backgroundError = null;
     }
+    this.session = null;
     this.model = model || null;
     this.modelSummary = model ? StoryFileLoader.summarize(model, 'tilecraft-transfer.json') : null;
     this.plan = null;
@@ -202,6 +233,7 @@ class StoryPlaybackController {
 
   async removeFile() {
     await this._cancelRun();
+    this.session = null;
     this.model = null;
     this.modelSummary = null;
     this.plan = null;
@@ -213,6 +245,17 @@ class StoryPlaybackController {
     this._setState('empty');
   }
 
+  _sessionProgress() {
+    const session = this.session;
+    const total = session ? session.totalTicks : 0;
+    const done = session ? session.ticksDone : 0;
+    return {
+      processedItems: done, totalItems: total,
+      processedStrokes: session ? session.strokesDone : 0, totalStrokes: session ? session.totalStrokes : 0,
+      playheadIndex: done, paintedOperations: done, pendingOperations: total - done, pendingRanges: 0,
+    };
+  }
+
   setSpeed(multiplier) {
     if (![0.25, 0.5, 1, 2, 4, 8, 16, 'max'].includes(multiplier)) {
       throw new RangeError('Unsupported story playback speed.');
@@ -220,6 +263,13 @@ class StoryPlaybackController {
     if (this.speed === multiplier) return Promise.resolve(false);
     this.speed = multiplier;
     this.maxRate = null;
+    if (this.session) {
+      // A session run reads the speed every frame; restarting it would have to
+      // finish the open stroke at once.
+      this._estimateSession();
+      this._emit();
+      return Promise.resolve(this.state === 'playing' || this.state === 'paused');
+    }
     if (this.plan) {
       const total = this.plan.operations.length;
       const painted = total - this.registry.pendingCount;
@@ -245,6 +295,8 @@ class StoryPlaybackController {
     if (this.thickness === normalized) return Promise.resolve(false);
     this.thickness = normalized;
     this._emit();
+    // An exact session replays its recorded brush sizes; thickness is a story setting.
+    if (this.session) return Promise.resolve(false);
     return this._reconfigureActiveRun();
   }
 
@@ -271,7 +323,7 @@ class StoryPlaybackController {
   }
 
   async play() {
-    if (!this.model) return false;
+    if (!this._hasSource()) return false;
     if (this.state === 'paused') return this.resume();
     if (this.state === 'completed-with-gaps') return this.playEarliestRemaining();
     if (this.state === 'completed') return this.restart();
@@ -327,7 +379,7 @@ class StoryPlaybackController {
   }
 
   async restart() {
-    if (!this.model) return false;
+    if (!this._hasSource()) return false;
     await this._cancelRun();
     this.baselineValid = false;
     try {
@@ -359,8 +411,9 @@ class StoryPlaybackController {
     this.plan = null;
     this.registry.reset(0);
     this.playheadIndex = 0;
-    this.progress = this._emptyProgress();
-    this._setState(this.model ? 'ready' : 'empty');
+    if (this.session) this.session.rewind();
+    this.progress = this.session ? this._sessionProgress() : this._emptyProgress();
+    this._setState(this._hasSource() ? 'ready' : 'empty');
     return true;
   }
 
@@ -372,8 +425,9 @@ class StoryPlaybackController {
     this.plan = null;
     this.registry.reset(0);
     this.playheadIndex = 0;
-    this.progress = this._emptyProgress();
-    this._setState(this.model ? 'ready' : 'empty');
+    if (this.session) this.session.rewind();
+    this.progress = this.session ? this._sessionProgress() : this._emptyProgress();
+    this._setState(this._hasSource() ? 'ready' : 'empty');
     return true;
   }
 
@@ -425,6 +479,26 @@ class StoryPlaybackController {
   }
 
   _prepareFreshRun() {
+    if (this.session) {
+      // The recording carries its own palette, quality and baseline. Its
+      // undo history starts empty, so the run is not one undoable step the
+      // way a story's is: a recorded Undo must not reach past its start.
+      const replace = this.canvasPolicy === 'replace';
+      this.session.prepare({ replace });
+      if (replace) {
+        this.backgroundSummary = this.session.background ? {
+          fileName: `${this.session.summary.fileName} baseline`,
+          byteSize: this.session.baselinePng.length,
+          sourceWidth: this.session.background.width,
+          sourceHeight: this.session.background.height,
+        } : null;
+      }
+      this.progress = this._sessionProgress();
+      this.playheadIndex = 0;
+      this.error = null;
+      this._resetTiming();
+      return;
+    }
     this._applyColorModel();
     this._captureBaseline();
     if (this.canvasPolicy === 'replace') {
@@ -537,6 +611,7 @@ class StoryPlaybackController {
   }
 
   async _runFrom(startIndex) {
+    if (this.session) return this._runSession();
     if (!this.plan || !this.plan.operations.length) return false;
     this._paused = false;
     const abortController = new AbortController();
@@ -549,7 +624,8 @@ class StoryPlaybackController {
     const max = runSettings.speed === 'max';
     const runTargetDuration = max ? null : this.targetDuration * remainingFraction;
     const runElapsedBase = this.elapsed;
-    const meter = max ? this._startRateMeter(total) : null;
+    const oneXSeconds = TilecraftStrokePlayer.targetPlaySeconds(total);
+    const meter = max ? this._startRateMeter(total, oneXSeconds > 0 ? total / oneXSeconds : 0) : null;
     /* Denser bristles for imported stamps, restored in the finally below.
      * A stamp is one press, so its coverage is whatever a single sunflower of
      * bristles paints; the brush slider is the user's choice for their own
@@ -611,6 +687,81 @@ class StoryPlaybackController {
       if (this._abortController === abortController) this._abortController = null;
       if (this._runPromise === run) this._runPromise = null;
     }
+  }
+
+  /* Replay the opened session from its cursor (fluid-session phase 4). Unlike
+   * a plan run it follows speed changes without restarting, and keeps the
+   * engine clock while paused: a host step would add idle ticks the recording
+   * does not have. */
+  async _runSession() {
+    const session = this.session;
+    if (session.done) return false;
+    this._paused = false;
+    const abortController = new AbortController();
+    this._abortController = abortController;
+    this._setState('playing');
+    this.activeRunSettings = Object.freeze({ speed: this.speed, thickness: this.thickness });
+    const userState = session.applyRunState();
+    let meter = null;
+    const run = session.play({
+      signal: abortController.signal,
+      speed: () => this.speed,
+      waitUntilResumed: (signal) => this._waitUntilResumed(signal),
+      waitFrame: () => new Promise(requestAnimationFrame),
+      onTick: () => { if (this._storyTickCounter) this._storyTickCounter.ticks++; },
+      onFrame: () => {
+        if (this.speed === 'max' && !meter) {
+          meter = this._startRateMeter(session.totalTicks, 60);
+        } else if (this.speed !== 'max' && meter) {
+          meter = null;
+          this._storyTickCounter = null;
+        }
+        this.progress = this._sessionProgress();
+        this.playheadIndex = session.ticksDone;
+        if (meter) this._sampleRate(meter, this.progress);
+        else this._estimateSession();
+        this.painter.needsRedraw = true;
+        this._emit();
+      },
+    });
+    this._runPromise = run;
+    try {
+      await run;
+      if (!abortController.signal.aborted) {
+        this.estimatedRemaining = 0;
+        this._setState('completed');
+      }
+      return true;
+    } catch (error) {
+      if (error.name !== 'AbortError') {
+        this.error = error;
+        this._setState('ready');
+        throw error;
+      }
+      return false;
+    } finally {
+      this._storyTickCounter = null;
+      session.restoreRunState(userState);
+      this.progress = this._sessionProgress();
+      this.playheadIndex = session.ticksDone;
+      if (this._abortController === abortController) this._abortController = null;
+      if (this._runPromise === run) this._runPromise = null;
+    }
+  }
+
+  /* A numeric speed plays 60 ticks/s times the multiplier: 1x is the
+   * recording's own tempo, without its pauses past IDLE_LIMIT. */
+  _estimateSession() {
+    const session = this.session;
+    if (this.speed === 'max') {
+      this.targetDuration = null;
+      if (this.state !== 'playing') this.estimatedRemaining = null;
+      return;
+    }
+    const tickSeconds = 1 / (60 * this.speed);
+    this.targetDuration = session.totalTicks * tickSeconds;
+    this.elapsed = session.ticksDone * tickSeconds;
+    this.estimatedRemaining = (session.totalTicks - session.ticksDone) * tickSeconds;
   }
 
   /**
@@ -723,18 +874,21 @@ class StoryPlaybackController {
 
   /** True while a run feeds the engine its ticks; the host must not add its own. */
   get ownsEngineClock() {
-    return this.state === 'playing' && this._runPromise !== null;
+    if (this._runPromise === null) return false;
+    // A paused session replay still owns the fluid (see _runSession).
+    return this.state === 'playing' || (this.session !== null && this.state === 'paused');
   }
 
   /* Max reports what it measures: operations and ticks per second over a
-   * sliding one-second window, published at most twice a second. */
-  _startRateMeter(total) {
+   * sliding one-second window, published at most twice a second. `oneXRate`
+   * is what 1x plays per second: plan operations, or a session's 60 ticks. */
+  _startRateMeter(total, oneXRate) {
     const counter = { ticks: 0 };
     this._storyTickCounter = counter;
     this.maxRate = null;
     this.estimatedRemaining = null;
     const start = performance.now();
-    return { counter, total, samples: [{ time: start, ticks: 0, operations: null }],
+    return { counter, total, oneXRate, samples: [{ time: start, ticks: 0, operations: null }],
       start, publishedAt: -Infinity };
   }
 
@@ -750,8 +904,7 @@ class StoryPlaybackController {
     if (seconds <= 0) return;
     const operationsPerSecond = (progress.paintedOperations - first.operations) / seconds;
     const ticksPerSecond = (meter.counter.ticks - first.ticks) / seconds;
-    const oneXSeconds = TilecraftStrokePlayer.targetPlaySeconds(meter.total);
-    const oneXRate = oneXSeconds > 0 ? meter.total / oneXSeconds : 0;
+    const oneXRate = meter.oneXRate;
     meter.publishedAt = time;
     this.maxRate = {
       multiplier: oneXRate > 0 ? operationsPerSecond / oneXRate : 0,
@@ -791,6 +944,10 @@ class StoryPlaybackController {
     const count = this.plan?.operations?.length || 0;
     this.maxRate = null;
     this.elapsed = 0;
+    if (this.session) {
+      this._estimateSession();
+      return;
+    }
     if (this.speed === 'max') {
       this.targetDuration = null;
       this.estimatedRemaining = null;
@@ -811,7 +968,9 @@ class StoryPlaybackController {
     const canNavigate = !!this.plan;
     return {
       state: this.state,
+      sourceKind: this.session ? 'session' : this.model ? 'story' : null,
       modelSummary: this.modelSummary,
+      sessionSummary: this.session ? this.session.summary : null,
       progress: { ...this.progress },
       speed: this.speed,
       maxRate: this.maxRate ? { ...this.maxRate } : null,

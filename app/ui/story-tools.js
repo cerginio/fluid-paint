@@ -323,9 +323,11 @@ class StoryToolsUI {
   render(view) {
     const summary = view.modelSummary;
     const hasFile = !!summary;
+    const session = view.sessionSummary;
+    const hasSource = hasFile || !!session;
     const busy = view.state === 'loading';
     const background = view.backgroundSummary;
-    if (this.toolPanel) this.toolPanel.setExtensionHasStory(hasFile);
+    if (this.toolPanel) this.toolPanel.setExtensionHasStory(hasSource);
 
     if (this.dropzone) this.dropzone.hidden = hasFile || busy;
     if (this.fileSummary) this.fileSummary.hidden = !hasFile;
@@ -356,10 +358,11 @@ class StoryToolsUI {
       );
     }
     if (summary) this._renderSummary(summary);
+    if (session) this._renderSessionSummary(session);
 
-    if (this.playerEmpty) this.playerEmpty.hidden = hasFile;
-    if (this.playerContent) this.playerContent.hidden = !hasFile;
-    if (!hasFile) return;
+    if (this.playerEmpty) this.playerEmpty.hidden = hasSource;
+    if (this.playerContent) this.playerContent.hidden = !hasSource;
+    if (!hasSource) return;
 
     const progress = view.progress;
     const total = progress.totalItems || 0;
@@ -367,14 +370,21 @@ class StoryToolsUI {
     const percent = total ? Math.round(painted / total * 100) : 0;
     if (this.progress) {
       this.progress.setAttribute('aria-valuenow', String(percent));
-      this.progress.setAttribute('aria-valuetext', `${percent}% painted; playhead ${progress.playheadIndex || 0} of ${total}`);
+      this.progress.setAttribute('aria-valuetext', session
+        ? `${percent}% replayed; ${progress.processedStrokes} of ${progress.totalStrokes} strokes`
+        : `${percent}% painted; playhead ${progress.playheadIndex || 0} of ${total}`);
     }
     if (this.progressFill) this.progressFill.style.width = `${percent}%`;
     if (this.coverage) {
-      this.coverage.textContent = `${painted.toLocaleString()} / ${total.toLocaleString()} operations · ${percent}% painted`;
+      // SPEC §2.8: ticks done / total, and the strokes finished.
+      this.coverage.textContent = session
+        ? `${painted.toLocaleString('en-US')} / ${total.toLocaleString('en-US')} ticks · ` +
+          `${progress.processedStrokes} / ${progress.totalStrokes} strokes`
+        : `${painted.toLocaleString()} / ${total.toLocaleString()} operations · ${percent}% painted`;
     }
     if (this.playhead) {
-      this.playhead.textContent = `${progress.frameId || 'Frame —'} · ${progress.groupId || 'Group —'}`;
+      this.playhead.textContent = session ? 'Session — no frames'
+        : `${progress.frameId || 'Frame —'} · ${progress.groupId || 'Group —'}`;
     }
     if (this.playerStatus) this.playerStatus.textContent = this._statusText(view);
 
@@ -393,8 +403,10 @@ class StoryToolsUI {
     const previousFrame = document.getElementById('story-previous-frame');
     const nextFrame = document.getElementById('story-next-frame');
     const navigable = ['playing', 'paused', 'completed-with-gaps'].includes(view.state);
-    if (previousFrame) previousFrame.disabled = !navigable || !view.canPreviousFrame;
-    if (nextFrame) nextFrame.disabled = !navigable || !view.canNextFrame;
+    // A session has no frames, and skipping strokes would change how the
+    // next ones mix wet (SPEC §2.8).
+    if (previousFrame) previousFrame.disabled = !!session || !navigable || !view.canPreviousFrame;
+    if (nextFrame) nextFrame.disabled = !!session || !navigable || !view.canNextFrame;
 
     const speed = document.getElementById('story-speed');
     const colorModel = document.getElementById('story-color-model');
@@ -402,9 +414,16 @@ class StoryToolsUI {
       colorModel.value = view.colorModel;
       colorModel.disabled = false;
     }
+    // A session holds the engine's pigment colours, not display RGB.
+    const colorModelGroup = document.getElementById('story-color-model-group');
+    if (colorModelGroup) colorModelGroup.hidden = !!session;
     if (speed && StoryToolsUI.parseSpeed(speed.value) !== view.speed) speed.value = String(view.speed);
     const thickness = document.getElementById('story-thickness');
     if (thickness && Number(thickness.value) !== view.thickness) thickness.value = String(view.thickness);
+    if (thickness) {
+      thickness.disabled = !!session;
+      thickness.title = session ? 'An exact session replays its recorded brush sizes.' : '';
+    }
     this._renderThicknessValue(view.thickness);
     document.querySelectorAll('input[name="story-canvas"]').forEach((input) => {
       input.checked = input.value === view.canvasPolicy;
@@ -436,6 +455,17 @@ class StoryToolsUI {
     }
   }
 
+  _renderSessionSummary(session) {
+    const name = document.getElementById('story-player-file-name');
+    if (name) name.textContent = session.fileName;
+    const slug = document.getElementById('story-player-slug');
+    if (slug) {
+      slug.hidden = false;
+      slug.textContent = `Session recording · ${session.mode} · ${SessionToolsUI.clock(session.durationSec)} · ` +
+        `${session.strokes} strokes${session.baseline ? ' · over a background' : ''}`;
+    }
+  }
+
   /** Select value to controller speed: a multiplier, or the string 'max'. */
   static parseSpeed(value) {
     return value === 'max' ? 'max' : Number(value);
@@ -451,7 +481,7 @@ class StoryToolsUI {
         ? ` · ${Math.ceil(view.estimatedRemaining)} s left` : '';
       return `Playing · Max ≈ ${multiplier}× · ${ticks} ticks/s${eta}`;
     }
-    if (view.state === 'playing') return 'Painting story…';
+    if (view.state === 'playing') return view.sourceKind === 'session' ? 'Replaying session…' : 'Painting story…';
     if (view.state === 'paused') return 'Playback paused.';
     if (view.state === 'completed') return 'Playback completed.';
     if (view.state === 'completed-with-gaps') {

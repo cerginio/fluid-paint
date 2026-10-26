@@ -915,10 +915,16 @@ class FluidEngine {
     );
   }
 
-  /** Discard all paint. Velocity is not cleared; a following frame settles it. */
-  clear() {
+  /**
+   * Discard all paint. Velocity is not cleared; a following frame settles it.
+   * `dynamics: true` also clears velocity, pressure and the active splat
+   * areas: a session recording and its replay must start from the same fluid,
+   * and what earlier strokes left there is in neither file.
+   */
+  clear({ dynamics = false } = {}) {
     this._assertNoStroke('clear()');
-    this.simulator.clear();
+    if (dynamics) this.simulator.clearPaintAndDynamics();
+    else this.simulator.clear();
   }
 
   // --- Snapshots --------------------------------------------------------
