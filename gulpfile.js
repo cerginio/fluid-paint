@@ -62,6 +62,8 @@ const paths = {
     'app/unpainted-range-registry.js',
     'app/story-file-loader.js',
     'app/story-playback-controller.js',
+    'app/session-codec.js',
+    'app/session-recorder.js',
     // iro.js before app/ui/color.js, which constructs an iro.ColorPicker.
     // Vendored verbatim, MPL-2.0 -- see docs/UI-COMPONENTS.md. colorpicker.js
     // and its two GL programs are gone (Phase 8).
@@ -86,6 +88,7 @@ const paths = {
     // Before story-tools.js, which constructs a StoryRecentStore.
     'app/story-recent-store.js',
     'app/ui/story-tools.js',
+    'app/ui/session-tools.js',
     'paint-setup.js',
     'paint.js',
     'app/fluid-control-api.js',

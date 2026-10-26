@@ -271,6 +271,37 @@
             <div id="bake-page" class="panel-extension-page bake-page"
                  role="tabpanel" tabindex="0" aria-labelledby="bake-tab"
                  data-extension-page="bake" hidden>
+                <section id="session-card" class="bake-card session-card" aria-labelledby="session-title">
+                    <strong id="session-title">Session recording</strong>
+                    <div class="session-status">
+                        <span id="session-status-text" aria-hidden="true">Not recording</span>
+                        <span id="session-status-live" class="visually-hidden" role="status"
+                              aria-live="polite">Not recording</span>
+                    </div>
+                    <button id="session-record" class="story-primary story-wide" type="button"
+                            aria-pressed="false">● Record</button>
+                    <div class="story-actions session-file-actions">
+                        <button id="session-save" type="button" disabled>Save</button>
+                        <button id="session-open" type="button">Open…</button>
+                        <input id="session-open-input" type="file" accept=".flus" hidden>
+                    </div>
+                    <fieldset id="session-start-from" class="session-start-from" hidden>
+                        <legend>Starts from</legend>
+                        <label><input type="radio" name="session-start" value="background" checked>
+                            current painting as background</label>
+                        <label><input type="radio" name="session-start" value="clear">
+                            clear canvas first</label>
+                    </fieldset>
+                    <p id="session-note" class="session-note" hidden></p>
+                    <div id="session-discard" class="story-background-card session-discard" role="alert" hidden>
+                        <span>Unsaved recording will be discarded</span>
+                        <div class="story-actions">
+                            <button id="session-discard-confirm" type="button">Discard</button>
+                            <button id="session-discard-cancel" type="button">Cancel</button>
+                        </div>
+                    </div>
+                    <div id="session-opened" class="session-opened" hidden></div>
+                </section>
                 <div class="bake-card">
                     <strong>Brush Angle</strong>
                     <p>Tilts the current bristle shape between its two extremes -- a
@@ -304,6 +335,13 @@
 
       Starting state comes from ?debug= (debug/debug-flags.js), not from markup.
     -->
+    <!-- Recording indicator (fluid-session phase 3): outside the panels, so
+         closing them does not hide that a session is still being recorded. -->
+    <div id="session-rec-chip-slot" role="status">
+        <button id="session-rec-chip" class="session-rec-chip" type="button" hidden
+                title="Session recording — open the State tab">● REC</button>
+    </div>
+
     <div id="debug-toggle-tr" class="debug-toggle-corner" data-fluid-ui-full-only></div>
     <div id="debug-toggle-br" class="debug-toggle-corner" data-fluid-ui-full-only></div>
 
@@ -350,6 +388,8 @@
     <script src="app/story-file-loader.js"></script>
     <script src="app/story-demo-catalog.js"></script>
     <script src="app/story-playback-controller.js"></script>
+    <script src="app/session-codec.js"></script>
+    <script src="app/session-recorder.js"></script>
     <!-- colorpicker.js is GONE (Phase 8): the GL hue ring, its two programs and
          its hand-written hit tests are replaced by the iro.js wheel below. -->
     <!-- ryb.js BEFORE iro.js, not merely before color.js: iro builds its hue
@@ -369,6 +409,7 @@
     <script src="app/ui/panel.js"></script>
     <script src="app/story-recent-store.js"></script>
     <script src="app/ui/story-tools.js"></script>
+    <script src="app/ui/session-tools.js"></script>
     <script src="paint-setup.js"></script>
     <script src="paint.js"></script>
     <script src="app/fluid-control-api.js"></script>

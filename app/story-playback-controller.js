@@ -176,6 +176,7 @@ class StoryPlaybackController {
     if (!model && !background) throw new TypeError('A transferred scene requires a model or background.');
     await this._cancelRun();
     if (background) {
+      this.painter.interruptSessionRecording?.('background');
       this.painter.engine.setBackgroundImage(background.source || background);
       this.painter.needsRedraw = true;
       this.backgroundSummary = background.summary || {
@@ -278,7 +279,7 @@ class StoryPlaybackController {
     try {
       this._prepareFreshRun();
     } catch (error) {
-      if (this.baselineValid) this.painter.applySnapshot(this.baseline);
+      if (this.baselineValid) this._restoreBaselineSnapshot();
       this.error = error;
       this._setState('ready');
       throw error;
@@ -332,7 +333,7 @@ class StoryPlaybackController {
     try {
       this._prepareFreshRun();
     } catch (error) {
-      if (this.baselineValid) this.painter.applySnapshot(this.baseline);
+      if (this.baselineValid) this._restoreBaselineSnapshot();
       this.baselineValid = false;
       this.error = error;
       this._setState('ready');
@@ -351,7 +352,7 @@ class StoryPlaybackController {
   async restoreBaseline() {
     await this._cancelRun();
     if (this.baselineValid && this.baseline) {
-      this.painter.applySnapshot(this.baseline);
+      this._restoreBaselineSnapshot();
       this.painter.needsRedraw = true;
     }
     this.baselineValid = false;
@@ -426,7 +427,10 @@ class StoryPlaybackController {
   _prepareFreshRun() {
     this._applyColorModel();
     this._captureBaseline();
-    if (this.canvasPolicy === 'replace') this.engine.clear();
+    if (this.canvasPolicy === 'replace') {
+      this.engine.clear();
+      this.painter.recordSessionCommand?.({ op: 'clear' });
+    }
     this.painter.needsRedraw = true;
     this.plan = this._compilePlan();
     this.registry.reset(this.plan.operations.length);
@@ -454,6 +458,13 @@ class StoryPlaybackController {
       this.painter.resolutionScale
     );
     this.baselineValid = true;
+    // A session replay keeps its own copy, so it can restore it the same way.
+    this.painter.recordSessionCommand?.({ op: 'story-baseline' });
+  }
+
+  _restoreBaselineSnapshot() {
+    this.painter.applySnapshot(this.baseline);
+    this.painter.recordSessionCommand?.({ op: 'story-restore' });
   }
 
   _compilePlan() {

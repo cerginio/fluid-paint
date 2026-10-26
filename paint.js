@@ -332,8 +332,9 @@ class Paint {
             QUALITIES.map((q) => q.name),
             INITIAL_QUALITY,
             (index) => {
-                this.saveSnapshot();
+                this._saveSnapshot();
                 this.resolutionScale = QUALITIES[index].resolutionScale;
+                this._recordSessionCommand({ op: 'quality', resolutionScale: this.resolutionScale });
                 this.engine.changeResolution(
                     this.getPaintingResolutionWidth(),
                     this.getPaintingResolutionHeight()
@@ -726,6 +727,17 @@ class Paint {
 
         this.storyTools = this.storyPlaybackController && typeof StoryToolsUI !== 'undefined'
             ? new StoryToolsUI(this.storyPlaybackController, this.toolPanel)
+            : null;
+
+        // Session recording (fluid-session phase 3). The recorder watches the
+        // engine; Paint pushes the commands only it knows about.
+        this.sessionRecorder = typeof SessionRecorder !== 'undefined'
+            ? new SessionRecorder(this.engine, {
+                onFinish: (recorder, reason) => this.sessionTools?.onRecorderFinished(reason),
+            })
+            : null;
+        this.sessionTools = this.sessionRecorder && typeof SessionToolsUI !== 'undefined'
+            ? new SessionToolsUI(this, this.sessionRecorder, this.toolPanel)
             : null;
 
         if (this.toolPanel) {
@@ -1169,6 +1181,7 @@ class Paint {
         return {
             dirty: 'unknown',
             active: !!(this._updateOperations || this.manualStrokeActive || this.engine.strokeActive ||
+                (this.sessionTools && this.sessionTools.hasUnsavedWork()) ||
                 this._manualInputPending || this.interactionState !== InteractionMode.NONE ||
                 !c || c.backgroundLoading || c._runPromise || ['loading', 'playing', 'paused'].includes(c.state)),
             operations: this._updateOperations || 0,
@@ -1221,18 +1234,23 @@ class Paint {
             if ([137,80,78,71,13,10,26,10].some((byte, i) => signature[i] !== byte)) {
                 throw new Error('Invalid PNG signature');
             }
-            const url = URL.createObjectURL(blob);
-            const anchor = document.createElement('a');
-            anchor.href = url;
-            anchor.download = name;
-            anchor.hidden = true;
-            document.body.appendChild(anchor);
-            anchor.click();
-            anchor.remove();
-            setTimeout(() => URL.revokeObjectURL(url), 0);
+            this.downloadBlob(blob, name);
             return blob;
 
         } finally { this._updateOperations--; }
+    }
+
+    /** Hand a blob to the browser as a download; also the .flus Save. */
+    downloadBlob(blob, name) {
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = name;
+        anchor.hidden = true;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 0);
     }
 
     _pixelsToCanvas(pixels, width, height) {
@@ -1252,6 +1270,7 @@ class Paint {
         this._updateOperations = (this._updateOperations || 0) + 1;
         try {
             const decoded = await this.decodeBackground(file, file?.name);
+            this.interruptSessionRecording('background');
             this.engine.setBackgroundImage(decoded.source);
             this.needsRedraw = true;
             return decoded.summary;
@@ -1322,6 +1341,7 @@ class Paint {
     }
 
     clearBackgroundImage() {
+        this.interruptSessionRecording('background');
         this.engine.clearBackgroundImage();
         this.needsRedraw = true;
     }
@@ -1959,6 +1979,15 @@ class Paint {
 
     /** Commit a resize on release: offsets follow the anchored edge. */
     _commitResize() {
+        // A recording's ticks live in the painting's coordinates, which a
+        // resize redefines: it ends the session instead (fluid-session
+        // phase 3, open question 4).
+        const resized = this.newPaintingRectangle.left !== this.paintingRectangle.left ||
+            this.newPaintingRectangle.bottom !== this.paintingRectangle.bottom ||
+            this.newPaintingRectangle.width !== this.paintingRectangle.width ||
+            this.newPaintingRectangle.height !== this.paintingRectangle.height;
+        if (resized) this.interruptSessionRecording('resize');
+
         let offsetX = 0,
             offsetY = 0;
 
@@ -2051,6 +2080,7 @@ class Paint {
                 // This is the commit point: the upload succeeds before wet paint
                 // and its dynamics are discarded by the same engine operation.
                 this.engine.bakeToBackground(bakedCanvas);
+                this._recordSessionCommand({ op: 'bake' });
                 this.snapshotIndex = 0;
                 this.maxRedoIndex = 0;
                 this.undoing = false;
@@ -2081,6 +2111,7 @@ class Paint {
     async clear() {
         if (this.storyPlaybackController) await this.storyPlaybackController.yieldToManualInput();
         this.engine.clear();
+        this._recordSessionCommand({ op: 'clear' });
         this.needsRedraw = true;
     }
 
@@ -2090,6 +2121,7 @@ class Paint {
         }
         if (this.paletteMode === mode) return false;
         this.paletteMode = mode;
+        this._recordSessionCommand({ op: 'palette', mode });
         this.modelButtons?.setIndex(mode === 'digital' ? 1 : 0);
         if (this.exactPaintRgb) {
             const rgb = this.exactPaintRgb.slice();
@@ -2200,7 +2232,15 @@ class Paint {
         return this.brushScale;
     }
 
+    /** Take an undo snapshot: before a stroke, a resize, or a story run. */
     saveSnapshot() {
+        this._saveSnapshot();
+        this._recordSessionCommand({ op: 'snapshot' });
+    }
+
+    // Undo and the quality buttons snapshot as part of their own command, so a
+    // replay of that command takes it again; recording it twice would not.
+    _saveSnapshot() {
         if (this.snapshotIndex === HISTORY_SIZE) {
             // rotate ring buffer when full
             const front = this.snapshots.shift();
@@ -2257,8 +2297,9 @@ class Paint {
 
     async undo() {
         if (this.storyPlaybackController) await this.storyPlaybackController.yieldToManualInput();
+        this._recordSessionCommand({ op: 'undo' });
         if (!this.undoing) {
-            this.saveSnapshot();
+            this._saveSnapshot();
             this.undoing = true;
             this.snapshotIndex -= 1;
             this.maxRedoIndex = this.snapshotIndex;
@@ -2275,6 +2316,7 @@ class Paint {
 
     async redo() {
         if (this.storyPlaybackController) await this.storyPlaybackController.yieldToManualInput();
+        this._recordSessionCommand({ op: 'redo' });
         if (this.canRedo()) {
             this.applySnapshot(this.snapshots[this.snapshotIndex + 1]);
             this.snapshotIndex += 1;
@@ -2282,6 +2324,22 @@ class Paint {
 
         this.refreshDoButtons();
         this.needsRedraw = true;
+    }
+
+    // --- Session recording hooks ---
+
+    _recordSessionCommand(command) {
+        if (this.sessionRecorder && this.sessionRecorder.active) this.sessionRecorder.command(command);
+    }
+
+    /** Story playback's own commands, so a replay needs no Tilecraft file. */
+    recordSessionCommand(command) {
+        this._recordSessionCommand(command);
+    }
+
+    /** Something a session cannot replay happened: end the recording before it. */
+    interruptSessionRecording(reason) {
+        if (this.sessionRecorder && this.sessionRecorder.state === 'recording') this.sessionRecorder.stop(reason);
     }
 
     refreshDoButtons() {

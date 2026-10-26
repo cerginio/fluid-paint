@@ -18,6 +18,7 @@ const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
 const { chromium } = require('playwright');
+const SessionCodec = require('../app/session-codec.js');
 require('./browser-lock').acquireBrowserLock('session replay GPU check');
 
 const hardware = process.argv.includes('--hardware');
@@ -187,8 +188,64 @@ function exportBase64() {
     assert.deepEqual(recording.observerFailure,
       { detached: true, consoleErrors: 1, strokeActive: false, painted: true });
 
+    // Phase 3: the same events through the .flus codec and back. Ticks are
+    // stored as float32 (the scale is the stroke's brushSize), contacts as
+    // float64, so this must replay like the float32 variant below.
+    const viaCodec = async (events) => {
+      const records = [];
+      let ticks = [];
+      const flush = () => {
+        if (ticks.length) records.push({ type: 'ticks', data: Float32Array.from(ticks) });
+        ticks = [];
+      };
+      for (const event of events) {
+        switch (event[0]) {
+          case 'begin': records.push({ type: 'begin', params: event[1], variation: event[2] }); break;
+          case 'tick':
+            assert.equal(event[4], records.findLast((r) => r.type === 'begin').params.brushSize);
+            ticks.push(event[1], event[2], event[3]);
+            break;
+          case 'idle': {
+            const last = records.at(-1);
+            if (last && last.type === 'idle') last.count++;
+            else records.push({ type: 'idle', count: 1 });
+            break;
+          }
+          case 'contact': flush(); records.push({ type: 'contact', x: event[1], y: event[2], pressure: event[3] }); break;
+          case 'end': flush(); records.push({ type: 'end' }); break;
+        }
+      }
+      const file = await SessionCodec.encode({ header: {}, records });
+      const decoded = await SessionCodec.decode(file);
+      const out = [];
+      let brushSize = 0;
+      for (const record of decoded.records) {
+        switch (record.type) {
+          case 'begin': {
+            const { variation, ...params } = { ...record.params, variation: record.variation };
+            brushSize = params.brushSize;
+            out.push(['begin', params, variation]);
+            break;
+          }
+          case 'ticks':
+            for (let i = 0; i < record.data.length; i += 3) {
+              out.push(['tick', record.data[i], record.data[i + 1], record.data[i + 2], brushSize]);
+            }
+            break;
+          case 'idle': for (let i = 0; i < record.count; i++) out.push(['idle']); break;
+          case 'contact': out.push(['contact', record.x, record.y, record.pressure]); break;
+          case 'end': out.push(['end']); break;
+        }
+      }
+      const tickCount = events.filter((event) => event[0] === 'tick').length;
+      console.log(JSON.stringify({ check: 'codec', fileBytes: file.length, ticks: tickCount,
+        bytesPerTick: Math.round(file.length / tickCount * 100) / 100 }));
+      return out;
+    };
+    const codecEvents = await viaCodec(recording.events);
+
     // --- Replay ------------------------------------------------------------
-    const replay = async (name, { xy = 0, height = 0, contactXY = 0, contactPressure = false, fround = false, reseed = true }) => {
+    const replay = async (name, { events = recording.events, xy = 0, height = 0, contactXY = 0, contactPressure = false, fround = false, reseed = true }) => {
       const { page, errors } = await openPage();
       const result = await page.evaluate(({ events, original, xy, height, contactXY, contactPressure, fround, reseed, seed, exportSource }) => {
         const exportPixels = eval(`(${exportSource})`);
@@ -242,7 +299,7 @@ function exportBase64() {
         const pixels = source.length / 4;
         return { pixels, hash, identicalBytes: identicalBytes / source.length,
           withinTwo: withinTwo / pixels, maxDelta, differingBox: maxDelta > 2 ? box : null };
-      }, { events: recording.events, original: recording.pixels, xy, height, contactXY, contactPressure, fround, reseed,
+      }, { events, original: recording.pixels, xy, height, contactXY, contactPressure, fround, reseed,
         seed: BRISTLE_SEED, exportSource: exportBase64.toString() });
       assert.deepEqual(errors, []);
       await page.close();
@@ -258,6 +315,7 @@ function exportBase64() {
     const spec = await replay('xy:64/h:4096 ticks + contacts', { xy: 64, height: 4096, contactXY: 64, contactPressure: true });
     const fine = await replay('xy:65536 ticks', { xy: 65536 });
     const control = await replay('control: float, no reseed', { reseed: false });
+    const codec = await replay('.flus codec round trip', { events: codecEvents });
 
     assert.equal(float.identicalBytes, 1, 'a float replay after reload is bit-exact');
     // Not bit-exact: Simulator.splat() sizes its CPU-side splat area from the
@@ -266,6 +324,7 @@ function exportBase64() {
     // off by exactly 1. The GPU itself only ever receives float32.
     assert.ok(fround.withinTwo === 1 && fround.maxDelta <= 1, 'float32 ticks: every pixel within +-1');
     assert.equal(pressure.identicalBytes, 1, 'u16 contact pressure loses nothing');
+    assert.ok(codec.withinTwo === 1 && codec.maxDelta <= 1, 'a .flus round trip replays like float32 ticks');
     assert.ok(control.identicalBytes < 1, 'without the bristle seed the replay differs: the probe can see it');
     // Measured, not asserted: below float32 the dynamics are chaotic, so any
     // tick quantum -- even 1/65536 px -- leaves ~7 % of pixels off by > 2.
