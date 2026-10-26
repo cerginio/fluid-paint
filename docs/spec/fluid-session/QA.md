@@ -9,6 +9,144 @@ Fixture для сценаріїв лежить на диску: `D:\work\fluid-p
 Довідкові числа з desktop-QA (AMD Radeon 890M, D3D11, 2026-10-26), повний fixture:
 1× за планом — 43,0 с; 16× — 13,5 с (1 918 оп/с); Max — 3,8 с (6 838 оп/с).
 
+## Фаза 4 — Open і повтор у Player (SPEC §2.7 Open, §2.8) — прийнято 2026-10-27
+
+Журнал: Open… показує `Open in Player →`; Player програє `.flus` точно, тік за тіком
+(`app/session-player.js`). Record тепер стартує з того стану, з якого стартує повтор: непорожнє
+полотно запікається у фон, порожнє — без швидкості рідини (без цього повтор поверх малюнка давав
+0,934 пікселів у ±2). Браузерні сценарії — на `npm run dev` (`http://127.0.0.1:3000/`), інтернет не
+потрібен. Для P2–P7 потрібен файл `.flus`: записати за QA-S2–S6 (з Undo) і дати рідині осісти
+секунду перед `■ Stop`. Покриття автоматом: P1–P8 і P10 проходить `npm run test:session-ui`
+(повтор після перезавантаження побітово рівний оригіналу), P9 — те саме на справжньому GPU.
+Очима — те, чого автомат не бачить: темп 1× проти оригіналу, плавність Max, що полотно на паузі
+справді завмирає, зум вигляду у вузькому вікні. Власник прийняв фазу через `handoff:next`.
+
+### QA-P1. Open… пропонує Open in Player
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:3000/`
+**qa:action:** `+` → вкладка `State` → `Open…` → обрати збережений `painting-session-….flus`.
+**qa:inspect:** текст під кнопками Save/Open… і кнопка під ним.
+**qa:expected:** `painting-session-….flus: 00:mm · N strokes · T ticks · K KB · Exact · starts from
+an empty canvas.` (без колишнього «arrives in the next update»), під ним широка зелена кнопка
+`Open in Player →`. Для зіпсованого файлу (`x.flus`) — червоний текст помилки, кнопки немає.
+
+### QA-P2. Player показує сесію
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:3000/` після QA-P1.
+**qa:action:** `Open in Player →`.
+**qa:inspect:** вкладка Player: назва, рядок під нею, лічильник прогресу, контроли.
+**qa:expected:** відкрилась вкладка `Player`. Назва — ім'я файлу; під нею
+`Session recording · Exact · 00:mm · N strokes`. Лічильник `0 / T ticks · 0 / N strokes`
+(T — усі тіки повтору: мазки плюс холості паузи). Блоку `Import colors` немає; повзунок
+`Thickness` сірий (вимкнений), кнопки `⏮ Frame` / `Frame ⏭` вимкнені, рядок над ними —
+`Session — no frames`.
+
+### QA-P3. 1× — темп оригіналу, Record вимкнений
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:3000/` після QA-P2.
+**qa:action:** `Paint onto canvas` → `Replace current painting`; `Speed` → `1×`; `Play`. Поки грає —
+вкладка `State`, навести курсор на `● Record`.
+**qa:inspect:** полотно; статус Player; кнопка Record і її підказка.
+**qa:expected:** полотно очищується, мазки з'являються в тому порядку й тому темпі, як малювались
+(довгі паузи між мазками скорочені до ≈ 1 с). Статус `Replaying session…`. `● Record` вимкнений,
+підказка `A session is replaying in the Player: stop it first.` Мазок, відмінений Undo в
+оригіналі, з'являється і в момент Undo зникає.
+
+### QA-P4. Пауза заморожує рідину
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:3000/` під час QA-P3, щойно після мазка.
+**qa:action:** `Pause`, дивитись на полотно 3 секунди, потім `Resume`.
+**qa:inspect:** мокра фарба щойно намальованого мазка.
+**qa:expected:** на паузі фарба не розтікається далі — кадр нерухомий. Після `Resume` розтікання
+продовжується з того самого місця, а повтор — з наступного тіку.
+
+### QA-P5. Max і завершення
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:3000/` після QA-P2 або QA-P3.
+**qa:action:** `Speed` → `Max` → `Restart` (або `Play`).
+**qa:inspect:** статус Player, лічильник, полотно після завершення.
+**qa:expected:** статус спершу `Playing · Max (measuring…)`; якщо повтор довший за ~1 с —
+`Playing · Max ≈ N× · T ticks/s · S s left`, і S рівно спадає. Тік сесії — повний крок пензля й
+рідини, тож Max обмежений GPU: на Radeon 890M щільна сесія йде ≈ 4× (≈ 230–265 ticks/s), не
+десятки разів, як story. Полотно оновлюється плавно, без замирань на секунди. Короткий запис
+(кілька мазків) закінчується раніше, ніж з'явиться `≈ N×`, — це нормально. Кінець: статус
+`Playback completed.`, лічильник `T / T ticks · N / N strokes`, `● Record` знову увімкнений.
+
+### QA-P6. Повтор після перезавантаження збігається з оригіналом
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:3000/`
+**qa:action:** записати 3–4 мазки з `Undo` і `Clear` посередині (QA-S2), дати осісти 1 с, `■ Stop`,
+`Save`, зробити скріншот полотна. Перезавантажити сторінку (F5). `Open…` → цей файл →
+`Open in Player →` → `Replace current painting` → `Max` → `Play`.
+**qa:inspect:** полотно після `Playback completed.` поруч зі скріншотом.
+**qa:expected:** малюнок той самий до пікселя на око: ті самі мазки, ворсинки, розтікання;
+відмінений Undo мазок відсутній, Clear стер те, що стер в оригіналі.
+
+### QA-P7. Сесія поверх малюнка: baseline як фон
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:3000/`
+**qa:action:** намалювати щось → `State` → `current painting as background` → `● Record` → мазок
+поверх → `■ Stop` → `Save`. Перезавантажити → `Open…` → файл → `Open in Player →` →
+`Replace current painting` → `Max` → `Play`.
+**qa:inspect:** полотно відразу після Play і після завершення; підсумок у State після `Open…`.
+**qa:expected:** при `● Record` полотно на вигляд не змінилось (малюнок запікся у фон, примітка
+`Started over the current painting…`). Підсумок файлу — `starts over a background`. Після Play
+одразу з'являється малюнок до Record як фон, потім поверх нього — записаний мазок; результат
+збігається з оригіналом.
+
+### QA-P8. Вужче вікно — вигляд зменшується, координати ні
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:3000/` у вікні браузера, вужчому за вікно запису (наприклад
+700×520 проти 1100×760).
+**qa:action:** `Open…` → файл з QA-P6 → `Open in Player →` → `Replace current painting` → `Max` →
+`Play`.
+**qa:inspect:** полотно.
+**qa:expected:** painting rectangle цілком видно: вигляд зменшено (≈ 0,6 для 700×520), полотно по
+центру. Мазки там само відносно країв painting, що й в оригіналі; нічого не обрізано.
+
+### QA-P9. Повтор точний на справжньому GPU
+
+**qa:mode:** cli
+**qa:open:** термінал, каталог `D:\work\fluid-paint\fluid-paint`.
+**qa:action:** `node debug/session-recording-ui-test.js --hardware`
+**qa:inspect:** чотири рядки `"check":"replay"` і підсумок.
+**qa:expected:** у кожному `"withinTwo":1` (AC-REC-5 вимагає ≥ 0,99), `"pausedSteps":0` у рядку
+`empty`, `"viewScale"` < 1 у `small-window`; підсумок `session-recording-ui: 18 checks passed`,
+код виходу 0.
+
+### QA-P10. 320 px: Open in Player і Player
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:3000/` у DevTools device mode 320×640.
+**qa:action:** `+` → `State` → `Open…` → файл → `Open in Player →`.
+**qa:inspect:** картка Session recording, потім вкладка Player.
+**qa:expected:** `Open in Player →` на всю ширину картки, не нижча за 44 px; горизонтальної
+прокрутки немає ні в State, ні в Player.
+
+### Свідомо не зроблено у фазі 4
+
+- **Vector-повтор** файлу з іншим `engineContract` — фаза 5. Такий файл Open… показує з текстом
+  `Approximate replay arrives in a later update.`, кнопки `Open in Player →` немає.
+- **Prev/Next Frame** для сесії вимкнені назавжди у v1 (SPEC §2.8).
+- **`.flus` у вкладці File** (drag-and-drop) — відкрите питання 1, не вирішене.
+- **Undo після повтору**: повтор починає з порожньої undo-історії (так вимагають записані Undo),
+  тож весь прогін не відміняється одним Undo, як story.
+- **Add over current painting** програє поверх наявної фарби: це не точний повтор за визначенням;
+  painting однаково стає в прямокутник запису.
+- **Story Max** лишився на `BudgetTickScheduler` фази 1: темп від GPU-fence отримав лише повтор
+  сесії, чиї тіки важкі. Story на fixture не замирала (виміряно у фазі 1).
+- **AC-REC-6 на ручному корпусі ≥ 1 хв** не виміряний: є лише короткі записи (356 тіків — 1 265 Б,
+  ≈ 3,6 Б/тік з заголовками). Якщо при QA-P6 записати хвилину, розмір файлу з підсумку Open… дасть
+  це число.
+
 ## Фаза 3 — запис і Save (SPEC §2.1–2.4, §2.6, §2.7) — прийнято 2026-10-26
 
 Журнал: картка **Session recording** першою у вкладці State, чіп `● REC`, Save у `.flus`,
@@ -111,8 +249,8 @@ so new paint will not mix wet with it. Undo history starts here.` Undo нічо�
 з QA-S6. Потім `Open…` → будь-який не-`.flus` файл, перейменований на `x.flus`.
 **qa:inspect:** текст під кнопками.
 **qa:expected:** для файлу з QA-S6:
-`painting-session-….flus: 00:mm · 4 strokes · N ticks · M KB · Exact · starts from an empty canvas.
-Playing it in the Player arrives in the next update.` Для підробленого — червоний
+`painting-session-….flus: 00:mm · 4 strokes · N ticks · M KB · Exact · starts from an empty canvas.`
+і кнопка `Open in Player →` (з фази 4). Для підробленого — червоний
 `x.flus: Session file: this is not a Fluid Paint session (.flus) file.` Помилок у консолі немає.
 
 ### QA-S10. Файл відтворюється так само точно, як float32-тіки

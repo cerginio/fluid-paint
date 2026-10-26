@@ -1,12 +1,12 @@
 # Handoff: fluid-session — швидкість Max і запис сесії малювання
 
-Стан на 2026-10-26, гілка `feat/pwa`. Фази 1, 2 і 3 закриті й закомічені: код теми,
+Стан на 2026-10-27, гілка `feat/pwa`. Фази 1–4 закриті й закомічені: код теми,
 `QA.md` і цей файл. Спека
 [`docs/PLAYER-MAX-SPEED-AND-SESSION-RECORDING-SPEC.md`](../../PLAYER-MAX-SPEED-AND-SESSION-RECORDING-SPEC.md)
 (далі — SPEC) закомічена в `a4009a1`.
 
-> **Далі:** фаза 4 — Open у Player і повтор `.flus` (пункт 4). Формат файлу й команди, які
-> повтор має виконати, — «Контракт запису для фази 4» нижче.
+> **Далі:** фаза 5 — секція C (опорні точки) і Vector-повтор (пункт 5). Повтор Exact уже є
+> (`app/session-player.js`); Vector — другий шлях для файлу з іншим `engineContract`.
 
 ## Що зроблено і працює
 
@@ -34,6 +34,11 @@
 | `debug/session-codec-test.js` (`npm run test:session-codec`) | 10 перевірок: varint/zigzag, ключі float, round-trip усіх тегів, пошкоджені файли, recorder на фейковому рушії (waiting/stopping/ліміт/legacy), розмір на синтетиці 36 129 тіків. |
 | `debug/session-recording-ui-test.js` (`npm run test:session-ui`) | 12 перевірок у справжній сторінці: картка, чіп, закриття панелі, Stop, guard, Save → decode, baseline, Resize, Open…, Record vs story, overhead, 320 px. CORS-помилки демо-каталогу відфільтровані (оточення). |
 | `debug/session-replay-gpu-test.js` | + варіант `.flus codec round trip`: події → `SessionCodec` → назад → повтор; assert як для float32. |
+| `app/session-player.js` (фаза 4) | `SessionPlayer`: `prepare({replace})` (painting rect і quality з header, palette, reseed, порожнє undo-кільце; Replace — `clear({dynamics})` + baseline-фон), `play()` з курсором (запис + зсув), що переживає скасування; скасований прогін дограє відкритий мазок (`finishStroke`). Команди — внутрішні кроки Paint (`_undoStep`, `_bakeVisiblePainting`…), не публічні методи: ті поступаються Player'у й скасували б повтор. `IDLE_LIMIT = 61` + 61 холостий тік у кінці (осідання після Stop). `FenceTickScheduler`: ≤ 2 пачки тіків у польоті за `fenceSync`, AIMD +1/×0,7; WebGL1 → `BudgetTickScheduler`. |
+| `app/story-playback-controller.js` (фаза 4) | Друге джерело `session` (`loadSession`, `_runSession`, `_sessionProgress`, `_estimateSession`). Для сесії `setSpeed` і `setThickness` не перезапускають прогін; `ownsEngineClock` true і на паузі. Вимірювач Max узагальнений (`oneXRate`: оп/с story або 60 тіків/с). |
+| `app/ui/story-tools.js`, `app/ui/session-tools.js`, `index.html` (фаза 4) | Player для сесії (прогрес `ticks · strokes`, Import colors прихований, Thickness/Frame вимкнені); `Open in Player →`; Record на непорожньому полотні запікає його (`_bakeVisiblePainting`), на порожньому — `engine.clear({dynamics:true})`. |
+| `paint.js`, `viewport.js`, `fluid-engine/index.js`, `fluid-engine/simulation.js` (фаза 4) | `setResolutionScale()`, `placePaintingForReplay()`, `_resetUndoHistory()`; `Viewport.showWorldRect()` (зум, не зсув); `engine.clear({ dynamics })`; `clearPaintAndDynamics()` чистить і divergence/pressure. |
+| `debug/session-recording-ui-test.js` (фаза 4, `npm run test:session-ui`, `--hardware`) | 18 перевірок; 4 повтори після перезавантаження через UI: порожнє полотно (1× → пауза → Max), baseline, усі команди (+ мазок, що тече, перед Record), вужче вікно. Assert: `withinTwo ≥ 0,99` (AC-REC-5) і `maxDelta ≤ 1`. ≈ 7 хв на SwiftShader. `test:story-max` + юніт `FenceTickScheduler` на фейковому GL. |
 
 ## Інваріанти теми
 
@@ -47,7 +52,20 @@ hash 16× == Max. *Доведено мутаціями:* повернення с
 (падає); вимкнення придушення в `paint.js` → 191 `simulate()` на 186 тіків (падає). Без ривка
 +20 мс після `resetClock` друга мутація проходила — його не прибирати.
 
-## Контракт запису для фази 4
+**INV-REC-1.** Запис сесії і її повтор стартують з однакового стану рідини: мокрої фарби,
+швидкості, тиску, дивергенції і splat-областей немає; фон — baseline PNG або нічого.
+*Походження:* фаза 4 (2026-10-27), два виміри: Record поверх малюнка лишав мокру фарбу — повтор
+поверх baseline 0,934 пікселів у ±2; тиск і дивергенція поза областю симуляції пережили Clear і
+Bake — повтор запису, почату після малювання, 0,9975 у ±2, `maxDelta` 105–108.
+*Механізм:* Record — `_bakeVisiblePainting()` або `engine.clear({ dynamics: true })`; повтор
+Replace — `engine.clear({ dynamics: true })` + baseline; `clearPaintAndDynamics()` чистить і
+pressure/divergence.
+*Перевірка:* `npm run test:session-ui` — повтори `baseline` і `commands`, `maxDelta ≤ 1`.
+*Доведено мутаціями:* без запікання на Record → `baseline` 0,934 (падає); без
+`clear({dynamics})` на Record → `commands` 0,971 (падає); без очищення pressure/divergence →
+`commands` `maxDelta` 108 (падає на `≤ 1`).
+
+## Контракт запису (виконує `SessionPlayer`)
 
 Повтор `.flus` виконує записи по порядку на свіжому стані:
 
@@ -57,7 +75,7 @@ hash 16× == Max. *Доведено мутаціями:* повернення с
   undo-кільце порожнє.
 - `begin` → `engine.beginStroke({ ...params, variation })`; `ticks` → `replayTick(x, y, h,
   params.brushSize)`; `contact` → тримати до `end`; `end` → `endStroke({ contact })` (`null`, якщо
-  contact не було); `idle` → `replayTick()` × count (SPEC §2.8: серії > 60 можна скоротити до 60).
+  contact не було); `idle` → `replayTick()` × min(count, 61) (SPEC §2.8).
 - Команди: `snapshot` → `painter.saveSnapshot()`; `undo`/`redo`/`clear`/`bake` → однойменні методи
   Paint (вони самі беруть свої знімки); `palette` → `setPaletteMode`; `quality` → кнопка якості з
   цим `resolutionScale`; `fluidity` → `setSimulation`; `bristles` → `setBrush`; `path` →
@@ -66,6 +84,23 @@ hash 16× == Max. *Доведено мутаціями:* повернення с
 - Повтор не пишеться в новий запис (SPEC §2.7: Record вимкнений під час повтору `.flus`).
 
 ## Головні виміряні факти
+
+Фаза 4 (2026-10-27; SwiftShader і AMD Radeon 890M D3D11; власник прийняв через `handoff:next`):
+
+- **AC-REC-5 наскрізно через UI:** усі 4 повтори після перезавантаження побітові
+  (`identicalBytes: 1`, `maxDelta: 0`) на SwiftShader і на 890M (стенд `npm run dev`).
+- **Max сесії обмежений GPU:** щільна синтетика 13 261 тік — `BudgetTickScheduler` 57 с, але
+  замирання до 2,2 с (46 з 57 с у паузах), статус `≈ 0× · 11 ticks/s`; fence depth 1 — 102 с,
+  плавно; **fence depth 2 — 58,8 с, p90 кадру 18,8 мс, max 555 мс, статус
+  `≈ 4× · 235–265 ticks/s`**.
+- 1× — 4,1 с на 240 тіків (розрахунок 4,0).
+- **Спростовано:** «idle можна скоротити до 60» — область живе 61 крок (`frameNumber` росте лише в
+  `simulate()`). Але й 60 пікселями не відрізнити (швидкість ≈ 0,7⁶⁰): мутація 60 проходить тест;
+  61 тримається на аргументі стану.
+- Мутація «хост крокує на паузі» → `pausedSteps > 0`, ловиться.
+- Зависання `Pause` у першому guard (клік 30 с) на вимогу не відтворене; прибрано механізм
+  (`FixedTickScheduler(64)` доганяв годинник без межі GPU).
+- Guard фази: 17 з 18 exit 0; `test:bristle-shape` — `0.0895`, як до фази 1.
 
 Фаза 3 (2026-10-26; SwiftShader і AMD Radeon 890M D3D11; власник пройшов QA-S1–S11 на стенді):
 
@@ -136,7 +171,8 @@ hash 16× == Max. *Доведено мутаціями:* повернення с
 
 - ~~Квантування `xy: 64`, `height: 4096` тримає AC-REC-5~~ — спростовано фазою 2 (0,91).
 - Розмір float32-тіків на справжніх ручних мазках не більший за синтетику (8,2 Б/тік). Ручного
-  корпусу довшого за хвилину ще немає — міряти у фазі 4 на QA-записі.
+  корпусу довшого за хвилину ще немає (фаза 4 мала лише короткі мишачі записи: 356 тіків —
+  1 265 Б, ≈ 3,6 Б/тік з заголовками).
 
 ## НЕЗАКРИТЕ — почни звідси
 
@@ -238,6 +274,14 @@ Record/Stop, Save, Open… (поки disabled-заглушка або лише �
 
 </details>
 
+~~4. Фаза 4 — Open і повтор у Player (SPEC §2.7 Open, §2.8)~~ — ЗАКРИТО 2026-10-27.
+Див. «Що зроблено», INV-REC-1, «Виміряні факти», `QA.md` §«Фаза 4». Рішення фази поза SPEC
+(внесені в SPEC §2.6/§2.8): Record запікає/скидає рідину; idle до 61; painting у
+`header.painting` + зум вигляду (питання 6); повтор на паузі тримає годинник; порожнє undo-кільце;
+Max сесії — `FenceTickScheduler`. Регресії: дві (INV-REC-1).
+
+<details><summary>Початковий план фази 4 (історія)</summary>
+
 ### 4. Фаза 4 — Open і повтор у Player (SPEC §2.7 Open, §2.8)
 
 **Контракт.** Open… парсить `.flus`, показує підсумок і `Open in Player →`.
@@ -261,6 +305,8 @@ Open → Play на Max → порівняння `exportPixels()` з PNG, збе�
 Restart на Max. Дивитись: темп 1× як у оригіналі, Max швидше, малюнок збігається
 з оригіналом; Undo/Clear з запису відтворились.
 
+</details>
+
 ### 5. Фаза 5 — опорні точки C і Vector-повтор (SPEC §2.5)
 
 **Контракт.** На Save добудовується секція `KEYFRAMES` (RDP `ε = 0,5`, тиск
@@ -268,7 +314,9 @@ Restart на Max. Дивитись: темп 1× як у оригіналі, Max
 `Vector — approximate` і грає через replay-режим `strokeTo()`; Thickness
 увімкнений. Без секції C — зрозуміла помилка.
 
-**Guard:** guard фази 4 + `debug/session-keyframes-test.js`.
+**Guard:** guard фази 4 (guard фази 3, де `test:session-ui` і `test:story-max` розширені фазою 4)
++ `debug/session-keyframes-test.js`. Vector-повтор може взяти курсор і `_runSession` з
+`SessionPlayer`, але грати через `strokeTo()`, не `replayTick`.
 
 **Probe:** штучно змінений `engineContract` у файлі → Open показує
 `Vector — approximate` і програє без винятків у консолі (AC-REC-9); точок C
@@ -283,6 +331,7 @@ Restart на Max. Дивитись: темп 1× як у оригіналі, Max
 4. ~~Resize під час запису~~ — вирішено 2026-10-26: Resize завершує запис, записане зберігається.
 5. ~~`bristleCount` зі story у записі~~ — закрито фазою 3: recorder порівнює `engine.bristleCount`
    на кожному `beginStroke` і пише команду `bristles` (юніт у `test:session-codec`).
-6. Повтор у Player при іншому розмірі вікна: тіки в координатах світу, тож фаза 4 ставить
-   painting rectangle у `header.painting`, а не зсуває тіки. Якщо він не влазить у вікно —
-   вирішити у фазі 4 (зум вигляду, не зсув координат).
+6. ~~Повтор у Player при іншому розмірі вікна~~ — вирішено фазою 4: painting у `header.painting`,
+   `Viewport.showWorldRect()` зменшує вигляд (≥ 0,25).
+7. Story Max на `FenceTickScheduler`? Фаза 4 дала fence лише сесіям; story на fixture не замирала.
+   Не в жодній фазі.
