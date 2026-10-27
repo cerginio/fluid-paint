@@ -9,6 +9,133 @@ Fixture для сценаріїв лежить на диску: `D:\work\fluid-p
 Довідкові числа з desktop-QA (AMD Radeon 890M, D3D11, 2026-10-26), повний fixture:
 1× за планом — 43,0 с; 16× — 13,5 с (1 918 оп/с); Max — 3,8 с (6 838 оп/с).
 
+## Фаза 5 — опорні точки C і Vector-повтор (SPEC §2.5) — прийнято 2026-10-27
+
+Прогін QA 2026-10-27 (агент, Windows / AMD Radeon 890M): **V1–V8 пройдено**.
+V1: `engineContract: 2`, 8 опорних точок на 100 тіків (`ticksPerKeyframe: 12.5`);
+обидва перепозначені файли створено. V2–V4 і V6: `test:session-ui --hardware`
+підтвердив Vector у Open і Player, активний Thickness, завершення `269 / 269 ticks ·
+6 / 6 strokes` без помилок, а для файлу без C — зрозуміле повідомлення.
+Порівняння Vector з оригіналом: `withinTwo: 0.883` (очікування ≈ 0,9);
+візуально мазки на тих самих місцях, загальна форма збережена. V5: на `2.50×`
+мазки помітно ширші, повтор завершується; `test:session-keyframes` підтвердив
+передачу Thickness у `brushSize`. V7: 10/10, `ticksPerPoint: 4.62`, 282 КБ / 36 000
+тіків. V8: 21/21, `ticksPerKeyframe: 11.68`; чотири Exact-повтори побітові.
+Guard фази: 16 команд з кодом 0; `test:bristle-shape` — той самий відомий збій
+`round footprint has a strong 3-fold harmonic (0.0895)`.
+
+Журнал: на Stop файл `.flus` отримує секцію C (`app/session-keyframes.js`): опорні точки
+мазків, RDP `ε = 0,5` + тиск. Файл іншого рушія (інший `engineContract`) Open… показує як
+`Vector — approximate`, і Player програє його за точками C через replay-режим `strokeTo()`;
+Thickness для нього увімкнений. Файл іншого рушія без секції C — зрозуміла помилка.
+
+Браузерні сценарії — на `npm run dev` (`http://127.0.0.1:3000/`), інтернет не потрібен. Файл
+«іншого рушія» робиться зі звичайного запису: записати 3–4 мазки з Undo (QA-S2–S6), дати осісти
+секунду, `■ Stop`, `Save`, потім у терміналі в `D:\work\fluid-paint\fluid-paint`:
+
+```
+npm run session:retag -- "<завантажений painting-session-….flus>" "%TEMP%\other-engine.flus"
+npm run session:retag -- "<завантажений painting-session-….flus>" "%TEMP%\no-keyframes.flus" --strip-keyframes
+```
+
+Покриття автоматом: V2–V4, V6 проходить `npm run test:session-ui` (файл з усіма командами,
+перепозначений `debug/session-retag.js`), V5 — юніт `test:session-keyframes` (thickness 1,5 →
+`brushSize` 60). Очима — те, чого автомат не бачить: що Vector-мазки за формою і місцем ті самі,
+що в оригіналі, і що Thickness справді робить їх товщими.
+
+### QA-V1. Секція C у збереженому файлі
+
+**qa:mode:** cli
+**qa:open:** термінал, каталог `D:\work\fluid-paint\fluid-paint`, файл `.flus` записаний і збережений
+у цій фазі (Save після фази 5).
+**qa:action:** `npm run session:retag -- "<файл>.flus" "%TEMP%\other-engine.flus"`
+**qa:inspect:** рядок JSON у виводі.
+**qa:expected:** `"engineContract":2`, `"keyframes"` — ціле > 0, `"ticksPerKeyframe"` ≥ 5 (на
+прямих мишачих мазках ≈ 10–30), код виходу 0; файл `%TEMP%\other-engine.flus` з'явився.
+
+### QA-V2. Open… показує файл іншого рушія як Vector
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:3000/`
+**qa:action:** `+` → вкладка `State` → `Open…` → `%TEMP%\other-engine.flus` (з QA-V1).
+**qa:inspect:** текст під кнопками Save/Open… і кнопка під ним.
+**qa:expected:** `other-engine.flus: 00:mm · N strokes · T ticks · K KB · Vector — approximate ·
+starts from an empty canvas.` (без колишнього «Approximate replay arrives in a later update.»),
+під ним кнопка `Open in Player →`. Текст не червоний.
+
+### QA-V3. Player для Vector: Thickness увімкнений
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:3000/` після QA-V2.
+**qa:action:** `Open in Player →`.
+**qa:inspect:** вкладка Player: рядок під назвою файлу, повзунок Thickness, кнопки Frame.
+**qa:expected:** рядок `Session recording · Vector — approximate · 00:mm · N strokes`. Повзунок
+`Thickness` активний (не сірий, без підказки про exact). `Import colors` прихований,
+`⏮ Frame` / `Frame ⏭` вимкнені, лічильник `0 / T ticks · 0 / N strokes`.
+
+### QA-V4. Vector-повтор програється до кінця
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:3000/` після QA-V3, відкрита консоль DevTools.
+**qa:action:** `Paint onto canvas` → `Replace current painting`; `Speed` → `Max`; `Play`.
+**qa:inspect:** полотно, статус Player, лічильник, консоль.
+**qa:expected:** полотно очищується, мазки з'являються там само й такої самої форми, як в
+оригіналі; відмінений Undo мазок з'являється і зникає. Ворсинки й розтікання можуть
+відрізнятися в деталях — це наближення (автомат: ≈ 0,89 пікселів у ±2 від оригіналу).
+Кінець: `Playback completed.`, лічильник `T / T ticks · N / N strokes`. У консолі жодної помилки.
+
+### QA-V5. Thickness змінює Vector-повтор
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:3000/` після QA-V4.
+**qa:action:** `Thickness` → крайнє праве значення (підпис `Thickness 2.50×`); `Restart`.
+**qa:inspect:** ширина мазків на полотні після `Playback completed.` проти QA-V4.
+**qa:expected:** ті самі мазки на тих самих місцях, помітно ширші (на 890M площа фарби ×2,56 проти
+`1.00×`). Повтор доходить до
+`Playback completed.`, помилок у консолі немає. Повернути `Thickness` на `1.00×`.
+
+### QA-V6. Файл іншого рушія без секції C — зрозуміла помилка
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:3000/`, відкрита консоль DevTools.
+**qa:action:** `+` → `State` → `Open…` → `%TEMP%\no-keyframes.flus` (друга команда вступу).
+**qa:inspect:** текст під кнопками, кнопка під ним, консоль.
+**qa:expected:** червоний текст `no-keyframes.flus: This session was recorded by a different engine
+version and has no keyframes to replay approximately.` Кнопки `Open in Player →` немає. У консолі
+помилок немає.
+
+### QA-V7. Секція C, Vector-повтор і бюджет розміру на юніт-рівні
+
+**qa:mode:** cli
+**qa:open:** термінал, каталог `D:\work\fluid-paint\fluid-paint`.
+**qa:action:** `npm run test:session-keyframes`
+**qa:inspect:** рядок `"check":"keyframes"` і підсумок.
+**qa:expected:** `session-keyframes: 10 checks passed`; у `keyframes`: `"ticks":36129`,
+`"ticksPerPoint":4.62`, `"fileKBper36000":282` (≤ 300). Код виходу 0.
+
+### QA-V8. Проба фази 5 на справжньому GPU
+
+**qa:mode:** cli
+**qa:open:** термінал, каталог `D:\work\fluid-paint\fluid-paint`.
+**qa:action:** `node debug/session-recording-ui-test.js --hardware`
+**qa:inspect:** рядки `"check":"keyframes on the QA corpus"`, `"check":"vector replay"` і підсумок.
+**qa:expected:** `ticksPerKeyframe` ≥ 5; у `vector replay` — `"coverage":"T / T ticks · 6 / 6
+strokes"`, `"painted":true`, `withinTwo` ≈ 0,9 (наближення, не порівнюється з AC-REC-5);
+чотири рядки `"check":"replay"` фази 4 — як і раніше `"withinTwo":1`; підсумок
+`session-recording-ui: 21 checks passed`, код виходу 0 (≈ 25 с на 890M; без `--hardware`, на
+SwiftShader — ≈ 9 хв і Exact-повтори можуть не вкластися в таймаут, див. HANDOFF пункт 6).
+
+### Свідомо не зроблено у фазі 5
+
+- **Прев'ю мазків у картці Open** (SPEC §2.5 п. 2, необов'язкове) — не зроблено.
+- **Пошкоджений блок** не відкривається як Vector: gzip охоплює все тіло, тож такий файл не
+  декодується зовсім, Open показує червону помилку.
+- **Файл іншого рушія з іншим `tickEncoding`** теж не відкриється: потік A декодується повністю,
+  бо з нього беруться початки мазків і команди. Поки рушій один, це гіпотетично.
+- **5–10× на синтетиці** не досягнуто (4,6×): правило тиску SPEC `|Δp| > 0,02` на синтетичному
+  тиску з розмахом 0,3 кожні 1,8 с ставить точку кожні 2–3 тіки. На ручних мазках QA — 11–32×.
+- **Thickness для Exact** лишився вимкненим: він змінив би сам запис.
+
 ## Фаза 4 — Open і повтор у Player (SPEC §2.7 Open, §2.8) — прийнято 2026-10-27
 
 Журнал: Open… показує `Open in Player →`; Player програє `.flus` точно, тік за тіком
@@ -119,8 +246,8 @@ an empty canvas.` (без колишнього «arrives in the next update»), 
 **qa:action:** `node debug/session-recording-ui-test.js --hardware`
 **qa:inspect:** чотири рядки `"check":"replay"` і підсумок.
 **qa:expected:** у кожному `"withinTwo":1` (AC-REC-5 вимагає ≥ 0,99), `"pausedSteps":0` у рядку
-`empty`, `"viewScale"` < 1 у `small-window`; підсумок `session-recording-ui: 18 checks passed`,
-код виходу 0.
+`empty`, `"viewScale"` < 1 у `small-window`; підсумок `session-recording-ui: 18 checks passed`
+(з фази 5 — 21, див. QA-V8), код виходу 0.
 
 ### QA-P10. 320 px: Open in Player і Player
 

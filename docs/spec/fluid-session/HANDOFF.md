@@ -1,12 +1,13 @@
 # Handoff: fluid-session — швидкість Max і запис сесії малювання
 
-Стан на 2026-10-27, гілка `feat/pwa`. Фази 1–4 закриті й закомічені: код теми,
+Стан на 2026-10-27, гілка `feat/pwa`. Фази 1–5 закриті й закомічені: код теми,
 `QA.md` і цей файл. Спека
 [`docs/PLAYER-MAX-SPEED-AND-SESSION-RECORDING-SPEC.md`](../../PLAYER-MAX-SPEED-AND-SESSION-RECORDING-SPEC.md)
 (далі — SPEC) закомічена в `a4009a1`.
 
-> **Далі:** фаза 5 — секція C (опорні точки) і Vector-повтор (пункт 5). Повтор Exact уже є
-> (`app/session-player.js`); Vector — другий шлях для файлу з іншим `engineContract`.
+> **Далі:** фази SPEC вичерпано. Кандидат — пункт 6 (розділити `test:session-ui` на швидку і
+> повну частини, з'ясувати таймаути Exact на SwiftShader); пункт 1a і відкриті питання 1, 2, 7 —
+> рішення власника. Без рішення власника нову фазу не починати.
 
 ## Що зроблено і працює
 
@@ -38,6 +39,11 @@
 | `app/story-playback-controller.js` (фаза 4) | Друге джерело `session` (`loadSession`, `_runSession`, `_sessionProgress`, `_estimateSession`). Для сесії `setSpeed` і `setThickness` не перезапускають прогін; `ownsEngineClock` true і на паузі. Вимірювач Max узагальнений (`oneXRate`: оп/с story або 60 тіків/с). |
 | `app/ui/story-tools.js`, `app/ui/session-tools.js`, `index.html` (фаза 4) | Player для сесії (прогрес `ticks · strokes`, Import colors прихований, Thickness/Frame вимкнені); `Open in Player →`; Record на непорожньому полотні запікає його (`_bakeVisiblePainting`), на порожньому — `engine.clear({dynamics:true})`. |
 | `paint.js`, `viewport.js`, `fluid-engine/index.js`, `fluid-engine/simulation.js` (фаза 4) | `setResolutionScale()`, `placePaintingForReplay()`, `_resetUndoHistory()`; `Viewport.showWorldRect()` (зум, не зсув); `engine.clear({ dynamics })`; `clearPaintAndDynamics()` чистить і divergence/pressure. |
+| `app/session-keyframes.js` (фаза 5) | `SessionKeyframes`: `build(records, { heightScale })` — секція C на Stop (RDP `ε = 0,5` px світу, тиск `|Δp| > 0,02` + екстремуми з гістерезисом 0,005, перша/остання точка), `decode()`. JSON цілих delta-масивів: `t` у тіках, xy 1/64, p 1/4096; тиск тіку = `height / (2·brushSize)` (`FluidEngine.STROKE_HEIGHT_SCALE`). Кодек пише тег `KEYFRAMES` перед `END`, прапор `FLAG_KEYFRAMES`. |
+| `app/session-player.js` (фаза 5) | `mode`: `exact` (свій `engineContract`) або `vector` (інший + є секція C; без неї — помилка в конструкторі). Vector: `_beginVector()` — `beginStroke({ timing:'replay' })` з точки 0, `brushSize`/`spacing` × `thickness`; тіки мазка лише задають темп (`_sendKeyframes(tick)` — `strokeTo()` точок з `t ≤ tick`); на `end` — решта точок і `endStroke()`. Холості паузи й команди — як в Exact. `SessionPlayer.VECTOR_LABEL`. |
+| `app/ui/session-tools.js`, `app/ui/story-tools.js`, `app/story-playback-controller.js` (фаза 5) | Open… показує режим (`Exact` / `Vector — approximate`) або червону помилку без `Open in Player →`; Thickness увімкнений лише для Vector. |
+| `debug/session-keyframes-test.js` (`npm run test:session-keyframes`), `debug/session-retag.js` (`npm run session:retag -- <in> <out> [--strip-keyframes]`), `debug/session-test-fixtures.js` (фаза 5) | 10 перевірок секції C, Vector-повтору на фейковому рушії і бюджету розміру; retag міняє `engineContract` у файлі для QA; спільна синтетика 36 129 тіків для кодека й keyframes. |
+| `debug/session-recording-ui-test.js` (фаза 5) | + `keyframes on the QA corpus`, Open файлу іншого рушія, Vector-повтор (`coverage`, `painted`, `withinTwo` лише міряється), файл без C → помилка. 21 перевірка. |
 | `debug/session-recording-ui-test.js` (фаза 4, `npm run test:session-ui`, `--hardware`) | 18 перевірок; 4 повтори після перезавантаження через UI: порожнє полотно (1× → пауза → Max), baseline, усі команди (+ мазок, що тече, перед Record), вужче вікно. Assert: `withinTwo ≥ 0,99` (AC-REC-5) і `maxDelta ≤ 1`. ≈ 7 хв на SwiftShader. `test:story-max` + юніт `FenceTickScheduler` на фейковому GL. |
 
 ## Інваріанти теми
@@ -84,6 +90,21 @@ pressure/divergence.
 - Повтор не пишеться в новий запис (SPEC §2.7: Record вимкнений під час повтору `.flus`).
 
 ## Головні виміряні факти
+
+Фаза 5 (2026-10-27; власник прийняв через `handoff:next` **без повторного прогону** на закритті —
+на CPU SwiftShader `test:session-ui` не вкладається в таймаути, див. пункт 6; числа нижче — з
+прогонів під час фази, 890M D3D11):
+
+- **Секція C:** синтетика 36 129 тіків — 4,62 тіка на точку (без правил тиску 10,4×), файл
+  282 КБ на 36 000 тіків (≤ 300, AC-REC-6), секція ≈ 47 КБ на 10 хв; ручні мишачі мазки QA —
+  11–32 тіки на точку. Побудова на Stop ≈ 10 мс на 36 000 тіків — `requestIdleCallback` не потрібен.
+- **Vector-повтор** файлу з усіма командами: доходить до кінця (`T / T ticks · 6 / 6 strokes`),
+  ≈ 0,89 пікселів у ±2 від оригіналу (наближення, не AC-REC-5). Thickness 2,5× — площа фарби
+  ×2,56 проти 1×.
+- Exact-повтори фази 4 на 890M лишились побітовими (`withinTwo: 1`); на SwiftShader двічі з
+  чотирьох прогонів — таймаут 180 с (пункт 6, не з'ясовано).
+- **Спростовано:** «5–10× на будь-якому корпусі» — правило тиску SPEC `|Δp| > 0,02` на синтетиці з
+  розмахом 0,3 кожні 1,8 с ставить точку кожні 2–3 тіки (4,6×). Правило лишили як у SPEC.
 
 Фаза 4 (2026-10-27; SwiftShader і AMD Radeon 890M D3D11; власник прийняв через `handoff:next`):
 
@@ -307,6 +328,14 @@ Restart на Max. Дивитись: темп 1× як у оригіналі, Max
 
 </details>
 
+~~5. Фаза 5 — опорні точки C і Vector-повтор (SPEC §2.5)~~ — ЗАКРИТО 2026-10-27.
+Див. «Що зроблено», «Виміряні факти», `QA.md` §«Фаза 5». Рішення фази поза SPEC (внесені в
+SPEC §2.5/§2.7): C будується на Stop, не на Save і не в `requestIdleCallback`; пошкоджений блок не
+веде у Vector (gzip охоплює все тіло); Vector-мазок — replay-режим, темп задають тіки A; Thickness
+лише для Vector. Регресій фаза не виправляла — нового інваріанту немає.
+
+<details><summary>Початковий план фази 5 (історія)</summary>
+
 ### 5. Фаза 5 — опорні точки C і Vector-повтор (SPEC §2.5)
 
 **Контракт.** На Save добудовується секція `KEYFRAMES` (RDP `ε = 0,5`, тиск
@@ -321,6 +350,23 @@ Restart на Max. Дивитись: темп 1× як у оригіналі, Max
 **Probe:** штучно змінений `engineContract` у файлі → Open показує
 `Vector — approximate` і програє без винятків у консолі (AC-REC-9); точок C
 у 5–10 разів менше, ніж тіків, на QA-корпусі.
+
+</details>
+
+### 6. Розділити `test:session-ui` на швидку і повну частини (знахідка фази 5, не в жодній фазі)
+
+Проба йде ≈ 9–10 хв на SwiftShader: кожен тік сесії — повний крок пензля й рідини, а SwiftShader
+рахує їх на CPU зі швидкістю ≈ 4–5 тіків/с, навіть холостих (виміряно у фазі 5). Повтори AC-REC-5
+(4 Exact) і Vector займають більшу частину часу. Пропозиція власника (2026-10-27): швидка частина
+— картка, Open, помилки, 320 px, без повторів (≈ 1 хв), для роботи; повна — з повторами, перед
+`handoff:next`. До того guard фази ганяє `session-ui` з `--hardware` (890M).
+
+Пов'язане й не з'ясоване: у фазі 5 Exact-повтор на SwiftShader двічі з чотирьох прогонів не
+вклався в таймаут 180 с (раз — `commands`, раз — `empty`), хоча перші два прогони фази проходили
+всі 4 повтори побітово. На 890M — щоразу зелено. Порівняння швидкості повтору `HEAD` проти робочого
+дерева на SwiftShader не зроблено (власник зупинив і переніс guard на GPU). Зміни фази 5 у
+Exact-шляху — одна перевірка `this._vector` у `_tick()` і вибір режиму в `_execute('begin')`.
+Таймаут тепер друкує `ticksDone/totalTicks`, де зупинився повтор, — з цього починати.
 
 ## Відкриті питання
 
