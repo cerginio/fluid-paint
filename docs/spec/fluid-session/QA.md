@@ -9,6 +9,68 @@ Fixture для сценаріїв лежить на диску: `D:\work\fluid-p
 Довідкові числа з desktop-QA (AMD Radeon 890M, D3D11, 2026-10-26), повний fixture:
 1× за планом — 43,0 с; 16× — 13,5 с (1 918 оп/с); Max — 3,8 с (6 838 оп/с).
 
+## Фаза 7 — `.flus` у вкладці File і Open in Player одразу після Stop — прийнято 2026-10-27
+
+Журнал: запит власника 2026-10-27 (відкрите питання 1 SPEC §7.1 + зайві кроки Save → Open →
+Open in Player). Після Stop картка сама читає щойно закодований файл тим самим шляхом, що й Open…,
+і показує підсумок і `Open in Player →`. Отже Player грає рівно ті байти, які запише Save. Вкладка
+File приймає `.flus` (кидок або вибір файлу) і відкриває Player одразу, як для story JSON.
+Заодно виправлено: попередження `Unsaved recording will be discarded`, підняте до Save, після Save
+лишалося на екрані поруч зі статусом `Saved …`.
+
+Сценарії QA-F1–F4 перевірені автоматично (`npm run test:session-ui`, 18 перевірок) і скриптом на
+стенді `:3000`. Очима варто подивитись на справжнє перетягування файлу з провідника (QA-F2): тест
+надсилає подію drop, а не реальний drag.
+
+### QA-F1. Open in Player одразу після Stop
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:3000/`
+**qa:action:** панель Story tools → вкладка State → `● Record` → закрити панель → один мазок на
+полотні → відкрити панель → State → `■ Stop`.
+**qa:inspect:** картка Session recording: статус, рядок підсумку під нею, зелена кнопка.
+**qa:expected:** статус `Recorded 00:0N · 1 strokes · 1 KB — not saved`; рядок
+`painting-session-<дата>-<час>.flus: 00:0N · 1 strokes · N ticks · 1 KB · Exact · starts from an empty canvas.`;
+кнопка `Open in Player →` видима, без натискання Save чи Open….
+
+### QA-F2. `.flus`, кинутий у вкладку File, відкривається в Player
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:3000/`
+**qa:action:** панель Story tools → вкладка File → перетягнути з провідника збережений
+`painting-session-*.flus` на зону `Drop Story JSON, PNG or session`.
+**qa:inspect:** вкладка, що стала активною, і рядок сесії в Player.
+**qa:expected:** зона підписана `.json / .png / .flus · max 25 MB`; після кидка активна вкладка
+Player з рядком `Session recording · Exact · MM:SS · N strokes`; у File → Recent files файл не
+з'являється (там лише story JSON).
+
+### QA-F3. Пошкоджений `.flus` у File — помилка, Player не відкривається
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:3000/`
+**qa:action:** створити текстовий файл `junk.flus` з будь-яким текстом → вкладка File → клік по
+зоні → вибрати `junk.flus`.
+**qa:inspect:** рядок статусу під зоною у вкладці File.
+**qa:expected:** лишається вкладка File, червоний рядок
+`Session file: this is not a Fluid Paint session (.flus) file.`
+
+### QA-F4. Save прибирає попередження про незбережений запис
+
+**qa:mode:** browser
+**qa:open:** `http://127.0.0.1:3000/`
+**qa:action:** State → `● Record` → мазок → `■ Stop` → `Open…` (з'являється попередження) →
+не натискати Discard/Cancel → `Save`.
+**qa:inspect:** картка Session recording.
+**qa:expected:** статус `Saved painting-session-*.flus`, блоку
+`Unsaved recording will be discarded` з кнопками Discard/Cancel немає.
+
+### Свідомо не зроблено у фазі 7
+
+- `.flus` не потрапляє в Recent files вкладки File: сховище тримає текст story, а `.flus`
+  бінарний. Повторно відкрити сесію — через File або State → Open….
+- Кидок `.flus` під час запису відхиляється з повідомленням
+  `Stop the session recording first, then open a .flus file.` — запис не втрачається.
+
 ## Пункт 6 — повтори вимкнені в `test:session-ui`, глибина fence 4 — прийнято 2026-10-27
 
 Журнал: правило власника — довгих тестів у регулярних прогонах немає. `npm run test:session-ui`
@@ -26,7 +88,7 @@ Fixture для сценаріїв лежить на диску: `D:\work\fluid-p
 **qa:action:** `npm run test:session-ui`
 **qa:inspect:** рядок `"check":"replays skipped"` і підсумок.
 **qa:expected:** `{"check":"replays skipped","reason":"off by default; --replays"}`, рядків
-`"check":"replay"` немає, підсумок `session-recording-ui: 17 checks passed`, код виходу 0,
+`"check":"replay"` немає, підсумок `session-recording-ui: 18 checks passed` (з фази 7; було 17), код виходу 0,
 ≈ 40 с (SwiftShader).
 
 ### QA-T2. Разова проба повторів на справжньому GPU
@@ -36,7 +98,7 @@ Fixture для сценаріїв лежить на диску: `D:\work\fluid-p
 **qa:action:** `node debug/session-recording-ui-test.js --hardware --replays`
 **qa:inspect:** чотири рядки `"check":"replay"`, рядок `"check":"vector replay"`, підсумок.
 **qa:expected:** у кожному `"replay"` — `"withinTwo":1`, `"maxDelta":0` і поля `frames`,
-`emptyFrames`, `ticksPerFrame`, `maxBetweenMs`; підсумок `session-recording-ui: 21 checks passed`,
+`emptyFrames`, `ticksPerFrame`, `maxBetweenMs`; підсумок `session-recording-ui: 22 checks passed` (з фази 7; було 21),
 код виходу 0, ≈ 25 с на 890M.
 
 ### Свідомо не зроблено в пункті 6

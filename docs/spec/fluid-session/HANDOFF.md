@@ -1,12 +1,12 @@
 # Handoff: fluid-session — швидкість Max і запис сесії малювання
 
-Стан на 2026-10-27, гілка `feat/pwa`. Фази 1–5 і пункт 6 закриті й закомічені: код теми,
+Стан на 2026-10-27, гілка `feat/pwa`. Фази 1–5, пункт 6 і фаза 7 закриті й закомічені: код теми,
 `QA.md` і цей файл. Спека
 [`docs/PLAYER-MAX-SPEED-AND-SESSION-RECORDING-SPEC.md`](../../PLAYER-MAX-SPEED-AND-SESSION-RECORDING-SPEC.md)
 (далі — SPEC) закомічена в `a4009a1`.
 
-> **Далі:** фази SPEC вичерпано, пункт 6 закрито. Відкриті лише пункт 1a і питання 1, 2, 7 —
-> рішення власника. Без рішення власника нову фазу не починати.
+> **Далі:** фази SPEC вичерпано, фазу 7 (запит власника) закрито. Відкриті лише пункт 1a і
+> питання 2, 7 — рішення власника. Без рішення власника нову фазу не починати.
 
 ## Що зроблено і працює
 
@@ -45,6 +45,9 @@
 | `debug/session-recording-ui-test.js` (фаза 5) | + `keyframes on the QA corpus`, Open файлу іншого рушія, Vector-повтор (`coverage`, `painted`, `withinTwo` лише міряється), файл без C → помилка. 21 перевірка. |
 | `debug/session-recording-ui-test.js` (пункт 6) | **Повтори вимкнені за замовчуванням** (правило власника: довгих тестів у регулярних прогонах немає). `npm run test:session-ui` — 17 перевірок без повторів, 37 с SwiftShader / 13 с 890M. `--replays` — разова проба: + 4 Exact і Vector, 21 перевірка; рядки `replay` і таймаут друкують статистику кадрів (`frames`, `emptyFrames`, `blocked`, `ticksPerFrame`, `tickMsPerTick`, `betweenMsPerFrame`, `maxBetweenMs`). |
 | `app/session-player.js` (пункт 6) | `FenceTickScheduler` `depth = 4` (було 2); юніт у `test:story-max` фіксує 4. |
+| `app/story-playback-controller.js`, `app/ui/story-tools.js`, `index.html` (фаза 7) | `loadFile()` віддає `*.flus` у `loadSessionFile()`: ліміт 25 МБ, `SessionCodec.decode` → `loadSession`; помилка — у `fileError` (статус File), під час запису — відмова. Зона File: `.flus` в `accept` і підписі; `.flus` не йде в Recent files (там текст story). |
+| `app/ui/session-tools.js` (фаза 7) | Після Stop `onRecorderFinished` викликає `open(new File([bytes], name))` — ті самі байти, що запише Save, тож `Open in Player →` є одразу. `open()` з лічильником `_openSerial`: пізніший Open перемагає авто-Open. `save()` ховає застаріле попередження Discard/Cancel. |
+| `debug/session-recording-ui-test.js` (фаза 7) | 18 перевірок без повторів, 22 з `--replays`: Open in Player після Stop, Save ховає попередження, `.flus` у File (пошкоджений — помилка; кидок через `DragEvent` — Player). |
 | `debug/session-recording-ui-test.js` (фаза 4, `npm run test:session-ui`, `--hardware`) | 18 перевірок; 4 повтори після перезавантаження через UI: порожнє полотно (1× → пауза → Max), baseline, усі команди (+ мазок, що тече, перед Record), вужче вікно. Assert: `withinTwo ≥ 0,99` (AC-REC-5) і `maxDelta ≤ 1`. ≈ 7 хв на SwiftShader. `test:story-max` + юніт `FenceTickScheduler` на фейковому GL. |
 
 ## Інваріанти теми
@@ -93,6 +96,16 @@ pressure/divergence.
 - Повтор не пишеться в новий запис (SPEC §2.7: Record вимкнений під час повтору `.flus`).
 
 ## Головні виміряні факти
+
+Фаза 7 (2026-10-27; 890M D3D11):
+
+- `test:session-ui --hardware` — 18 з 18 (двічі), `--replays` — 22 з 22, 4 Exact побітові, Vector
+  0,887; `test:story-ui` PASS, `test:session-codec` 10/10, `build`, `test:pwa-release` 4/4.
+- Мутації: без авто-Open — таймаут перевірки Stop; без приховування в `save()` — `Save hides a stale
+  discard warning`; без маршруту `.flus` у `loadFile()` — перевірка File (падають).
+- **Пастка тесту:** назва `.flus` — з точністю до хвилини, тож запис після Resize і збережений файл
+  можуть мати одну назву. Чекати на Open… за назвою не можна — тест чекає на `starts from an empty
+  canvas.`
 
 Пункт 6 (2026-10-27; 890M D3D11 і SwiftShader; проба планувальника — скрипт у scratchpad, не в
 репо: одна сесія, Max, різні планувальники):
@@ -397,10 +410,14 @@ Exact-шляху — одна перевірка `this._vector` у `_tick()` і 
 
 </details>
 
+~~7. Фаза 7 — `.flus` у File і Open in Player одразу після Stop (запит власника)~~ — ЗАКРИТО 2026-10-27.
+Див. «Що зроблено», «Виміряні факти», `QA.md` §«Фаза 7»; SPEC §7.1 закрито. Заодно виправлено баг
+(не регресію фази): попередження Discard/Cancel лишалось після Save. Це локальний стан UI з
+перевіркою в `test:session-ui`, а не інваріант теми — нового інваріанту немає.
+
 ## Відкриті питання
 
-1. Чи приймати `.flus` і у вкладці File (drag-and-drop)? SPEC §7.1 — пропозиція
-   «так, після фази 4»; не входить у жодну фазу, доки людина не вирішить.
+1. ~~Чи приймати `.flus` і у вкладці File (drag-and-drop)?~~ — вирішено 2026-10-27: так, фаза 7.
 2. Перемикач «Skip idle pauses» для `1×` чи лише жорстке скорочення до 60 тіків? (SPEC §7.2)
 3. ~~Остаточні кванти (SPEC §7.3)~~ — вирішено 2026-10-26: квантів немає, float32 (пункт 2a).
 4. ~~Resize під час запису~~ — вирішено 2026-10-26: Resize завершує запис, записане зберігається.
