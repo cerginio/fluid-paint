@@ -136,7 +136,8 @@ class StoryToolsUI {
       }
       // Only stories go in the list: a PNG background is not something the
       // player can reopen, and it would push a real story out of three slots.
-      if (!isBackground) await this._remember(file);
+      // Recent files keep story text; a .flus is binary and reopens via State.
+      if (!isBackground && result?.kind !== 'session') await this._remember(file);
     } catch (_) { /* controller state renders the contextual error */ }
   }
 

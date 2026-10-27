@@ -100,6 +100,7 @@ class StoryPlaybackController {
   async loadFile(file) {
     const isPng = file && (file.type === 'image/png' || /\.png$/i.test(file.name || ''));
     if (isPng) return this.loadBackgroundFile(file);
+    if (/\.flus$/i.test(file?.name || '')) return this.loadSessionFile(file);
     try {
       const loaded = await StoryFileLoader.load(file);
       await this.loadModel(loaded.model, loaded.summary);
@@ -162,6 +163,25 @@ class StoryPlaybackController {
    * An opened .flus (fluid-session phase 4). It replaces a loaded story; Play
    * replays it exactly through SessionPlayer.
    */
+  /* A .flus dropped or picked in the File tab plays exactly as State's
+   * Open… → Open in Player would (fluid-session phase 7). */
+  async loadSessionFile(file) {
+    try {
+      if (this.painter.sessionRecorder?.active) {
+        throw new Error('Stop the session recording first, then open a .flus file.');
+      }
+      if (file.size > SessionCodec.MAX_FILE_BYTES) throw new Error(`${file.name} is larger than 25 MB.`);
+      const session = await SessionCodec.decode(new Uint8Array(await file.arrayBuffer()));
+      await this.loadSession(session, { fileName: file.name, byteSize: file.size });
+      return { kind: 'session' };
+    } catch (error) {
+      this.fileError = error;
+      if (this.model || this.session) this._emit();
+      else this._setState('file-error');
+      throw error;
+    }
+  }
+
   async loadSession(session, meta) {
     const player = new SessionPlayer(this.painter, session, meta);
     if (player.mode === 'vector') player.thickness = this.thickness;

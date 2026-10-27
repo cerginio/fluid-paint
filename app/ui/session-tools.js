@@ -22,6 +22,7 @@ class SessionToolsUI {
     this.savedName = null;
     this.note = '';
     this._pending = null;      // the action an unsaved-recording warning holds
+    this._openSerial = 0;
     this._timer = null;
     this._baseline = null;     // Promise<Uint8Array|null> of the baseline PNG
 
@@ -220,6 +221,9 @@ class SessionToolsUI {
         strokes: recorder.strokes,
       };
       this._setPhase('recorded');
+      // Offer Open in Player at once, read back from the very bytes Save
+      // writes, so the replay is the saved file's (fluid-session phase 7).
+      await this.open(new File([bytes], this.file.name));
     });
   }
 
@@ -227,10 +231,16 @@ class SessionToolsUI {
     if (!this.file) return;
     this.painter.downloadBlob(new Blob([this.file.bytes], { type: 'application/octet-stream' }), this.file.name);
     this.savedName = this.file.name;
+    // Nothing is left to discard: a warning raised before Save is stale.
+    this._pending = null;
+    this.discard.hidden = true;
     this._setPhase('saved');
   }
 
   async open(file) {
+    // The latest Open wins: the automatic one after Stop must not land over
+    // a file the user opened meanwhile.
+    const serial = ++this._openSerial;
     this.opened.hidden = false;
     this.opened.classList.remove('is-error');
     this.openedSession = null;
@@ -242,10 +252,12 @@ class SessionToolsUI {
     try {
       session = await SessionCodec.decode(new Uint8Array(await file.arrayBuffer()));
     } catch (error) {
+      if (serial !== this._openSerial) return null;
       this.opened.textContent = `${file.name}: ${error.message}`;
       this.opened.classList.add('is-error');
       return null;
     }
+    if (serial !== this._openSerial) return null;
     // The Player's own checks (engine contract, keyframes, painting) decide
     // the mode, so Open shows exactly what Open in Player would play.
     let mode;

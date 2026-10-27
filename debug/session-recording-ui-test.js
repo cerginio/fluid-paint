@@ -185,7 +185,11 @@ function comparePixels(original, replayed) {
       window.dispatchEvent(event);
       return event.defaultPrevented;
     }), true, 'beforeunload warns about the unsaved recording');
-    check('Stop: Recorded … — not saved, Save enabled, beforeunload armed');
+    // Phase 7: the recording is offered to the Player at once, no Save/Open.
+    await page.waitForFunction(() => !document.getElementById('session-open-player').hidden);
+    assert.match(await page.locator('#session-opened').textContent(),
+      /^painting-session-\d{8}-\d{4}\.flus: 00:\d\d · 4 strokes · .* · Exact · starts from an empty canvas\.$/);
+    check('Stop: Recorded … — not saved, Save enabled, beforeunload armed, Open in Player offered');
 
     // --- Unsaved guard ---------------------------------------------------------
     await page.click('#session-record');
@@ -196,7 +200,6 @@ function comparePixels(original, replayed) {
     assert.match(await status(), /not saved$/);
     await page.click('#session-open');
     assert.equal(await page.locator('#session-discard').isVisible(), true, 'Open… warns too');
-    await page.click('#session-discard-cancel');
     check('unsaved guard: Record and Open… warn inline; Cancel keeps the recording');
 
     // --- Save -------------------------------------------------------------------
@@ -206,6 +209,8 @@ function comparePixels(original, replayed) {
     await download.saveAs(savedPath);
     const bytes = fs.readFileSync(savedPath);
     assert.equal(await status(), `Saved ${download.suggestedFilename()}`);
+    // The Open… warning raised above is left open on purpose: Save ends it.
+    assert.equal(await page.locator('#session-discard').isHidden(), true, 'Save hides a stale discard warning');
     const decoded = await page.evaluate(async (data) => {
       const session = await SessionCodec.decode(new Uint8Array(data));
       const kinds = {};
@@ -279,7 +284,9 @@ function comparePixels(original, replayed) {
     // Discard ran the held action: the file chooser opens through the input.
     await page.setInputFiles('#session-open-input', savedPath);
     await page.waitForFunction(() => !document.getElementById('session-opened').hidden &&
-      document.getElementById('session-opened').textContent.includes('Exact'));
+      // Not the name: the Resize recording, opened by itself after Stop, can
+      // share the saved file's minute. Only the saved file starts empty.
+      document.getElementById('session-opened').textContent.endsWith('starts from an empty canvas.'));
     const opened = await page.locator('#session-opened').textContent();
     assert.match(opened, /4 strokes · .* ticks · \d+ KB · Exact · starts from an empty canvas\.$/);
     assert.equal(await status(), 'Not recording', 'Discard dropped the unsaved recording');
@@ -291,6 +298,28 @@ function comparePixels(original, replayed) {
     assert.match(await page.locator('#session-opened').textContent(), /not a Fluid Paint session/);
     assert.equal(await page.locator('#session-open-player').isHidden(), true, 'a damaged file offers nothing to play');
     check('Open… summarises a saved file as Exact with Open in Player, and names a damaged one');
+
+    // --- Phase 7: a .flus in the File tab goes straight to the Player -----------
+    await page.click('#story-file-tab');
+    await page.setInputFiles('#story-file-input', junk);
+    await page.waitForFunction(() => document.getElementById('story-file-status').classList.contains('is-error'));
+    assert.match(await page.locator('#story-file-status').textContent(), /not a Fluid Paint session/);
+    assert.equal(await page.locator('#story-file-page').isVisible(), true, 'a damaged file stays on File');
+    // A real drop event on the drop zone, not only the file input.
+    await page.evaluate(async (data) => {
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([new Uint8Array(data)], 'dropped.flus'));
+      document.getElementById('story-file-dropzone').dispatchEvent(
+        new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true }));
+    }, [...bytes]);
+    await page.waitForFunction(() => !document.getElementById('story-player-page').hidden &&
+      window.__painter.storyPlaybackController.session);
+    assert.deepEqual(await page.evaluate(() => {
+      const view = window.__painter.storyPlaybackController._viewModel();
+      return { state: view.state, mode: view.sessionSummary.mode, fileError: !!view.fileError };
+    }), { state: 'ready', mode: 'Exact', fileError: false });
+    check('File tab: a damaged .flus names its error; a dropped .flus opens in the Player');
+    await openState();
 
     // --- Record follows story playback ------------------------------------------
     await page.evaluate(async () => {
