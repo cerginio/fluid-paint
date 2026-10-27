@@ -21,13 +21,26 @@
  * The cursor -- record index plus offset into a ticks/idle record -- survives
  * a cancelled run, so Resume continues where it stopped. A cancelled run never
  * leaves a stroke open: finishStroke() plays it to its end at once.
+ *
+ * Vector mode (phase 5, SPEC §2.5) is for a file of another engineContract,
+ * whose ticks mean something else to this engine. Its strokes are replayed
+ * from the keyframes of section C through the replay-mode strokeTo(): a
+ * stroke's ticks only pace it -- tick n sends the keyframes up to t = n --
+ * while idle runs and commands play as in Exact mode. The result depends on
+ * the keyframes' geometry, not on time; it approximates the recording, and the
+ * Thickness multiplier applies to it.
  */
 class SessionPlayer {
   constructor(painter, session, { fileName = 'session.flus', byteSize = 0 } = {}) {
     const header = session && session.header;
-    if (!header || header.engineContract !== SessionRecorder.ENGINE_CONTRACT) {
-      throw new Error('This session was recorded by a different engine version and cannot be replayed exactly.');
+    if (!header) throw new Error('This session has no header.');
+    const exact = header.engineContract === SessionRecorder.ENGINE_CONTRACT;
+    if (!exact && !session.keyframes) {
+      throw new Error('This session was recorded by a different engine version and has no keyframes to replay approximately.');
     }
+    this.mode = exact ? 'exact' : 'vector';
+    // Decoded up front: a malformed section must fail Open, not the run.
+    this.keyframes = exact ? null : SessionKeyframes.decode(session.keyframes);
     const painting = header.painting;
     if (!painting || !['left', 'bottom', 'width', 'height'].every((key) => Number.isFinite(painting[key])) ||
         painting.width <= 0 || painting.height <= 0) {
@@ -49,6 +62,9 @@ class SessionPlayer {
     }
     this.totalTicks = totalTicks;
     this.totalStrokes = totalStrokes;
+    if (this.keyframes && this.keyframes.length !== totalStrokes) {
+      throw new Error(`This session's keyframes describe ${this.keyframes.length} strokes, its records ${totalStrokes}.`);
+    }
     this.summary = {
       fileName,
       byteSize,
@@ -56,8 +72,9 @@ class SessionPlayer {
       strokes: totalStrokes,
       ticks: totalTicks,
       baseline: !!this.baselinePng,
-      mode: 'Exact',
+      mode: exact ? 'Exact' : SessionPlayer.VECTOR_LABEL,
     };
+    this.thickness = 1;   // Vector only; read at each stroke's begin
     this.runState = null;
     this._storyBaseline = null;
     this.rewind();
@@ -101,6 +118,7 @@ class SessionPlayer {
     this.inStroke = false;
     this._contact = null;
     this._brushSize = 0;
+    this._vector = null;   // { points, next, tick } of the open Vector stroke
   }
 
   /** The recording's starting state. `replace` also clears to its baseline. */
@@ -202,6 +220,7 @@ class SessionPlayer {
     } catch (error) {
       if (error.name === 'AbortError') this.finishStroke();
       else if (this.engine.strokeActive) this.engine.endStroke();
+      if (error.name !== 'AbortError') this._vector = null;
       throw error;
     } finally {
       dispose();
@@ -244,7 +263,10 @@ class SessionPlayer {
   /** One engine step: the tick under the cursor. */
   _tick() {
     const record = this.records[this.index];
-    if (record.type === 'ticks') {
+    if (record.type === 'ticks' && this._vector) {
+      this._vector.tick++;
+      this._sendKeyframes(this._vector.tick);
+    } else if (record.type === 'ticks') {
       const data = record.data;
       const i = this.offset * 3;
       this.engine.replayTick(data[i], data[i + 1], data[i + 2], this._brushSize);
@@ -255,10 +277,38 @@ class SessionPlayer {
     this.ticksDone++;
   }
 
+  /* Vector: strokeTo() every keyframe up to tick `upTo`; the replay-mode stroke
+   * runs its own steps, one per spacing along the way. */
+  _sendKeyframes(upTo) {
+    const vector = this._vector;
+    const points = vector.points;
+    while (vector.next < points.t.length && points.t[vector.next] <= upTo) {
+      const i = vector.next++;
+      this.engine.strokeTo({ x: points.x[i], y: points.y[i], pressure: points.p[i] });
+    }
+  }
+
+  _beginVector(record) {
+    const points = this.keyframes[this.strokesDone];
+    const params = record.params;
+    const thickness = this.thickness;
+    // The begin point is keyframe 0; beginStroke() settles on it itself.
+    this.engine.beginStroke({
+      ...params,
+      x: points.x[0], y: points.y[0], pressure: points.p[0],
+      timing: 'replay',
+      brushSize: params.brushSize * thickness,
+      spacing: params.spacing === undefined ? undefined : params.spacing * thickness,
+      variation: record.variation,
+    });
+    this._vector = { points, next: 1, tick: 0 };
+  }
+
   _execute(record) {
     switch (record.type) {
       case 'begin':
-        this.engine.beginStroke({ ...record.params, variation: record.variation });
+        if (this.mode === 'vector') this._beginVector(record);
+        else this.engine.beginStroke({ ...record.params, variation: record.variation });
         this._brushSize = record.params.brushSize;
         this._contact = null;
         this.inStroke = true;
@@ -267,7 +317,13 @@ class SessionPlayer {
         this._contact = { x: record.x, y: record.y, pressure: record.pressure };
         break;
       case 'end':
-        this.engine.endStroke({ contact: this._contact });
+        if (this._vector) {
+          this._sendKeyframes(Infinity);
+          this._vector = null;
+          this.engine.endStroke();
+        } else {
+          this.engine.endStroke({ contact: this._contact });
+        }
         this._contact = null;
         this.inStroke = false;
         this.strokesDone++;
@@ -401,6 +457,7 @@ SessionPlayer.FenceTickScheduler = class {
  * endStroke(), a path segment -- therefore needs 61 steps; after them every
  * further idle step returns at once and changes nothing. */
 SessionPlayer.IDLE_LIMIT = 61;
+SessionPlayer.VECTOR_LABEL = 'Vector — approximate';
 
 if (typeof module !== 'undefined' && module.exports) module.exports = SessionPlayer;
 if (typeof globalThis !== 'undefined') globalThis.SessionPlayer = SessionPlayer;

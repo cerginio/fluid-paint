@@ -64,6 +64,7 @@ const paths = {
     'app/story-playback-controller.js',
     'app/session-codec.js',
     'app/session-recorder.js',
+    'app/session-keyframes.js',
     'app/session-player.js',
     // iro.js before app/ui/color.js, which constructs an iro.ColorPicker.
     // Vendored verbatim, MPL-2.0 -- see docs/UI-COMPONENTS.md. colorpicker.js

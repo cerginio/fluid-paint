@@ -210,6 +210,8 @@ class SessionToolsUI {
       const recorder = this.recorder;
       const baselinePng = await this._baseline;
       const session = recorder.toSession({ baselinePng });
+      // Section C: what a future engine replays approximately (SPEC §2.5).
+      session.keyframes = SessionKeyframes.build(session.records, { heightScale: FluidEngine.STROKE_HEIGHT_SCALE });
       const bytes = await SessionCodec.encode(session);
       this.file = {
         bytes,
@@ -244,18 +246,24 @@ class SessionToolsUI {
       this.opened.classList.add('is-error');
       return null;
     }
+    // The Player's own checks (engine contract, keyframes, painting) decide
+    // the mode, so Open shows exactly what Open in Player would play.
+    let mode;
+    try {
+      mode = new SessionPlayer(this.painter, session, { fileName: file.name, byteSize: file.size }).summary.mode;
+    } catch (error) {
+      this.opened.textContent = `${file.name}: ${error.message}`;
+      this.opened.classList.add('is-error');
+      this.render();
+      return null;
+    }
     const header = session.header;
-    const exact = header.engineContract === SessionRecorder.ENGINE_CONTRACT;
-    const mode = exact ? 'Exact' : session.hasKeyframes ? 'Vector — approximate' : null;
     const stats = header.stats || {};
-    this.opened.textContent = mode
-      ? `${file.name}: ${SessionToolsUI.clock(header.durationSec || 0)} · ${stats.strokes || 0} strokes · ` +
-        `${(stats.ticks || 0).toLocaleString('en-US')} ticks · ${SessionToolsUI.kilobytes(file.size)} · ${mode} · ` +
-        `${session.baselinePng ? 'starts over a background' : 'starts from an empty canvas'}.` +
-        (exact ? '' : ' Approximate replay arrives in a later update.')
-      : `${file.name} was recorded by a different engine version and has no keyframes to replay approximately.`;
-    if (!mode) this.opened.classList.add('is-error');
-    if (exact) this.openedSession = { session, fileName: file.name, byteSize: file.size };
+    this.opened.textContent =
+      `${file.name}: ${SessionToolsUI.clock(header.durationSec || 0)} · ${stats.strokes || 0} strokes · ` +
+      `${(stats.ticks || 0).toLocaleString('en-US')} ticks · ${SessionToolsUI.kilobytes(file.size)} · ${mode} · ` +
+      `${session.baselinePng ? 'starts over a background' : 'starts from an empty canvas'}.`;
+    this.openedSession = { session, fileName: file.name, byteSize: file.size };
     this.render();
     return session;
   }

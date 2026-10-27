@@ -1175,6 +1175,9 @@ class FluidEngine {
  */
 FluidEngine.SHADER_FILES = ENGINE_SHADER_FILES;
 FluidEngine.COLOR_MODEL = COLOR_MODEL;
+// A live tick's height is this * brushSize * max(pressure, 0.15); session
+// keyframes turn recorded heights back into pressure with it.
+FluidEngine.STROKE_HEIGHT_SCALE = STROKE_HEIGHT_SCALE;
 
 /*
  * COLOR_MODEL.RGB is the name; renderer.js's private ColorModelRGB is the value

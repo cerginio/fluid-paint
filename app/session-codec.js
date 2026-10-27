@@ -15,7 +15,8 @@
  * the residual is the distance between the two floats in ulps, zigzag-varint
  * encoded. Contacts are rare and stored as float64, exactly as recorded.
  *
- * A session is { header, baselinePng, records }, the same shape in and out:
+ * A session is { header, baselinePng, records, keyframes }, the same shape in
+ * and out (keyframes: section C, SessionKeyframes.build, or null):
  *   { type: 'begin', params, variation }
  *   { type: 'ticks', data: Float32Array(3n) }   x, y, height per tick
  *   { type: 'contact', x, y, pressure }
@@ -265,7 +266,7 @@ const SessionCodec = (() => {
   }
 
   /** The uncompressed body. Synchronous; used by encode() and by size tests. */
-  function encodeBody({ header, baselinePng = null, records }) {
+  function encodeBody({ header, baselinePng = null, records, keyframes = null }) {
     const writer = new ByteWriter(64 * 1024);
     writer.json({ ...header, tickEncoding: TICK_ENCODING }, 'u32');
     if (baselinePng) {
@@ -306,6 +307,10 @@ const SessionCodec = (() => {
           break;
       }
     }
+    if (keyframes) {
+      writer.u8(TAG.KEYFRAMES);
+      writer.json(keyframes);
+    }
     writer.u8(TAG.END);
     return writer.result();
   }
@@ -319,6 +324,7 @@ const SessionCodec = (() => {
     }
     const baselinePng = baseline ? reader.raw(reader.u32()).slice() : null;
     const records = [];
+    let keyframes = null;
     let state = null;
     for (;;) {
       const tag = reader.u8();
@@ -349,14 +355,14 @@ const SessionCodec = (() => {
           records.push({ type: 'command', command: reader.json() });
           break;
         case TAG.KEYFRAMES:
-          // Section C (phase 5). Skipped by length until something reads it.
-          reader.raw(reader.varint());
+          // Section C (SessionKeyframes), after the last record.
+          keyframes = reader.json();
           break;
         default:
           throw formatError(`unknown record tag 0x${tag.toString(16)}.`);
       }
     }
-    return { header, baselinePng, records };
+    return { header, baselinePng, records, keyframes };
   }
 
   async function pipe(bytes, stream) {
@@ -371,7 +377,7 @@ const SessionCodec = (() => {
     const file = new Uint8Array(6 + compressed.length);
     file.set(MAGIC, 0);
     file[4] = FORMAT_VERSION;
-    file[5] = session.baselinePng ? FLAG_BASELINE : 0;
+    file[5] = (session.baselinePng ? FLAG_BASELINE : 0) | (session.keyframes ? FLAG_KEYFRAMES : 0);
     file.set(compressed, 6);
     return file;
   }
@@ -392,7 +398,7 @@ const SessionCodec = (() => {
     }
     const session = decodeBody(body, { baseline: (flags & FLAG_BASELINE) !== 0 });
     session.flags = flags;
-    session.hasKeyframes = (flags & FLAG_KEYFRAMES) !== 0;
+    session.hasKeyframes = !!session.keyframes;
     return session;
   }
 

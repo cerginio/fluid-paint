@@ -422,7 +422,8 @@ function comparePixels(original, replayed) {
     await phone.close();
 
     // --- Phase 4: replay after reload through the UI (AC-REC-1, AC-REC-5) ----------
-    const replay = async (name, bytes, original, { viewport = { width: 1100, height: 760 }, pauseAtOneX = false } = {}) => {
+    // A reload: a fresh page, State tab, the file through Open….
+    const openFresh = async (name, bytes, viewport = { width: 1100, height: 760 }) => {
       const fresh = await browser.newPage({ viewport, deviceScaleFactor: 1 });
       const freshErrors = [];
       fresh.on('pageerror', (error) => freshErrors.push(error.message));
@@ -436,6 +437,13 @@ function comparePixels(original, replayed) {
       await fresh.click('#panel-extension-toggle');
       await fresh.click('#bake-tab');
       await fresh.setInputFiles('#session-open-input', { name: `${name}.flus`, mimeType: 'application/octet-stream', buffer: bytes });
+      await fresh.waitForFunction(() => !document.getElementById('session-opened').hidden &&
+        document.getElementById('session-opened').textContent.includes(' · ') ||
+        document.getElementById('session-opened').classList.contains('is-error'));
+      return { fresh, freshErrors };
+    };
+    const replay = async (name, bytes, original, { viewport = { width: 1100, height: 760 }, pauseAtOneX = false } = {}) => {
+      const { fresh, freshErrors } = await openFresh(name, bytes, viewport);
       await fresh.waitForFunction(() => !document.getElementById('session-open-player').hidden);
       await fresh.click('#session-open-player');
       await fresh.waitForFunction(() => !document.getElementById('story-player-page').hidden);
@@ -480,8 +488,19 @@ function comparePixels(original, replayed) {
         await fresh.selectOption('#story-speed', 'max');
         await fresh.click('#story-play-pause');
       }
+      const playStarted = Date.now();
       await fresh.waitForFunction(() => window.__painter.storyPlaybackController.state === 'completed', null,
-        { timeout: 180000 });
+        { timeout: 180000 }).catch(async (error) => {
+        const at = await fresh.evaluate(() => {
+          const controller = window.__painter.storyPlaybackController;
+          return { state: controller.state, ticksDone: controller.session.ticksDone, totalTicks: controller.session.totalTicks,
+            status: document.getElementById('story-player-status').textContent };
+        });
+        // The stack printed for it was built with the old message: say it apart.
+        console.log(JSON.stringify({ check: 'replay timeout', name, seconds: Math.round((Date.now() - playStarted) / 1000), ...at }));
+        throw error;
+      });
+      const playSeconds = Math.round((Date.now() - playStarted) / 1000);
       const done = await fresh.evaluate(() => {
         const painter = window.__painter;
         const controller = painter.storyPlaybackController;
@@ -500,7 +519,7 @@ function comparePixels(original, replayed) {
       });
       const result = comparePixels(original, await exportPixels(fresh));
       console.log(JSON.stringify({ check: 'replay', name, viewport: `${viewport.width}x${viewport.height}`,
-        pausedSteps: paused && paused.steps, viewScale: done.viewScale, coverage: done.coverage, ...result }));
+        pausedSteps: paused && paused.steps, viewScale: done.viewScale, coverage: done.coverage, playSeconds, ...result }));
       assert.equal(done.status, 'Playback completed.');
       assert.match(done.coverage, /^([\d,]+) \/ \1 ticks · (\d+) \/ \2 strokes$/);
       assert.deepEqual(done.rectangle, done.header, 'the painting sits where it was recorded');
@@ -525,6 +544,68 @@ function comparePixels(original, replayed) {
     results.small = await replay('small-window', bytes, originals.empty, { viewport: { width: 700, height: 520 } });
     assert.ok(results.small.viewScale < 1, 'a smaller window zooms the view out');
     check(`replay in a smaller window zooms out (${results.small.viewScale.toFixed(2)}): ${results.small.withinTwo} within ±2`);
+
+    // --- Phase 5: a file of another engine replays from section C (AC-REC-9) -------
+    const { retag } = require('./session-retag.js');
+    const corpus = {};
+    for (const [name, file] of [['empty', bytes], ['baseline', baselineFile], ['commands', commandsFile]]) {
+      corpus[name] = (await retag(file)).stats;
+    }
+    const corpusTicks = Object.values(corpus).reduce((sum, stats) => sum + stats.ticks, 0);
+    const corpusKeyframes = Object.values(corpus).reduce((sum, stats) => sum + stats.keyframes, 0);
+    console.log(JSON.stringify({ check: 'keyframes on the QA corpus', corpus, ticksPerKeyframe:
+      Math.round(corpusTicks / corpusKeyframes * 100) / 100 }));
+    assert.ok(corpusTicks / corpusKeyframes >= 5, 'section C: at least 5x fewer keyframes than ticks');
+    check(`section C on the QA corpus: ${corpusKeyframes} keyframes for ${corpusTicks} ticks`);
+
+    const vectorReplay = async (name, file, original) => {
+      const { fresh, freshErrors } = await openFresh(name, (await retag(file)).bytes);
+      assert.match(await fresh.locator('#session-opened').textContent(), / · Vector — approximate · /);
+      await fresh.click('#session-open-player');
+      await fresh.waitForFunction(() => !document.getElementById('story-player-page').hidden);
+      const ui = await fresh.evaluate(() => ({
+        slug: document.getElementById('story-player-slug').textContent,
+        thicknessDisabled: document.getElementById('story-thickness').disabled,
+        colorsHidden: document.getElementById('story-color-model-group').hidden,
+      }));
+      assert.match(ui.slug, /^Session recording · Vector — approximate · /);
+      assert.deepEqual({ thicknessDisabled: ui.thicknessDisabled, colorsHidden: ui.colorsHidden },
+        { thicknessDisabled: false, colorsHidden: true }, 'Vector: Thickness enabled, colours hidden');
+      await fresh.check('input[name="story-canvas"][value="replace"]');
+      await fresh.selectOption('#story-speed', 'max');
+      await fresh.click('#story-play-pause');
+      await fresh.waitForFunction(() => window.__painter.storyPlaybackController.state === 'completed', null,
+        { timeout: 180000 });
+      const done = await fresh.evaluate(() => ({
+        status: document.getElementById('story-player-status').textContent,
+        coverage: document.getElementById('story-player-coverage').textContent,
+        strokeActive: window.__painter.engine.strokeActive,
+      }));
+      const result = comparePixels(original, await exportPixels(fresh));
+      // That Thickness reaches the strokes is session-keyframes-test's: a
+      // second run here costs minutes on SwiftShader (4-5 ticks/s, as Exact).
+      console.log(JSON.stringify({ check: 'vector replay', name, coverage: done.coverage, ...result }));
+      assert.equal(done.status, 'Playback completed.');
+      assert.match(done.coverage, /^([\d,]+) \/ \1 ticks · (\d+) \/ \2 strokes$/);
+      assert.equal(done.strokeActive, false);
+      assert.equal(result.painted, true);
+      assert.deepEqual(freshErrors, [], 'AC-REC-9: no errors in the console');
+      await fresh.close();
+      return result;
+    };
+    const vector = await vectorReplay('vector-commands', commandsFile, originals.commands);
+    check(`Vector replay of another engine's file: completes, ${vector.withinTwo} within ±2 of the original, no errors`);
+
+    {
+      const { fresh, freshErrors } = await openFresh('no-keyframes', (await retag(bytes, { stripKeyframes: true })).bytes);
+      const text = await fresh.locator('#session-opened').textContent();
+      assert.match(text, /different engine version and has no keyframes to replay approximately\.$/);
+      assert.equal(await fresh.locator('#session-opened').evaluate((element) => element.classList.contains('is-error')), true);
+      assert.equal(await fresh.locator('#session-open-player').isHidden(), true);
+      assert.deepEqual(freshErrors, [], 'a clear message, no exception in the console');
+      await fresh.close();
+      check('another engine without section C: a clear error, nothing to play, no console errors');
+    }
     console.log(`session-recording-ui: ${checks.length} checks passed`);
   } finally {
     await browser.close();

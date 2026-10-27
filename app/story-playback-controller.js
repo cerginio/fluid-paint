@@ -164,6 +164,7 @@ class StoryPlaybackController {
    */
   async loadSession(session, meta) {
     const player = new SessionPlayer(this.painter, session, meta);
+    if (player.mode === 'vector') player.thickness = this.thickness;
     await player.load();
     await this._cancelRun();
     this.model = null;
@@ -295,8 +296,12 @@ class StoryPlaybackController {
     if (this.thickness === normalized) return Promise.resolve(false);
     this.thickness = normalized;
     this._emit();
-    // An exact session replays its recorded brush sizes; thickness is a story setting.
-    if (this.session) return Promise.resolve(false);
+    // An exact session replays its recorded brush sizes. A Vector one takes the
+    // thickness at each stroke's begin, so a run follows it without restarting.
+    if (this.session) {
+      this.session.thickness = this.session.mode === 'vector' ? normalized : 1;
+      return Promise.resolve(false);
+    }
     return this._reconfigureActiveRun();
   }
 

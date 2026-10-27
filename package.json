@@ -54,6 +54,8 @@
     "test:session-replay:gpu": "node debug/session-replay-gpu-test.js",
     "test:session-codec": "node debug/session-codec-test.js",
     "test:session-ui": "node debug/session-recording-ui-test.js",
+    "test:session-keyframes": "node debug/session-keyframes-test.js",
+    "session:retag": "node debug/session-retag.js",
     "test:tilecraft-scale": "node debug/tilecraft-group-scale-test.js",
     "test:tilecraft:gpu": "node debug/tilecraft-story-gpu-test.js",
     "test:tilecraft:polyline:gpu": "node debug/tilecraft-origin-polyline-gpu-test.js",

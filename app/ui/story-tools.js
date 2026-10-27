@@ -421,8 +421,9 @@ class StoryToolsUI {
     const thickness = document.getElementById('story-thickness');
     if (thickness && Number(thickness.value) !== view.thickness) thickness.value = String(view.thickness);
     if (thickness) {
-      thickness.disabled = !!session;
-      thickness.title = session ? 'An exact session replays its recorded brush sizes.' : '';
+      const exactSession = !!session && session.mode === 'Exact';
+      thickness.disabled = exactSession;
+      thickness.title = exactSession ? 'An exact session replays its recorded brush sizes.' : '';
     }
     this._renderThicknessValue(view.thickness);
     document.querySelectorAll('input[name="story-canvas"]').forEach((input) => {
