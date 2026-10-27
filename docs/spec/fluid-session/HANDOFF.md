@@ -1,12 +1,11 @@
 # Handoff: fluid-session — швидкість Max і запис сесії малювання
 
-Стан на 2026-10-27, гілка `feat/pwa`. Фази 1–5 закриті й закомічені: код теми,
+Стан на 2026-10-27, гілка `feat/pwa`. Фази 1–5 і пункт 6 закриті й закомічені: код теми,
 `QA.md` і цей файл. Спека
 [`docs/PLAYER-MAX-SPEED-AND-SESSION-RECORDING-SPEC.md`](../../PLAYER-MAX-SPEED-AND-SESSION-RECORDING-SPEC.md)
 (далі — SPEC) закомічена в `a4009a1`.
 
-> **Далі:** фази SPEC вичерпано. Кандидат — пункт 6 (розділити `test:session-ui` на швидку і
-> повну частини, з'ясувати таймаути Exact на SwiftShader); пункт 1a і відкриті питання 1, 2, 7 —
+> **Далі:** фази SPEC вичерпано, пункт 6 закрито. Відкриті лише пункт 1a і питання 1, 2, 7 —
 > рішення власника. Без рішення власника нову фазу не починати.
 
 ## Що зроблено і працює
@@ -44,6 +43,8 @@
 | `app/ui/session-tools.js`, `app/ui/story-tools.js`, `app/story-playback-controller.js` (фаза 5) | Open… показує режим (`Exact` / `Vector — approximate`) або червону помилку без `Open in Player →`; Thickness увімкнений лише для Vector. |
 | `debug/session-keyframes-test.js` (`npm run test:session-keyframes`), `debug/session-retag.js` (`npm run session:retag -- <in> <out> [--strip-keyframes]`), `debug/session-test-fixtures.js` (фаза 5) | 10 перевірок секції C, Vector-повтору на фейковому рушії і бюджету розміру; retag міняє `engineContract` у файлі для QA; спільна синтетика 36 129 тіків для кодека й keyframes. |
 | `debug/session-recording-ui-test.js` (фаза 5) | + `keyframes on the QA corpus`, Open файлу іншого рушія, Vector-повтор (`coverage`, `painted`, `withinTwo` лише міряється), файл без C → помилка. 21 перевірка. |
+| `debug/session-recording-ui-test.js` (пункт 6) | **Повтори вимкнені за замовчуванням** (правило власника: довгих тестів у регулярних прогонах немає). `npm run test:session-ui` — 17 перевірок без повторів, 37 с SwiftShader / 13 с 890M. `--replays` — разова проба: + 4 Exact і Vector, 21 перевірка; рядки `replay` і таймаут друкують статистику кадрів (`frames`, `emptyFrames`, `blocked`, `ticksPerFrame`, `tickMsPerTick`, `betweenMsPerFrame`, `maxBetweenMs`). |
+| `app/session-player.js` (пункт 6) | `FenceTickScheduler` `depth = 4` (було 2); юніт у `test:story-max` фіксує 4. |
 | `debug/session-recording-ui-test.js` (фаза 4, `npm run test:session-ui`, `--hardware`) | 18 перевірок; 4 повтори після перезавантаження через UI: порожнє полотно (1× → пауза → Max), baseline, усі команди (+ мазок, що тече, перед Record), вужче вікно. Assert: `withinTwo ≥ 0,99` (AC-REC-5) і `maxDelta ≤ 1`. ≈ 7 хв на SwiftShader. `test:story-max` + юніт `FenceTickScheduler` на фейковому GL. |
 
 ## Інваріанти теми
@@ -66,7 +67,9 @@ Bake — повтор запису, почату після малювання, 
 *Механізм:* Record — `_bakeVisiblePainting()` або `engine.clear({ dynamics: true })`; повтор
 Replace — `engine.clear({ dynamics: true })` + baseline; `clearPaintAndDynamics()` чистить і
 pressure/divergence.
-*Перевірка:* `npm run test:session-ui` — повтори `baseline` і `commands`, `maxDelta ≤ 1`.
+*Перевірка:* `node debug/session-recording-ui-test.js --hardware --replays` — повтори `baseline` і
+`commands`, `maxDelta ≤ 1`. З пункту 6 це разова проба, не регулярний прогін: у
+`npm run test:session-ui` повтори вимкнені (рішення власника).
 *Доведено мутаціями:* без запікання на Record → `baseline` 0,934 (падає); без
 `clear({dynamics})` на Record → `commands` 0,971 (падає); без очищення pressure/divergence →
 `commands` `maxDelta` 108 (падає на `≤ 1`).
@@ -90,6 +93,23 @@ pressure/divergence.
 - Повтор не пишеться в новий запис (SPEC §2.7: Record вимкнений під час повтору `.flus`).
 
 ## Головні виміряні факти
+
+Пункт 6 (2026-10-27; 890M D3D11 і SwiftShader; проба планувальника — скрипт у scratchpad, не в
+репо: одна сесія, Max, різні планувальники):
+
+- **Причина таймаутів Exact на SwiftShader — `FenceTickScheduler` depth 2, а не вартість тіку.**
+  Повний прогін на SwiftShader: `commands` 511 / 554 тіків за 180 с; 944 з 1322 кадрів заблоковані
+  fence, 0,3–0,4 тіка/кадр, CPU 0,7–2,9 мс/тік. 180 с ≈ 540 тіків, а `commands` пише ≈ 550 —
+  тому «двічі з чотирьох».
+- SwiftShader, 549 тіків: depth 2 — 203,5 с (2,7 тіка/с, 3259 з 3797 кадрів порожні); depth 4 —
+  59,2 с (9,3); depth 8 — 9,3 с (59,1).
+- 890M, 4 904 тіки: depth 2 — 42,2 с (p90 кадру 16,7 мс, max 83); **depth 4 — 25,3 с (p90 16,8,
+  max 83, кадрів > 100 мс — 0)**; depth 8 — 26,0 с (p90 33,3, max 200); depth 16 — 17,8 с (p90 50,
+  max 217); Budget — 17,0 с, max 2 067 мс (замирання фази 4).
+- **Спростовано:** «глибина понад 2 відбудує чергу» (фаза 4 порівнювала лише 1 і 2) — для 4 ні;
+  з 8 — так.
+- Після depth 4, 890M, `--replays`: 4 Exact побітові (`withinTwo: 1`, `maxDelta: 0`), Vector 0,889,
+  21 перевірка, 23 с. Без `--replays`: 17 перевірок — 13 с 890M, 37 с SwiftShader.
 
 Фаза 5 (2026-10-27; власник прийняв через `handoff:next` **без повторного прогону** на закритті —
 на CPU SwiftShader `test:session-ui` не вкладається в таймаути, див. пункт 6; числа нижче — з
@@ -353,6 +373,13 @@ SPEC §2.5/§2.7): C будується на Stop, не на Save і не в `re
 
 </details>
 
+~~6. Розділити `test:session-ui` на швидку і повну частини (знахідка фази 5)~~ — ЗАКРИТО 2026-10-27.
+Рішення власника замість розділення: повтори вимкнені в регулярному прогоні, лишились у коді за
+`--replays`. Таймаути з'ясовано й прибрано: fence depth 2 → 4 (див. «Виміряні факти»). Регресій
+пункт не виправляв — нового інваріанту немає; перевірку INV-REC-1 перенесено на `--replays`.
+
+<details><summary>Опис пункту 6 до роботи (історія)</summary>
+
 ### 6. Розділити `test:session-ui` на швидку і повну частини (знахідка фази 5, не в жодній фазі)
 
 Проба йде ≈ 9–10 хв на SwiftShader: кожен тік сесії — повний крок пензля й рідини, а SwiftShader
@@ -367,6 +394,8 @@ SPEC §2.5/§2.7): C будується на Stop, не на Save і не в `re
 дерева на SwiftShader не зроблено (власник зупинив і переніс guard на GPU). Зміни фази 5 у
 Exact-шляху — одна перевірка `this._vector` у `_tick()` і вибір режиму в `_execute('begin')`.
 Таймаут тепер друкує `ticksDone/totalTicks`, де зупинився повтор, — з цього починати.
+
+</details>
 
 ## Відкриті питання
 

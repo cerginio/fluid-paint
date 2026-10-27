@@ -9,11 +9,47 @@ Fixture для сценаріїв лежить на диску: `D:\work\fluid-p
 Довідкові числа з desktop-QA (AMD Radeon 890M, D3D11, 2026-10-26), повний fixture:
 1× за планом — 43,0 с; 16× — 13,5 с (1 918 оп/с); Max — 3,8 с (6 838 оп/с).
 
+## Пункт 6 — повтори вимкнені в `test:session-ui`, глибина fence 4 — прийнято 2026-10-27
+
+Журнал: правило власника — довгих тестів у регулярних прогонах немає. `npm run test:session-ui`
+тепер без повторів (17 перевірок: картка, Save, Open, помилки, 320 px, Vector в Open і Player):
+37 с на SwiftShader, 13 с на 890M. Повтори лишились у коді як разова проба за прапорцем
+`--replays`. Таймаути повторів на SwiftShader давав `FenceTickScheduler`: програма чекала, поки
+браузер повідомить, що відеокарта дійшла до позначки (fence) після кожної пачки кроків, а
+дозволяла лише 2 такі пачки в черзі. Сигнал приходить на кілька кадрів пізніше, тож 73 % кадрів
+минали без кроків (2,7 кроку/с). Тепер 4 пачки.
+
+### QA-T1. Звичайний прогін без повторів
+
+**qa:mode:** cli
+**qa:open:** термінал, каталог `D:\work\fluid-paint\fluid-paint`.
+**qa:action:** `npm run test:session-ui`
+**qa:inspect:** рядок `"check":"replays skipped"` і підсумок.
+**qa:expected:** `{"check":"replays skipped","reason":"off by default; --replays"}`, рядків
+`"check":"replay"` немає, підсумок `session-recording-ui: 17 checks passed`, код виходу 0,
+≈ 40 с (SwiftShader).
+
+### QA-T2. Разова проба повторів на справжньому GPU
+
+**qa:mode:** cli
+**qa:open:** термінал, каталог `D:\work\fluid-paint\fluid-paint`.
+**qa:action:** `node debug/session-recording-ui-test.js --hardware --replays`
+**qa:inspect:** чотири рядки `"check":"replay"`, рядок `"check":"vector replay"`, підсумок.
+**qa:expected:** у кожному `"replay"` — `"withinTwo":1`, `"maxDelta":0` і поля `frames`,
+`emptyFrames`, `ticksPerFrame`, `maxBetweenMs`; підсумок `session-recording-ui: 21 checks passed`,
+код виходу 0, ≈ 25 с на 890M.
+
+### Свідомо не зроблено в пункті 6
+
+- Повтори на SwiftShader з глибиною 4 не проганялись повністю: проба на тій самій сесії
+  (549 кроків) — 59 с проти 203 с. Повтори — разова проба на GPU, не регулярний прогін.
+- Таймаут повтору лишився 180 с.
+
 ## Фаза 5 — опорні точки C і Vector-повтор (SPEC §2.5) — прийнято 2026-10-27
 
 Прогін QA 2026-10-27 (агент, Windows / AMD Radeon 890M): **V1–V8 пройдено**.
 V1: `engineContract: 2`, 8 опорних точок на 100 тіків (`ticksPerKeyframe: 12.5`);
-обидва перепозначені файли створено. V2–V4 і V6: `test:session-ui --hardware`
+обидва перепозначені файли створено. V2–V4 і V6: `test:session-ui --hardware` (з пункту 6 Vector-повтор — лише з `--replays`)
 підтвердив Vector у Open і Player, активний Thickness, завершення `269 / 269 ticks ·
 6 / 6 strokes` без помилок, а для файлу без C — зрозуміле повідомлення.
 Порівняння Vector з оригіналом: `withinTwo: 0.883` (очікування ≈ 0,9);
@@ -38,7 +74,7 @@ npm run session:retag -- "<завантажений painting-session-….flus>" 
 npm run session:retag -- "<завантажений painting-session-….flus>" "%TEMP%\no-keyframes.flus" --strip-keyframes
 ```
 
-Покриття автоматом: V2–V4, V6 проходить `npm run test:session-ui` (файл з усіма командами,
+Покриття автоматом: V2, V3, V6 проходить `npm run test:session-ui`, V4 — лише з `--replays` (файл з усіма командами,
 перепозначений `debug/session-retag.js`), V5 — юніт `test:session-keyframes` (thickness 1,5 →
 `brushSize` 60). Очима — те, чого автомат не бачить: що Vector-мазки за формою і місцем ті самі,
 що в оригіналі, і що Thickness справді робить їх товщими.
@@ -117,13 +153,13 @@ version and has no keyframes to replay approximately.` Кнопки `Open in Pla
 
 **qa:mode:** cli
 **qa:open:** термінал, каталог `D:\work\fluid-paint\fluid-paint`.
-**qa:action:** `node debug/session-recording-ui-test.js --hardware`
+**qa:action:** `node debug/session-recording-ui-test.js --hardware --replays`
 **qa:inspect:** рядки `"check":"keyframes on the QA corpus"`, `"check":"vector replay"` і підсумок.
 **qa:expected:** `ticksPerKeyframe` ≥ 5; у `vector replay` — `"coverage":"T / T ticks · 6 / 6
 strokes"`, `"painted":true`, `withinTwo` ≈ 0,9 (наближення, не порівнюється з AC-REC-5);
 чотири рядки `"check":"replay"` фази 4 — як і раніше `"withinTwo":1`; підсумок
-`session-recording-ui: 21 checks passed`, код виходу 0 (≈ 25 с на 890M; без `--hardware`, на
-SwiftShader — ≈ 9 хв і Exact-повтори можуть не вкластися в таймаут, див. HANDOFF пункт 6).
+`session-recording-ui: 21 checks passed`, код виходу 0 (≈ 25 с на 890M; повтори вимкнені без
+`--replays`, див. QA-T2).
 
 ### Свідомо не зроблено у фазі 5
 
@@ -143,8 +179,8 @@ SwiftShader — ≈ 9 хв і Exact-повтори можуть не вклас�
 полотно запікається у фон, порожнє — без швидкості рідини (без цього повтор поверх малюнка давав
 0,934 пікселів у ±2). Браузерні сценарії — на `npm run dev` (`http://127.0.0.1:3000/`), інтернет не
 потрібен. Для P2–P7 потрібен файл `.flus`: записати за QA-S2–S6 (з Undo) і дати рідині осісти
-секунду перед `■ Stop`. Покриття автоматом: P1–P8 і P10 проходить `npm run test:session-ui`
-(повтор після перезавантаження побітово рівний оригіналу), P9 — те саме на справжньому GPU.
+секунду перед `■ Stop`. Покриття автоматом: P1–P8 і P10 проходить `node debug/session-recording-ui-test.js --replays`
+(з пункту 6 повтори вимкнені у звичайному `npm run test:session-ui`; повтор після перезавантаження побітово рівний оригіналу), P9 — те саме на справжньому GPU.
 Очима — те, чого автомат не бачить: темп 1× проти оригіналу, плавність Max, що полотно на паузі
 справді завмирає, зум вигляду у вузькому вікні. Власник прийняв фазу через `handoff:next`.
 
@@ -243,7 +279,7 @@ an empty canvas.` (без колишнього «arrives in the next update»), 
 
 **qa:mode:** cli
 **qa:open:** термінал, каталог `D:\work\fluid-paint\fluid-paint`.
-**qa:action:** `node debug/session-recording-ui-test.js --hardware`
+**qa:action:** `node debug/session-recording-ui-test.js --hardware --replays`
 **qa:inspect:** чотири рядки `"check":"replay"` і підсумок.
 **qa:expected:** у кожному `"withinTwo":1` (AC-REC-5 вимагає ≥ 0,99), `"pausedSteps":0` у рядку
 `empty`, `"viewScale"` < 1 у `small-window`; підсумок `session-recording-ui: 18 checks passed`
