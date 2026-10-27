@@ -6,6 +6,10 @@ For every `handoff:*` command, first read the `handoff` skill completely and
 follow it, even if it was not included in the session's advertised skill list.
 Do this before reading handoff documents or making changes.
 
+## Language
+
+reports: uk
+
 ## Реєстр тем
 
 Тема `fluid-demo-r2` ведеться тут. Для крос-репозиторної теми `fluid` цей

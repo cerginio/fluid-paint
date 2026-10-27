@@ -434,9 +434,10 @@ There is no autonomous case for a new document: a topic is created only by
 run only on a person's direct command. When `handoff-run` starts, the
 topic's `HANDOFF.md` already exists, so rule 1 applies.
 
-**The report language** (what you tell the person): in an interactive
-session — the language of the person's last message; in an autonomous run —
-the topic's document language.
+**The report language** (what you tell the person): the repository setting
+`AGENTS.md` → section `## Language`, line `reports: <code>`, when it is there;
+otherwise in an interactive session — the language of the person's last
+message; in an autonomous run — the topic's document language.
 
 Mixing:
 
