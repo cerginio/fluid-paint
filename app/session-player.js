@@ -386,12 +386,15 @@ class SessionPlayer {
  * seconds frozen, the status reading 11 ticks/s at a real 231.
  *
  * A fence after each frame's ticks tells when the GPU caught up. At most
- * `depth` batches are in flight: one waiting keeps the GPU fed between frames
- * (with depth 1 the same run took 102 s instead of 57), more would rebuild the
- * queue. A batch done before its successor's frame ends grows the next by
- * one; one the scheduler had to wait for shrinks it to 0.7. The CPU budget
- * still applies. Same protocol as the other schedulers; dispose() drops
- * pending fences.
+ * `depth` batches are in flight: those waiting keep the GPU fed between frames,
+ * and a page sees a fence signal frames after the GPU passed it. 4904 ticks on
+ * the 890M: depth 2 -- 42 s, depth 4 -- 25 s, both p90 frame 16.8 ms and none
+ * over 83 ms; depth 8 starts to rebuild the queue (p90 33 ms, 200 ms frames).
+ * On SwiftShader the fence lags most: depth 2 ran 2.7 ticks/s, depth 4 9.3
+ * (fluid-session item 6). A batch done before its successor's frame ends
+ * grows the next by one; one the scheduler had to wait for shrinks it to 0.7.
+ * The CPU budget still applies. Same protocol as the other schedulers;
+ * dispose() drops pending fences.
  */
 SessionPlayer.FenceTickScheduler = class {
   static supported(gl) {
@@ -399,7 +402,7 @@ SessionPlayer.FenceTickScheduler = class {
   }
 
   constructor(gl, { now = () => performance.now(), budgetMs = 10, initialLimit = 4, maxLimit = 256,
-    depth = 2 } = {}) {
+    depth = 4 } = {}) {
     this.gl = gl;
     this.now = now;
     this.budgetMs = budgetMs;

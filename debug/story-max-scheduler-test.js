@@ -126,12 +126,15 @@ function harness(options = {}) {
   };
   assert.equal(frame(), 4, 'starts at 4 ticks');
   assert.equal(frame(), 4, 'a second batch may be in flight');
-  assert.equal(frame(), 0, 'two batches pending: no ticks until the GPU catches up');
+  assert.equal(frame(), 4, 'a third');
+  assert.equal(frame(), 4, 'a fourth');
+  assert.equal(frame(), 0, 'four batches pending: no ticks until the GPU catches up');
   assert.equal(frame(), 0, 'still pending');
   done.add(0);
   assert.equal(frame(), 2, 'a batch that had to be waited for shrinks the next to 0.7');
   done.add(1); done.add(2);
   assert.equal(frame(), 4, 'each batch done without a wait grows the limit by one (2 -> 3 -> 4)');
+  assert.equal(new FenceTickScheduler(gl).depth, 4, 'depth 4: measured on the 890M and SwiftShader');
   scheduler.dispose();
   assert.equal(scheduler.fences.length, 0, 'dispose drops pending fences');
 }

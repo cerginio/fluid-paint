@@ -13,8 +13,17 @@
 // Play. The first replays at 1x, pauses mid-run and finishes at Max; one runs
 // in a smaller window, where the view must zoom out to show the painting.
 //
-//   node debug/session-recording-ui-test.js              SwiftShader
-//   node debug/session-recording-ui-test.js --hardware   real GPU (ANGLE D3D11)
+// Phase 5: section C and the Vector replay of another engine's file.
+//
+// Every replay steps the whole brush and fluid per tick, which SwiftShader
+// does on the CPU: the replays are most of the run. They are off by default
+// (owner's rule: no long tests in regular runs) -- the regular run checks the
+// card, Save, Open, errors, 320 px, the Vector Open and Player UI. --replays
+// adds the four Exact replays and the Vector one, a one-off probe.
+//
+//   node debug/session-recording-ui-test.js                       SwiftShader, no replays
+//   node debug/session-recording-ui-test.js --hardware            real GPU (ANGLE D3D11)
+//   node debug/session-recording-ui-test.js --hardware --replays  + replays (AC-REC-5, AC-REC-9)
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const http = require('node:http');
@@ -23,6 +32,7 @@ const { chromium } = require('playwright');
 require('./browser-lock').acquireBrowserLock('Session recording UI');
 
 const hardware = process.argv.includes('--hardware');
+const quick = !process.argv.includes('--replays');
 const root = path.resolve(__dirname, '..');
 const mime = { '.js': 'application/javascript', '.json': 'application/json', '.css': 'text/css',
   '.html': 'text/html', '.vert': 'text/plain', '.frag': 'text/plain' };
@@ -442,6 +452,41 @@ function comparePixels(original, replayed) {
         document.getElementById('session-opened').classList.contains('is-error'));
       return { fresh, freshErrors };
     };
+    // Where a replay's time goes: frames, ticks per frame, frames the fence
+    // held back, CPU inside the tick loop vs the wait for the next frame.
+    const instrumentReplay = (fresh) => fresh.evaluate(() => {
+      const stats = window.__replayStats = { frames: 0, emptyFrames: 0, blocked: 0, ticks: 0, maxTicks: 0,
+        tickMs: 0, betweenMs: 0, maxBetweenMs: 0 };
+      const proto = SessionPlayer.FenceTickScheduler.prototype;
+      const { beginFrame, endFrame } = proto;
+      let frameStart = 0;
+      let frameEnd = 0;
+      proto.beginFrame = function () {
+        frameStart = performance.now();
+        if (frameEnd) {
+          stats.betweenMs += frameStart - frameEnd;
+          stats.maxBetweenMs = Math.max(stats.maxBetweenMs, frameStart - frameEnd);
+        }
+        beginFrame.call(this);
+        if (this.blocked) stats.blocked++;
+      };
+      proto.endFrame = function () {
+        frameEnd = performance.now();
+        stats.frames++;
+        stats.ticks += this.count;
+        stats.maxTicks = Math.max(stats.maxTicks, this.count);
+        if (this.count === 0) stats.emptyFrames++;
+        stats.tickMs += frameEnd - frameStart;
+        endFrame.call(this);
+      };
+    });
+    const replayStats = (fresh) => fresh.evaluate(() => {
+      const s = window.__replayStats;
+      const round = (value) => Math.round(value * 10) / 10;
+      return { frames: s.frames, emptyFrames: s.emptyFrames, blocked: s.blocked, maxTicksPerFrame: s.maxTicks,
+        ticksPerFrame: round(s.ticks / Math.max(1, s.frames)), tickMsPerTick: round(s.tickMs / Math.max(1, s.ticks)),
+        betweenMsPerFrame: round(s.betweenMs / Math.max(1, s.frames)), maxBetweenMs: Math.round(s.maxBetweenMs) };
+    });
     const replay = async (name, bytes, original, { viewport = { width: 1100, height: 760 }, pauseAtOneX = false } = {}) => {
       const { fresh, freshErrors } = await openFresh(name, bytes, viewport);
       await fresh.waitForFunction(() => !document.getElementById('session-open-player').hidden);
@@ -460,6 +505,7 @@ function comparePixels(original, replayed) {
       assert.deepEqual({ colorsHidden: ui.colorsHidden, thicknessDisabled: ui.thicknessDisabled,
         framesDisabled: ui.framesDisabled }, { colorsHidden: true, thicknessDisabled: true, framesDisabled: true });
       await fresh.check('input[name="story-canvas"][value="replace"]');
+      await instrumentReplay(fresh);
 
       let paused = null;
       if (pauseAtOneX) {
@@ -497,7 +543,8 @@ function comparePixels(original, replayed) {
             status: document.getElementById('story-player-status').textContent };
         });
         // The stack printed for it was built with the old message: say it apart.
-        console.log(JSON.stringify({ check: 'replay timeout', name, seconds: Math.round((Date.now() - playStarted) / 1000), ...at }));
+        console.log(JSON.stringify({ check: 'replay timeout', name, seconds: Math.round((Date.now() - playStarted) / 1000),
+          ...at, ...await replayStats(fresh) }));
         throw error;
       });
       const playSeconds = Math.round((Date.now() - playStarted) / 1000);
@@ -519,7 +566,8 @@ function comparePixels(original, replayed) {
       });
       const result = comparePixels(original, await exportPixels(fresh));
       console.log(JSON.stringify({ check: 'replay', name, viewport: `${viewport.width}x${viewport.height}`,
-        pausedSteps: paused && paused.steps, viewScale: done.viewScale, coverage: done.coverage, playSeconds, ...result }));
+        pausedSteps: paused && paused.steps, viewScale: done.viewScale, coverage: done.coverage, playSeconds, ...result,
+        ...await replayStats(fresh) }));
       assert.equal(done.status, 'Playback completed.');
       assert.match(done.coverage, /^([\d,]+) \/ \1 ticks · (\d+) \/ \2 strokes$/);
       assert.deepEqual(done.rectangle, done.header, 'the painting sits where it was recorded');
@@ -534,16 +582,20 @@ function comparePixels(original, replayed) {
       await fresh.close();
       return { ...result, viewScale: done.viewScale };
     };
-    const results = {};
-    results.empty = await replay('empty', bytes, originals.empty, { pauseAtOneX: true });
-    check(`replay after reload, 1x -> pause -> Max: ${results.empty.withinTwo} within ±2, maxDelta ${results.empty.maxDelta}`);
-    results.baseline = await replay('baseline', baselineFile, originals.baseline);
-    check(`replay over a baseline PNG: ${results.baseline.withinTwo} within ±2, maxDelta ${results.baseline.maxDelta}`);
-    results.commands = await replay('commands', commandsFile, originals.commands);
-    check(`replay of every command: ${results.commands.withinTwo} within ±2, maxDelta ${results.commands.maxDelta}`);
-    results.small = await replay('small-window', bytes, originals.empty, { viewport: { width: 700, height: 520 } });
-    assert.ok(results.small.viewScale < 1, 'a smaller window zooms the view out');
-    check(`replay in a smaller window zooms out (${results.small.viewScale.toFixed(2)}): ${results.small.withinTwo} within ±2`);
+    if (quick) {
+      console.log(JSON.stringify({ check: 'replays skipped', reason: 'off by default; --replays' }));
+    } else {
+      const results = {};
+      results.empty = await replay('empty', bytes, originals.empty, { pauseAtOneX: true });
+      check(`replay after reload, 1x -> pause -> Max: ${results.empty.withinTwo} within ±2, maxDelta ${results.empty.maxDelta}`);
+      results.baseline = await replay('baseline', baselineFile, originals.baseline);
+      check(`replay over a baseline PNG: ${results.baseline.withinTwo} within ±2, maxDelta ${results.baseline.maxDelta}`);
+      results.commands = await replay('commands', commandsFile, originals.commands);
+      check(`replay of every command: ${results.commands.withinTwo} within ±2, maxDelta ${results.commands.maxDelta}`);
+      results.small = await replay('small-window', bytes, originals.empty, { viewport: { width: 700, height: 520 } });
+      assert.ok(results.small.viewScale < 1, 'a smaller window zooms the view out');
+      check(`replay in a smaller window zooms out (${results.small.viewScale.toFixed(2)}): ${results.small.withinTwo} within ±2`);
+    }
 
     // --- Phase 5: a file of another engine replays from section C (AC-REC-9) -------
     const { retag } = require('./session-retag.js');
@@ -558,7 +610,7 @@ function comparePixels(original, replayed) {
     assert.ok(corpusTicks / corpusKeyframes >= 5, 'section C: at least 5x fewer keyframes than ticks');
     check(`section C on the QA corpus: ${corpusKeyframes} keyframes for ${corpusTicks} ticks`);
 
-    const vectorReplay = async (name, file, original) => {
+    const vectorReplay = async (name, file, original, { play = true } = {}) => {
       const { fresh, freshErrors } = await openFresh(name, (await retag(file)).bytes);
       assert.match(await fresh.locator('#session-opened').textContent(), / · Vector — approximate · /);
       await fresh.click('#session-open-player');
@@ -571,7 +623,13 @@ function comparePixels(original, replayed) {
       assert.match(ui.slug, /^Session recording · Vector — approximate · /);
       assert.deepEqual({ thicknessDisabled: ui.thicknessDisabled, colorsHidden: ui.colorsHidden },
         { thicknessDisabled: false, colorsHidden: true }, 'Vector: Thickness enabled, colours hidden');
+      if (!play) {
+        assert.deepEqual(freshErrors, []);
+        await fresh.close();
+        return null;
+      }
       await fresh.check('input[name="story-canvas"][value="replace"]');
+      await instrumentReplay(fresh);
       await fresh.selectOption('#story-speed', 'max');
       await fresh.click('#story-play-pause');
       await fresh.waitForFunction(() => window.__painter.storyPlaybackController.state === 'completed', null,
@@ -584,7 +642,8 @@ function comparePixels(original, replayed) {
       const result = comparePixels(original, await exportPixels(fresh));
       // That Thickness reaches the strokes is session-keyframes-test's: a
       // second run here costs minutes on SwiftShader (4-5 ticks/s, as Exact).
-      console.log(JSON.stringify({ check: 'vector replay', name, coverage: done.coverage, ...result }));
+      console.log(JSON.stringify({ check: 'vector replay', name, coverage: done.coverage, ...result,
+        ...await replayStats(fresh) }));
       assert.equal(done.status, 'Playback completed.');
       assert.match(done.coverage, /^([\d,]+) \/ \1 ticks · (\d+) \/ \2 strokes$/);
       assert.equal(done.strokeActive, false);
@@ -593,8 +652,13 @@ function comparePixels(original, replayed) {
       await fresh.close();
       return result;
     };
-    const vector = await vectorReplay('vector-commands', commandsFile, originals.commands);
-    check(`Vector replay of another engine's file: completes, ${vector.withinTwo} within ±2 of the original, no errors`);
+    if (quick) {
+      await vectorReplay('vector-commands', commandsFile, originals.commands, { play: false });
+      check('another engine\'s file opens as Vector; the Player enables Thickness (not played without --replays)');
+    } else {
+      const vector = await vectorReplay('vector-commands', commandsFile, originals.commands);
+      check(`Vector replay of another engine's file: completes, ${vector.withinTwo} within ±2 of the original, no errors`);
+    }
 
     {
       const { fresh, freshErrors } = await openFresh('no-keyframes', (await retag(bytes, { stripKeyframes: true })).bytes);
