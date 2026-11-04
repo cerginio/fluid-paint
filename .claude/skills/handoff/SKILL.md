@@ -1,6 +1,6 @@
 ---
 name: handoff
-description: Runs work in phases with a context clear between them — reads handoff.md at the start of a phase, implements, runs the eval, writes QA scenarios for manual checking, hands the phase over for human review, updates the handoff and commits. Invoke at the start of a phase ("handoff:start", "read handoff", "continue the work", "продовж роботу", "next phase", "наступна фаза"), at the end ("handoff:next", "write the handoff", "запиши handoff", "close the phase", "закрий фазу") and on any "handoff:*" code. One phase = one context.
+description: Runs work in phases with a context clear between them — reads handoff.md at the start of a phase, implements, runs the eval, writes QA scenarios for manual checking, hands the phase over for human review, updates the handoff and commits. Invoke to inspect a phase ("handoff:start", "read handoff"), to start or resume work ("handoff:continue", "continue the work", "продовж роботу", "next phase", "наступна фаза"), at the end ("handoff:next", "write the handoff", "запиши handoff", "close the phase", "закрий фазу") and on any "handoff:*" code. One phase = one context.
 ---
 
 # Handoff — working in phases
@@ -39,13 +39,15 @@ sources the same way.
 | `handoff:5` | rewrite or complete `QA.md` |
 
 `handoff:2` does not exist: step 2 is reading in a **clean** context. The
-entry into a phase is `handoff:start`.
+entry into a phase is `handoff:start` (read only) or `handoff:continue`
+(read and execute).
 
 ### Words — actions on the phase
 
 | code | what to do |
 |---|---|
 | `handoff:start [topic]` | read `HANDOFF.md` and say where you start. **Do nothing else** |
+| `handoff:continue [topic]` | resume the unfinished phase, otherwise start the unambiguous next phase from `HANDOFF.md`, without asking for permission to work |
 | `handoff:next` | all OK: step 7 — update `HANDOFF.md`, commit, ask for `/clear` |
 | `handoff:qa <code> <what is wrong>` | a QA scenario failed: `handoff:qa A5 diagnostics empty` |
 | `handoff:hold` | stop, do not commit: the user is still looking |
@@ -75,6 +77,40 @@ live on our side and which on the other. See
 
 If `HANDOFF.md` is found, count the struck-through (`^~~<number>.`) phases
 at the same time — see the [archiving reminder](#archiving-reminder).
+
+### `handoff:continue`
+
+This is permission to work immediately, including after a failure, a usage
+limit or another interruption. Do not ask for permission to start or resume.
+
+Use the named topic, otherwise the topic already established in this
+session. If neither is available, resolve the topic and its `HANDOFF.md`
+as on `handoff:start`; read the file **in full**. Read it again on resumption
+too: session memory is not a substitute for the written state.
+
+- **An unfinished phase exists:** resume that phase from the first unfinished
+  step. Reconcile `HANDOFF.md` with the existing worktree and available
+  results of the interrupted attempt. Keep partial work; do not restart
+  completed steps or move to the next phase merely because the session
+  stopped. Recheck results when changes or missing evidence require it.
+- **No unfinished phase exists:** start the next phase only when
+  `HANDOFF.md` identifies it unambiguously (the `Next` / `Далі` marker and
+  open items agree). Briefly say which phase you are starting and proceed
+  to implementation, eval and QA in the same turn.
+- **The phase cannot be determined:** say that the next phase is not
+  defined unambiguously, state what is missing or conflicting, and ask the
+  person to select or confirm the phase. Do not invent a phase plan. If the
+  handoff explicitly says all phases are complete, report completion.
+
+Continue only this phase, then stop for human review as usual.
+`handoff:continue` does not approve QA or authorize a commit: a phase already
+awaiting review still needs `handoff:next` to close. If closing was interrupted
+after an explicit `handoff:next`, that permission remains valid; finish the
+remaining closing steps without asking again. An unresolved blocker still
+needs a decision, but an interruption alone is not a reason to ask again.
+
+This is the manual skill command, not the controller's `--continue` flag;
+it does not launch `handoff-run`.
 
 ### `handoff:next`
 
