@@ -42,6 +42,7 @@ class ToolPanel {
     this._returnFrame = null;
     this._listeners = [];
     this._destroyed = false;
+    this._hostRegions = [];
     this.extensionTabs = [];
     this.extensionPages = [];
 
@@ -98,6 +99,22 @@ class ToolPanel {
       };
       this.returnButton.addEventListener('click', this._onReturnClick);
       let returnPress = null;
+      let recoveryClick = null;
+      const guardRecoveryClick = (event) => {
+        if (!recoveryClick || event.detail === 0) return;
+        const press = recoveryClick;
+        recoveryClick = null;
+        if (performance.now() - press.time < 750 &&
+            Math.hypot(event.clientX - press.x, event.clientY - press.y) <= 8) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+        }
+      };
+      const clearRecoveryClick = () => { recoveryClick = null; };
+      document.addEventListener('click', guardRecoveryClick, true);
+      document.addEventListener('pointerdown', clearRecoveryClick, true);
+      this._listeners.push(() => document.removeEventListener('click', guardRecoveryClick, true),
+        () => document.removeEventListener('pointerdown', clearRecoveryClick, true));
       const returnDown = (event) => {
         if (event.button !== 0 || event.isPrimary === false || returnPress) return;
         event.preventDefault();
@@ -110,6 +127,7 @@ class ToolPanel {
         returnPress = null;
         try { this.returnButton.releasePointerCapture(event.pointerId); } catch (_) { /* capture lost */ }
         if (event.type === 'pointerup' && Math.hypot(event.clientX - press.x, event.clientY - press.y) <= 8) {
+          recoveryClick = { x: event.clientX, y: event.clientY, time: performance.now() };
           // Keep the target mounted until the compatibility click is routed.
           this._returnFrame = requestAnimationFrame(() => {
             this._returnFrame = null;
@@ -286,13 +304,44 @@ class ToolPanel {
     return { left, top, right, bottom };
   }
 
+  setHostLayout(layout) {
+    if (!layout || layout.version !== 1 || !Array.isArray(layout.regions) || layout.regions.length > 2 ||
+        layout.regions.some((r) => !r || ['left', 'top', 'right', 'bottom'].some((k) =>
+          !Number.isFinite(r[k]) || Math.abs(r[k]) > 32768) || r.right <= r.left || r.bottom <= r.top)) {
+      throw Object.assign(new Error('Invalid host UI bounds'), { code: 'INVALID_UI_LAYOUT' });
+    }
+    this._hostRegions = layout.regions.map(({ left, top, right, bottom }) => ({ left, top, right, bottom }));
+    this._scheduleLayout();
+  }
+
+  _freeBounds(bounds, left, width, preferredY) {
+    let slots = [{ ...bounds }];
+    for (const region of this._hostRegions) {
+      if (region.right <= left || region.left >= left + width) continue;
+      slots = slots.flatMap((slot) => {
+        if (region.bottom + 8 <= slot.top || region.top - 8 >= slot.bottom) return [slot];
+        return [{ ...slot, bottom: Math.min(slot.bottom, region.top - 8) },
+          { ...slot, top: Math.max(slot.top, region.bottom + 8) }].filter((s) => s.bottom > s.top);
+      });
+    }
+    const barHeight = this.bar.getBoundingClientRect().height + 2;
+    const viable = slots.filter((s) => s.bottom - s.top >= barHeight);
+    const distance = (s) => Math.abs(Math.max(s.top, Math.min(s.bottom - barHeight, preferredY)) - preferredY);
+    viable.sort((a, b) => distance(a) - distance(b) || (b.bottom - b.top) - (a.bottom - a.top));
+    return viable[0] || bounds;
+  }
+
   _layout() {
-    const bounds = this._viewportBounds();
+    let bounds = this._viewportBounds();
+
     if (this.returnButton) {
       this.returnButton.style.right = 'auto';
       this.returnButton.style.bottom = 'auto';
       this.returnButton.style.left = Math.max(bounds.left, bounds.right - 44) + 'px';
       this.returnButton.style.top = Math.max(bounds.top, bounds.bottom - 44) + 'px';
+      const returnLeft = Math.max(bounds.left, bounds.right - 44);
+      const free = this._freeBounds(bounds, returnLeft, 44, bounds.bottom - 44);
+      this.returnButton.style.top = Math.max(free.top, free.bottom - 44) + 'px';
     }
     const visible = !this.root.hidden && this.root.getBoundingClientRect().width > 0;
     if (!visible) {
@@ -309,6 +358,10 @@ class ToolPanel {
       };
     }
     const desired = this._desiredAnchor;
+    const width = this.root.getBoundingClientRect().width;
+    const resolvedLeft = Math.max(bounds.left, Math.min(bounds.right - width, desired.left));
+    bounds = this._freeBounds(bounds, resolvedLeft, width,
+      this._bottomAnchored ? bounds.bottom - barHeight - 1 : desired.top);
     const top = Math.max(bounds.top + 1, Math.min(bounds.bottom - barHeight - 1,
       this._bottomAnchored ? bounds.bottom - barHeight - 1 : desired.top));
     const above = top + barHeight / 2 > (bounds.top + bounds.bottom) / 2;
@@ -474,6 +527,8 @@ class ToolPanel {
   /** Use an adjacent side when it fits; otherwise overlay the base panel. */
   _placeExtension() {
     if (!this.extension || this.extension.hidden) return;
+    this.extension.style.removeProperty('max-height');
+    this.extension.style.removeProperty('overflow-y');
     const panel = this.root.getBoundingClientRect();
     const extensionWidth = this.extension.getBoundingClientRect().width;
     const gap = 8;
@@ -501,6 +556,7 @@ class ToolPanel {
           ? window.innerHeight - 8 - fixedRect.bottom
           : 0;
       if (shiftX || shiftY) this.extension.style.transform = `translate(${shiftX}px, ${shiftY}px)`;
+      this._avoidHostExtension();
       return;
     }
 
@@ -516,6 +572,21 @@ class ToolPanel {
       const viewportLeft = Math.max(0, Math.min(window.innerWidth - extensionWidth, preferredLeft));
       this.extension.style.left = (viewportLeft - panel.left) + 'px';
       this.extension.style.right = 'auto';
+    }
+    this._avoidHostExtension();
+  }
+
+  _avoidHostExtension() {
+    if (!this._hostRegions.length || !this.extension || this.extension.hidden) return;
+    const rect = this.extension.getBoundingClientRect();
+    const free = this._freeBounds(this._viewportBounds(), rect.left, rect.width, rect.top);
+    this.extension.style.maxHeight = Math.max(44, free.bottom - free.top) + 'px';
+    this.extension.style.overflowY = 'auto';
+    const fitted = this.extension.getBoundingClientRect();
+    const top = Math.max(free.top, Math.min(free.bottom - fitted.height, fitted.top));
+    if (Math.abs(top - fitted.top) > .5) {
+      const transform = this.extension.style.transform;
+      this.extension.style.transform = `${transform} translateY(${top - fitted.top}px)`;
     }
   }
 

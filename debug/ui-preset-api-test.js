@@ -12,6 +12,21 @@ function throwsCode(fn, code) {
 }
 
 async function main() {
+  const { ToolPanel } = require('../app/ui/panel.js');
+  const layout = { _scheduleLayout() {}, _hostRegions: [] };
+  const setLayout = (value) => ToolPanel.prototype.setHostLayout.call(layout, value);
+  const regions = [{ left: 10, top: 10, right: 310, bottom: 66 }];
+  setLayout({ version: 1, regions });
+  regions[0].bottom = 999;
+  assert.equal(layout._hostRegions[0].bottom, 66, 'layout owns its copied CSS bounds');
+  for (const invalid of [null, { version: 2, regions: [] }, { version: 1, regions: [{ left: NaN }] },
+    { version: 1, regions: [{ left: 2, top: 0, right: 1, bottom: 10 }] },
+    { version: 1, regions: Array(3).fill({ left: 0, top: 0, right: 1, bottom: 1 }) }]) {
+    throwsCode(() => setLayout(invalid), 'INVALID_UI_LAYOUT');
+    assert.equal(layout._hostRegions[0].bottom, 66, 'invalid bounds never mutate active layout');
+  }
+  setLayout({ version: 1, regions: [] });
+  assert.deepEqual(layout._hostRegions, [], 'close can clear exclusion bounds');
   assert.deepEqual(resolveFluidUiConfig().resolvedFeatures, [
     'color-picker', 'brush-size', 'colors-options', 'brush-options',
     'player', 'demo-r2', 'file-bg', 'file-play', 'state-bake',

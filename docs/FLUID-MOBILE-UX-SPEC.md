@@ -1,6 +1,6 @@
 # Fluid Play / Rescript — мобільні панелі обох репозиторіїв
 
-Статус: зріз MU-1 anchor/disclosure/chevron прийнято до commit через `handoff next`; return→extension лишається незакритим (останній browser runner FAIL). MU-2/MU-2G/MU-3 ще не реалізовано. Фактичні результати та докази — у канонічному HANDOFF.
+Статус: MU-1 follow-up та MU-2 прийнято й закрито власником через `handoff:next` 2026-11-06; source/build native і жива пара eval PASS. Прийнятий раніше anchor/disclosure/chevron не перевідкривається, старий return→extension FAIL не поточний gate. MU-2G/MU-3 ще не реалізовано; deploy не виконано. Код і closure-документи входять у closing commits. Фактичні результати та докази — у канонічному HANDOFF.
 Тема: **існуюча `fluid`**, не нова тема і не перевідкриття завершених `fluid-2` A–C.
 Канонічний план: [HANDOFF теми fluid](../../../js-games/ua-dream/docs/spec/fluid-paint/HANDOFF.md), фази MU-1…MU-3.
 Команда власника `Handoff continue fluid` дозволила реалізацію MU-1. Це не приймання QA, дозвіл на commit/deploy або автоматичний перехід до наступної фази.
@@ -105,6 +105,24 @@ Source revisions на вході: Fluid Paint `c978486`, ua-dream `d2dec2bf`. У
 
 **Технічна залежність MU-2:** перевірити чинний configureUi/bridge і вибрати мінімальний сумісний спосіб передати bounds host → child. Це ще не реалізований API; попереднє твердження «координація/RPC точно не потрібні» більше не чинне. Якщо потрібне адитивне розширення layout-контракту, описати payload, валідацію, legacy fallback і lifecycle до runtime-правки; канонічні та vendored копії оновлювати разом. Не використовувати довільний postMessage в обхід чинних origin/peer перевірок.
 
+#### Layout-контракт MU-2 — адитивний `uiLayout` v1
+
+- `openMode` повертає `uiLayoutVersion: 1`, тільки якщо child підтримує layout.
+- Host викликає `api.fluid.setUiLayout` через чинний MessageAPI peer/origin канал:
+  `{ transferId, layout: { version: 1, regions: [{ left, top, right, bottom }] } }`.
+  CSS px у viewport iframe; до двох прямокутників (primary і відкритий tray),
+  скінченні координати в межах ±32768, додатні ширина/висота. Невалідний payload
+  відхиляється без мутації; старий transfer — `STALE_TRANSFER`.
+- Native зберігає desired anchor, а resolved bar/body/extension/return уникають
+  зайнятих областей; body/tray скроляться за браку висоти. Canvas не змінюється.
+- Host coalesces resize/drag/tray/status/visualViewport у RAF, серіалізує RPC,
+  пропускає незмінні bounds; close скасовує pending роботу та observers.
+- Legacy child без capability не отримує нового RPC; host показує зрозуміле
+  попередження про відсутню координацію, не оголошує non-overlap PASS.
+- Child UI subscription надсилає `uiStateChanged` і після native recovery,
+  не тільки host configure. Dispose відписує subscriber. Канон bridge і vendor
+  оновлюються синхронно; protocol version та origin-перевірки не змінюються.
+
 ### 4.3 Fluid Paint: стабільна координата ручки
 
 - Зберігати **бажану screen-space позицію bar/grip** як стан, змінюваний лише drag або свідомим viewport clamp; не виводити нове бажане положення з DOM після кожного toggle.
@@ -164,7 +182,7 @@ Collapsed стан має знати напрямок **до** першого в
 - Up до hold або movement понад tolerance до активації скасовує pending без зміни розміру/history. Додавання другого пальця скасовує pending/active resize й передає жест pinch/pan; all-up drawing latch діє за §4.6. Pointercancel/lost capture/Escape скасовують preview, таймер та indicator.
 - Нормальний release після activated resize commit один раз і створює один осмислений undo-крок; hold без зміни розміру — без порожнього кроку. Indicator зникає після завершення/скасування. Захистити асинхронний hold callback від старої contact-session.
 
-## 5. Критерії приймання (MU-1: локальний eval PASS, human review очікується)
+## 5. Критерії приймання (MU-1 follow-up та MU-2: eval PASS, прийнято власником)
 
 ### Native — MU-1
 

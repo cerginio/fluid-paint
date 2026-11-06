@@ -116,6 +116,11 @@
             return this.api.call("fluid-player", "api.fluid.configureUi", { transferId: this.currentTransferId, config });
         }
 
+        setUiLayout(layout) {
+            if (!this.api || !this.currentTransferId) throw fluidError("SCENE_NOT_READY", "No active Fluid scene");
+            return this.api.call("fluid-player", "api.fluid.setUiLayout", { transferId: this.currentTransferId, layout });
+        }
+
         getUiState() {
             if (!this.api || !this.currentTransferId) throw fluidError("SCENE_NOT_READY", "No active Fluid scene");
             return this.api.call("fluid-player", "api.fluid.getUiState", { transferId: this.currentTransferId });
@@ -443,6 +448,7 @@
         compileModel = root.compileFluidStoryModel,
         decodeBackground = (blob) => createImageBitmap(blob),
         uiApi = null,
+        layoutApi = null,
         controlApi = null,
         timeoutMs = 8000,
     }) {
@@ -491,12 +497,18 @@
             unexpose.push(api.expose("api.fluid.configureUi", async (payload = {}) => {
                 requireActiveTransfer(payload);
                 const state = await uiApi.configure(payload.config);
-                await api.call("editor", "api.fluid.uiStateChanged", { transferId: payload.transferId, state });
                 return { accepted: true, transferId: payload.transferId, state };
             }));
             unexpose.push(api.expose("api.fluid.getUiState", (payload = {}) => {
                 requireActiveTransfer(payload);
                 return { transferId: payload.transferId, state: uiApi.getState() };
+            }));
+        }
+        if (layoutApi) {
+            unexpose.push(api.expose("api.fluid.setUiLayout", (payload = {}) => {
+                requireActiveTransfer(payload);
+                layoutApi.setHostLayout(payload.layout);
+                return { accepted: true, transferId: payload.transferId };
             }));
         }
         if (controlApi) {
@@ -518,7 +530,8 @@
                         : undefined,
                 });
                 controlApi.activateTransfer(transferId);
-                return { accepted: true, transferId, mode: payload.mode, uiState: uiApi?.getState() || null };
+                return { accepted: true, transferId, mode: payload.mode, uiState: uiApi?.getState() || null,
+                    uiLayoutVersion: layoutApi ? 1 : null };
             }));
             unexpose.push(api.expose("api.fluid.control", (payload) => controlApi.execute(payload)));
             unexpose.push(api.expose("api.fluid.getModeState", (payload = {}) => {
@@ -549,6 +562,10 @@
                 return { accepted: true, exportId, transferId: payload.transferId };
             }));
         }
+        const unsubscribeUi = uiApi?.subscribe?.((state) => {
+            if (!client.currentTransferId) return;
+            api.call("editor", "api.fluid.uiStateChanged", { transferId: client.currentTransferId, state }).catch(() => {});
+        });
         const unsubscribeMode = controlApi?.subscribe((state) => {
             if (!state.transferId) return;
             api.call("editor", "api.fluid.modeStateChanged", { transferId: state.transferId, state }).catch(() => {});
@@ -560,6 +577,7 @@
             dispose() {
                 client.dispose();
                 unsubscribeMode?.();
+                unsubscribeUi?.();
                 unexpose.forEach((off) => off?.());
                 controlApi?.dispose?.();
                 api.dispose();

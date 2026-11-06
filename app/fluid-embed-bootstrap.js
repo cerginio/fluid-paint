@@ -38,6 +38,7 @@
       compileModel: TilecraftStrokePlayer.compile,
       decodeBackground: (blob, name, meta) => painter.decodeBackground(blob, name, meta),
       uiApi: window.__fluidUiPresetApi,
+      layoutApi: painter.toolPanel,
       controlApi,
     });
     embedded.controlApi = controlApi;

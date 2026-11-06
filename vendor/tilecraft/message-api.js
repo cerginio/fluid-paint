@@ -8,6 +8,7 @@ function createMessageApi({
     role,                                 // "editor" | "gamificator" | ...
     selfId = null,                        // optional stable id for this app instance
     allowedOrigins = [],                  // if non-empty, only accept messages from these origins
+    strictPeerSource = false,
     targetOrigin = null,                  // required for sending (e.g., "https://example.com")
     debug = false,
     preferBinary = "arraybuffer",         // "arraybuffer" | "base64"
@@ -39,6 +40,7 @@ function createMessageApi({
       role,
       selfId: selfId || uuid(),
       allowedOrigins,
+      strictPeerSource,
       targetOrigin,
       debug,
       preferBinary,
@@ -405,6 +407,7 @@ function createMessageApi({
         const msg = ev.data;
         if (!msg || msg.__msgapi__ !== true) return;
         if (msg.channel !== this.channel) return;
+        if (this.strictPeerSource && msg.sessionId !== this.sessionId) return;
   
         // identify peer by source window, fallback to peerId inside envelope
         const peer = this._resolvePeerFromEvent(ev, msg);
@@ -467,6 +470,7 @@ function createMessageApi({
       for (const peer of this.peers.values()) {
         if (peer.win === ev.source) return peer;
       }
+      if (this.strictPeerSource) return null;
       // fallback: if sender included peerId and we have it
       if (msg.peerId && this.peers.has(msg.peerId)) return this.peers.get(msg.peerId);
       return null;

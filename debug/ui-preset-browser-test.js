@@ -324,6 +324,25 @@ const server = http.createServer((request, response) => {
     assert.equal(await mobile.locator('#panel-extension').isVisible(), false,
       'recovery compatibility click cannot activate the extension underneath');
 
+    await configure({ mode: 'empty' });
+    await settle();
+    const delayedRecovery = await mobile.evaluate(async () => {
+      const button = document.querySelector('#panel-return');
+      const r = button.getBoundingClientRect();
+      const coordinates = { clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 };
+      for (const type of ['pointerdown', 'pointerup']) button.dispatchEvent(new PointerEvent(type,
+        { ...coordinates, pointerId: 991, pointerType: 'touch', isPrimary: true, button: 0, bubbles: true }));
+      await new Promise(requestAnimationFrame);
+      await new Promise(requestAnimationFrame);
+      const lateClick = new MouseEvent('click', { ...coordinates, detail: 1, bubbles: true, cancelable: true });
+      const target = document.elementFromPoint(coordinates.clientX, coordinates.clientY);
+      target.dispatchEvent(lateClick);
+      return { prevented: lateClick.defaultPrevented, target: target.id };
+    });
+    assert.equal(delayedRecovery.prevented, true, 'late compatibility click is consumed even after recovery RAF');
+    assert.equal(await mobile.locator('#panel-extension').isVisible(), false);
+    results.input.delayedRecoveryClick = delayedRecovery;
+
     await mobile.tap('#panel-grip');
     await settle();
     assert.equal((await measure()).collapsed, 'false', 'a touch after return expands the body');
