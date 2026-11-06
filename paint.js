@@ -577,10 +577,14 @@ class Paint {
         // the bottom-left and owns the device pixel ratio in Viewport, so every
         // coordinate crosses through _toScreen() below and nothing downstream
         // sees a dispatcher coordinate directly. Adapting at the boundary is
-        // what keeps the vendored file all but untouched: it carries exactly one
-        // local patch, marked LOCAL PATCH in the file and recorded in
-        // docs/UI-COMPONENTS.md.
-        this.pointerDispatcher = new PointerDispatcher(canvas);
+        // Local dispatcher patches (coalescing and touch cancellation/hold)
+        // are documented in docs/UI-COMPONENTS.md.
+        this.pointerDispatcher = new PointerDispatcher(canvas, { cancelOnMultitouch: true });
+        this.resizeIndicator = document.createElement('div');
+        this.resizeIndicator.id = 'resize-hold-indicator';
+        this.resizeIndicator.hidden = true;
+        this.resizeIndicator.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(this.resizeIndicator);
         canvas.addEventListener('pointerdown', (event) => {
             if (!event.altKey || event.button !== 0 || event.pointerType !== 'mouse') return;
             event.preventDefault();
@@ -594,6 +598,12 @@ class Paint {
             .on('panstart', this.onGestureStart)
             .on('pan', this.onGesturePan)
             .on('panend', this.onGestureEnd)
+            .on('pancancel', this.onGestureCancel)
+            .on('hold', this.onResizeHold)
+            .on('holdcancel', () => {
+                if (this.interactionState === InteractionMode.RESIZE_PENDING) this.onGestureCancel();
+            })
+            .on('holdend', event => { if (event.reason !== 'up') this.onGestureCancel(); })
             .on('cursormove', this.onGestureHover)
             .on('pan2', this.onGesturePan2)
             .on('pan2end', this.onGestureEnd)
@@ -607,6 +617,10 @@ class Paint {
             if (e.repeat) return; // ignore auto-repeats if you want single-fire actions
 
             switch (e.code) {
+                case 'Escape':
+                    this.onGestureCancel();
+                    this.pointerDispatcher._cancelHold('escape');
+                    break;
                 case 'Space':
                     this.spaceDown = true;
                     e.preventDefault(); // stop page scroll
@@ -794,7 +808,7 @@ class Paint {
         const maxScale = FluidEngine.maxResolutionScaleForBudget(
             this.paintingRectangle.width,
             this.paintingRectangle.height,
-            HISTORY_SIZE,
+            HISTORY_SIZE + 7, // reserve the transient touch rollback targets
             budget
         );
 
@@ -1043,7 +1057,7 @@ class Paint {
             if (desiredMode === InteractionMode.PAINTING) {
                 desiredCursor = 'crosshair';
             } else if (desiredMode === InteractionMode.RESIZING) {
-                desiredCursor = cursorForResizingSide(this.getResizingSide(this.mouseX, this.mouseY));
+                desiredCursor = 'default';
             } else if (desiredMode === InteractionMode.PANNING) {
                 desiredCursor = 'pointer';
             } else {
@@ -1631,6 +1645,8 @@ class Paint {
     }
 
     onGestureStart = async (event) => {
+        const inputSerial = this._manualInputSerial = (this._manualInputSerial || 0) + 1;
+        if (this.pointerDispatcher.navigationOnly) return;
         // Right-click collapses/expands the panel; it never starts a stroke.
         // It goes through the panel rather than setting showPanel directly, so
         // the flag stays a MIRROR of the panel's state -- setting it here too
@@ -1650,6 +1666,8 @@ class Paint {
         if (storyNeedsYield) {
             await this.storyPlaybackController.yieldToManualInput();
         }
+        if (inputSerial !== this._manualInputSerial || this.pointerDispatcher.navigationOnly ||
+            !this.manualPaintingEnabled) return;
         this._manualInputPending = false;
 
         const position = this._toWorld(event.centerX, event.centerY);
@@ -1679,13 +1697,18 @@ class Paint {
         if (mode === InteractionMode.PANNING) {
             this.interactionState = InteractionMode.PANNING;
         } else if (mode === InteractionMode.RESIZING) {
-            this.saveSnapshot();
-            this.interactionState = InteractionMode.RESIZING;
+            this.interactionState = InteractionMode.RESIZE_PENDING;
+            this._resizeSession = event.sessionId;
             this.resizingSide = this.getResizingSide(mouseX, mouseY);
             this.newPaintingRectangle = this.paintingRectangle.clone();
         } else if (mode === InteractionMode.PAINTING) {
             this.interactionState = InteractionMode.PAINTING;
-            this.saveSnapshot();
+            if (event.pointerType === 'touch') {
+                this._touchTransaction = this.engine.captureTouchTransaction();
+                this._touchRecorder = this.sessionRecorder;
+                this._touchCheckpoint = this._touchRecorder?.checkpointTouch();
+                this._recordSessionCommand({ op: 'snapshot' });
+            } else this.saveSnapshot();
         }
 
         // A live press reseeds once and deposits a contact without advancing
@@ -1747,6 +1770,7 @@ class Paint {
     }
 
     onGesturePan = (event) => {
+        if (this.pointerDispatcher.navigationOnly) return;
         if (this._manualInputPending) {
             this._queuedManualPan = event;
             return;
@@ -1786,11 +1810,68 @@ class Paint {
             const delta = this._deltaToScreen(event.dx, event.dy);
             this._panView(delta.x, delta.y);
         } else if (this.interactionState === InteractionMode.RESIZING) {
-            this._resizePaintingTo(mx, my);
+            this._resizePaintingTo(mx + this._resizeOffset.x, my + this._resizeOffset.y);
+            this._positionResizeIndicator(event);
         }
 
         this.mouseX = mx;
         this.mouseY = my;
+    };
+
+    _positionResizeIndicator(event) {
+        const rect = this.canvas.getBoundingClientRect();
+        const x = rect.left + event.centerX * rect.width / this.canvas.width;
+        const y = rect.top + event.centerY * rect.height / this.canvas.height;
+        const visible = window.visualViewport;
+        const left = visible?.offsetLeft || 0, top = visible?.offsetTop || 0;
+        const width = visible?.width || window.innerWidth;
+        const height = visible?.height || window.innerHeight;
+        this.resizeIndicator.style.left = `${Utilities.clamp(x, left + 26, left + width - 26)}px`;
+        this.resizeIndicator.style.top = `${Utilities.clamp(y, top + 72, top + height - 4)}px`;
+    }
+
+    onResizeHold = (event) => {
+        if (this.interactionState !== InteractionMode.RESIZE_PENDING ||
+            event.sessionId !== this._resizeSession || this.pointerDispatcher.navigationOnly ||
+            this.pointerDispatcher.pointers.size !== 1) return;
+        const p = this._toWorld(event.centerX, event.centerY);
+        const r = this.paintingRectangle, side = this.resizingSide;
+        this._resizeOffset = {
+            x: ([ResizingSide.LEFT, ResizingSide.TOP_LEFT, ResizingSide.BOTTOM_LEFT].includes(side)
+                ? r.left : r.getRight()) - p.x,
+            y: ([ResizingSide.BOTTOM, ResizingSide.BOTTOM_LEFT, ResizingSide.BOTTOM_RIGHT].includes(side)
+                ? r.bottom : r.getTop()) - p.y,
+        };
+        this.interactionState = InteractionMode.RESIZING;
+        this.resizeIndicator.textContent = side === ResizingSide.TOP || side === ResizingSide.BOTTOM
+            ? '↕' : side === ResizingSide.LEFT || side === ResizingSide.RIGHT ? '↔' : '⤢';
+        this.resizeIndicator.hidden = false;
+        this._positionResizeIndicator(event);
+        this.needsRedraw = true;
+    };
+
+    onGestureCancel = () => {
+        this._manualInputSerial = (this._manualInputSerial || 0) + 1;
+        this._manualInputPending = false;
+        this._queuedManualPan = this._queuedManualEnd = null;
+        if (this._touchTransaction) {
+            this.engine.finishTouchTransaction(this._touchTransaction, true);
+            this._touchTransaction = null;
+            (this._touchRecorder || this.sessionRecorder)?.rollbackTouch(this._touchCheckpoint);
+            this._touchRecorder = this._touchCheckpoint = null;
+            this.manualStrokeActive = false;
+        } else if (this.manualStrokeActive) {
+            this.engine.endStroke();
+            this.manualStrokeActive = false;
+        }
+        this.interactionState = InteractionMode.NONE;
+        this.newPaintingRectangle = this.paintingRectangle.clone();
+        this.resizeIndicator.hidden = true;
+        this.needsRedraw = true;
+        if (this._manualPaintingDisablePending) {
+            this.manualPaintingEnabled = false;
+            this._manualPaintingDisablePending = false;
+        }
     };
 
     /** Two-finger drag pans the canvas, whatever the one-finger mode was. */
@@ -1878,6 +1959,15 @@ class Paint {
         if (this.manualStrokeActive) {
             try {
                 if (this.engine.strokeActive) {
+                    if (this._touchTransaction) {
+                        // Commit PRE-stroke paint only now; cancellation leaves
+                        // the history ring and redo chain untouched.
+                        this._saveSnapshot();
+                        const snapshot = this.snapshots[this.snapshotIndex - 1];
+                        const t = this._touchTransaction;
+                        this.engine.simulator.copyTexture(t.width, t.height,
+                            t.textures.paintTexture, snapshot.texture);
+                    }
                     if (Number.isFinite(event.centerX) && Number.isFinite(event.centerY)) {
                         const p = this._toWorld(event.centerX, event.centerY);
                         this.brushX = p.x; this.brushY = p.y;
@@ -1887,6 +1977,11 @@ class Paint {
                     this.needsRedraw = true;
                 }
             } finally {
+                if (this._touchTransaction) {
+                    this.engine.finishTouchTransaction(this._touchTransaction);
+                    this._touchTransaction = null;
+                    this._touchRecorder = this._touchCheckpoint = null;
+                }
                 this.manualStrokeActive = false;
                 if (this._manualPaintingDisablePending) {
                     this.manualPaintingEnabled = false;
@@ -1900,10 +1995,15 @@ class Paint {
         this.pinchStartViewScale = null;
 
         if (this.interactionState === InteractionMode.RESIZING) {
+            if (Number.isFinite(event.centerX) && Number.isFinite(event.centerY)) {
+                const p = this._toWorld(event.centerX, event.centerY);
+                this._resizePaintingTo(p.x + this._resizeOffset.x, p.y + this._resizeOffset.y);
+            }
             this._commitResize();
         }
 
         this.interactionState = InteractionMode.NONE;
+        this.resizeIndicator.hidden = true;
     };
 
     /** Shared by one-finger PANNING and two-finger pan2; screen-space camera pan. */
@@ -1979,7 +2079,9 @@ class Paint {
             this.newPaintingRectangle.bottom !== this.paintingRectangle.bottom ||
             this.newPaintingRectangle.width !== this.paintingRectangle.width ||
             this.newPaintingRectangle.height !== this.paintingRectangle.height;
-        if (resized) this.interruptSessionRecording('resize');
+        if (!resized) return;
+        this.saveSnapshot();
+        this.interruptSessionRecording('resize');
 
         let offsetX = 0,
             offsetY = 0;

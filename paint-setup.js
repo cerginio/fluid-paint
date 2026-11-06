@@ -2,7 +2,8 @@ const InteractionMode = {
     NONE: 0,
     PAINTING: 1,
     RESIZING: 2,
-    PANNING: 3
+    PANNING: 3,
+    RESIZE_PENDING: 4
 };
 
 const PaintState = {

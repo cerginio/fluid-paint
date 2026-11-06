@@ -151,6 +151,25 @@ function flatTicks(records) {
     assert.deepEqual(flatTicks(decoded.records), expected);
   });
 
+  await check('recorder: cancelled touch rewinds records/ticks even across blocks and Stop', async () => {
+    for (const stopping of [false,true]) {
+      const e=new FakeEngine(), r=newRecorder(e,{blockTicks:2});
+      r.start({bristleSeed:7,prepare:()=>({})});
+      e.begin(strokeParams(10,10));e.tick(11,11,5);e.end();e.idle(2);
+      const checkpoint=r.checkpointTouch();
+      r.command({op:'snapshot'});e.begin(strokeParams(40,40));
+      for(let i=0;i<7;i++)e.tick(40+i,40,5);
+      if(stopping)r.stop();
+      e.strokeActive=false;r.rollbackTouch(checkpoint);
+      if(!stopping)r.stop();
+      const session=await SessionCodec.decode(await SessionCodec.encode(r.toSession()));
+      assert.equal(session.records.filter(x=>x.type==='begin').length,1);
+      assert.equal(session.records.filter(x=>x.type==='command').length,0);
+      assert.equal(session.header.stats.ticks,1);assert.equal(session.header.stats.strokes,1);
+      assert.equal(session.header.stats.idleTicks,2);
+    }
+  });
+
   await check('recorder: Record mid-stroke starts after that stroke; Stop mid-stroke waits for its end', async () => {
     const engine = new FakeEngine();
     engine.begin(strokeParams(10, 10));

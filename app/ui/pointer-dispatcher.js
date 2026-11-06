@@ -7,6 +7,8 @@ class PointerDispatcher {
         this.sessionId = 0;
         this.opts = {
             capture: true,
+            cancelOnMultitouch: false, // opt-in: do not change upstream consumers
+
             // double tap
             tapMaxMove: 50,
             tapMaxDuration: 300,
@@ -67,6 +69,7 @@ class PointerDispatcher {
         el.addEventListener('pointermove', this._move, { passive: false });
         el.addEventListener('pointerup', this._up, { passive: true });
         el.addEventListener('pointercancel', this._up, { passive: true });
+        el.addEventListener('lostpointercapture', this._up, { passive: true });
 
         // Anything that can move or resize the element invalidates the cached rect.
         window.addEventListener('scroll', this.invalidateRect, { passive: true, capture: true });
@@ -120,7 +123,7 @@ class PointerDispatcher {
         const { x, y } = this._toCanvasCoords(e);
         if (isNaN(x) || isNaN(y)) throw 'Canvas Coords is NaN';
 
-        return { x, y, startX: x, startY: y, pressure: e.pressure, pointerId: e.pointerId, pointerType: e.pointerType, button: e.button };
+        return { x, y, clientX: e.clientX, clientY: e.clientY, startX: x, startY: y, pressure: e.pressure, pointerId: e.pointerId, pointerType: e.pointerType, button: e.button };
     };
 
     // to Array
@@ -143,7 +146,7 @@ class PointerDispatcher {
 
         this.travelDistance = 0;
 
-        if (this.opts.capture && (e.pointerType === 'touch') && this.pointers.size > 1) {
+        if (this.opts.capture && (e.pointerType === 'touch')) {
             this.el.setPointerCapture?.(e.pointerId);
         }
 
@@ -164,7 +167,14 @@ class PointerDispatcher {
         }
         if (n === 2 && wasN !== 2) {
             // if we were panning with 1 finger, end it now
-            if (this._active.pan) this._emitPanEnd(e.pointerType, prevCenter);
+            if (this.opts.cancelOnMultitouch &&
+                [...this.pointers.values()].filter(p => p.pointerType === 'touch').length >= 2) {
+                this.navigationOnly = true;
+                this._pending.pan = null;
+                this._active.pan = false;
+                this._vel.pan.length = 0;
+                this.emit('pancancel', { type: 'pancancel', reason: 'multitouch', pointerType: e.pointerType });
+            } else if (this._active.pan) this._emitPanEnd(e.pointerType, prevCenter);
             this._beginTwoFinger(e.pointerType);
         }
         if (n === 3 && wasN !== 3) {
@@ -190,6 +200,15 @@ class PointerDispatcher {
     };
 
     _up = e => {
+        if (!this.pointers.has(e.pointerId)) return;
+        const cancelled = e.type !== 'pointerup';
+        if (cancelled && this.opts.cancelOnMultitouch) {
+            this._pending.pan = null;
+            this._active.pan = false;
+            this.doubleTapCandidate = null;
+            this._swipeCanceled = true;
+            this.emit('pancancel', { type: 'pancancel', reason: e.type, pointerType: e.pointerType });
+        }
         const prevN = this.pointers.size;
         // pointerup may contain a newer endpoint than the last pointermove.
         // Do not manufacture movement for cancellation events.
@@ -203,7 +222,7 @@ class PointerDispatcher {
         // hold: end or cancel on pointer up/cancel
         if (this._hold && this._hold.pointerId === e.pointerId) {
             if (this._hold.active)
-                this._emitHoldEnd('up');
+                this._emitHoldEnd(cancelled ? 'cancel' : 'up');
             else
                 this._cancelHold('up');
         }
@@ -255,6 +274,8 @@ class PointerDispatcher {
         if (n === 0) {
             this._swipeStart = null;
             this._swipeCanceled = false;
+            this.navigationOnly = false;
+            this._pending = { pan: null, pan2: null, pinch: null, rotate2: null, rotate3: null };
             this.sessionId++;
         }
 
@@ -379,7 +400,7 @@ class PointerDispatcher {
             }
 
 
-            if ((dx || dy) && n === 1) {
+            if ((dx || dy) && n === 1 && !this.navigationOnly) {
                 this._deferPan(dx, dy, {
                     centerX: c.x,
                     centerY: c.y,
@@ -594,17 +615,18 @@ class PointerDispatcher {
     _startHold = (pt) => {
         if (this.opts.holdDelay <= 0) return;
         this._cancelHold();
-        this._hold = {
+        const hold = this._hold = {
             t0: performance.now(), x0: pt.x, y0: pt.y,
+            cssX0: pt.clientX, cssY0: pt.clientY,
             pointerId: pt.pointerId, pointerType: pt.pointerType, button: pt.button,
             active: false, maxDrift: 0,
             timer: setTimeout(() => {
                 const H = this._hold;
-                if (!H) return;
+                if (!H || H !== hold) return;
                 if (this.pointers.size !== 1) return this._cancelHold('multitouch');
                 const p = this.pointers.get(H.pointerId);
                 if (!p) return this._cancelHold('gone');
-                const drift = this._distance({ x: H.x0, y: H.y0 }, p);
+                const drift = Math.hypot(p.clientX - H.cssX0, p.clientY - H.cssY0);
                 H.maxDrift = Math.max(H.maxDrift, drift);
                 if (drift <= this.opts.holdMoveTolerance) {
                     H.active = true;
@@ -658,6 +680,7 @@ class PointerDispatcher {
         clearTimeout(H.timer);
         if (H.interval) clearInterval(H.interval);
         this._hold = null;
+        this.emit('holdcancel', { type: 'holdcancel', reason });
     };
 
 
@@ -667,12 +690,12 @@ class PointerDispatcher {
         if (this.pointers.size !== 1) return this._cancelHold('multitouch');
         const p = this.pointers.get(H.pointerId);
         if (!p) return this._cancelHold('gone');
-        const drift = this._distance({ x: H.x0, y: H.y0 }, p);
+        const drift = Math.hypot(p.clientX - H.cssX0, p.clientY - H.cssY0);
         H.maxDrift = Math.max(H.maxDrift, drift);
         if (!H.active) {
             if (drift > this.opts.holdMoveTolerance) this._cancelHold('moved');
         } else {
-            if (drift > this.opts.holdMoveTolerance) this._emitHoldEnd('moved');
+            // Once activated, the consumer owns the hold-drag until release.
         }
     };
 

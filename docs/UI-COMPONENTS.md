@@ -32,7 +32,14 @@ handlers in `paint.js`.
 
 ### Changes from upstream
 
-**One patch**, marked `LOCAL PATCH` in the file:
+**Local patches:** coalesced-input fallback below, plus MU-2G's opt-in
+`cancelOnMultitouch` cancellation/all-up latch, capture-loss cleanup and
+pending-frame purge. Hold drift uses client CSS pixels (not backing pixels);
+activated hold remains owned until release so the app can hold-drag resize.
+`holdcancel` reports an abandoned pending hold. These changes are local to
+Fluid Paint; no upstream Tilecraft dispatcher sync is implied.
+
+**Coalesced-input fallback**, marked `LOCAL PATCH` in the file:
 
 `_move()` treated the mere *existence* of `getCoalescedEvents` as proof it
 would return samples:

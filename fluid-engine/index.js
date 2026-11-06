@@ -927,6 +927,50 @@ class FluidEngine {
     else this.simulator.clear();
   }
 
+  // Short-lived manual touch state, separate from the undo ring. Include
+  // dynamics: paint-only rollback leaves the cancelled stroke's flow behind.
+  captureTouchTransaction() {
+    this._assertNoStroke('captureTouchTransaction()');
+    const s = this.simulator, w = this.wgl;
+    const names = ['paintTexture', 'paintTextureTemp', 'velocityTexture',
+      'velocityTextureTemp', 'divergenceTexture', 'pressureTexture', 'pressureTextureTemp'];
+    const textures = {};
+    try {
+      for (const name of names) {
+        textures[name] = w.buildTexture(w.RGBA,
+          name.startsWith('paint') ? s.paintTextureType : s.simulationTextureType,
+          s.resolutionWidth, s.resolutionHeight, null,
+          w.CLAMP_TO_EDGE, w.CLAMP_TO_EDGE, w.NEAREST, w.NEAREST);
+        s.copyTexture(s.resolutionWidth, s.resolutionHeight, s[name], textures[name]);
+      }
+    } catch (error) {
+      for (const texture of Object.values(textures)) w.deleteTexture(texture);
+      throw error;
+    }
+    return { textures, width: s.resolutionWidth, height: s.resolutionHeight,
+      frameNumber: s.frameNumber,
+      splatAreas: s.splatAreas.map(a => new SplatArea(a.rectangle.clone(), a.frameNumber)) };
+  }
+
+  finishTouchTransaction(transaction, cancel = false) {
+    const s = this.simulator;
+    try {
+      if (cancel) {
+        // No final contact or onEndStroke: the recorder rolls back too.
+        this._stroke = null;
+        this._liveTarget = this._previousLiveTarget = undefined;
+        for (const [name, texture] of Object.entries(transaction.textures)) {
+          s.copyTexture(transaction.width, transaction.height, texture, s[name]);
+        }
+        s.frameNumber = transaction.frameNumber;
+        s.splatAreas = transaction.splatAreas;
+        this.resetClock();
+      }
+    } finally {
+      for (const texture of Object.values(transaction.textures)) this.wgl.deleteTexture(texture);
+    }
+  }
+
   // --- Snapshots --------------------------------------------------------
   //
   // The engine produces and reloads snapshots; it keeps no history stack.

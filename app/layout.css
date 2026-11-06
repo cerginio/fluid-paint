@@ -1,3 +1,19 @@
+#resize-hold-indicator {
+  position: fixed;
+  z-index: 50;
+  pointer-events: none;
+  transform: translate(-50%, -140%);
+  min-width: 44px;
+  height: 44px;
+  border: 2px solid white;
+  border-radius: 12px;
+  background: #202630;
+  color: white;
+  text-align: center;
+  font: bold 30px/44px sans-serif;
+}
+#resize-hold-indicator[hidden] { display: none; }
+
 /* Self-hosted Open Sans: Fontsource 5.3.0 / SIL OFL 1.1. */
 @font-face {
   font-family: 'Open Sans';

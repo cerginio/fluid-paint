@@ -123,4 +123,31 @@ for(const path of paths) path.forEach((x,i)=>assert.ok(Math.abs(x-paths[0][i])<1
  assert.throws(()=>e.reseedBristleRandoms(-1),{name:'RangeError'});
  assert.throws(()=>e.reseedBristleRandoms(2**32),{name:'RangeError'});
 }
-console.log('live timing: PASS (hold, 30/60/144 Hz, bounded burst, cursor, endpoint, tap, overload, repeated resume, stepTick, session observer, replay)');
+// Dispatcher state checks use deterministic timers; GPU/input coverage lives
+// in live-gpu-test.js. Coordinates deliberately have a 2x backing/CSS ratio.
+{
+ const timers=new Map();let next=0;
+ const c=vm.createContext({performance:{now:()=>0},window:{addEventListener(){}},
+  requestAnimationFrame:()=>{},setTimeout:fn=>{timers.set(++next,fn);return next;},
+  clearTimeout:id=>timers.delete(id),setInterval:()=>++next,clearInterval(){}});
+ vm.runInContext(fs.readFileSync('app/ui/pointer-dispatcher.js','utf8')+';globalThis.Dispatcher=PointerDispatcher',c);
+ const d=new c.Dispatcher({width:200,height:200,addEventListener(){},setPointerCapture(){},
+  getBoundingClientRect:()=>({left:0,top:0,width:100,height:100})},{cancelOnMultitouch:true});
+ const logs=[];for(const name of ['panstart','panend','pancancel','hold','holdcancel'])d.on(name,e=>logs.push([name,e.reason]));
+ const ev=(id,x=20,type='pointerdown')=>({pointerId:id,pointerType:'touch',clientX:x,clientY:20,pressure:.5,button:0,type,preventDefault(){}});
+ d._down(ev(1));d._processMoveSample(ev(1,26));
+ assert.ok(d._hold,'6 CSS px stays within 8px even at backing ratio 2');
+ timers.get(d._hold.timer)();assert.equal(d._hold.active,true);
+ d._processMoveSample(ev(1,40));assert.equal(d._hold.active,true,'activated hold permits drag');
+ d._down(ev(2));assert.equal(d.navigationOnly,true);assert.equal(d._pending.pan,null);
+ assert.equal(logs.filter(e=>e[0]==='panend').length,0,'promotion cancels, never commits');
+ d._down(ev(3));d._up(ev(3,20,'pointerup'));d._up(ev(2,20,'pointerup'));
+ d._processMoveSample(ev(1,60));assert.equal(d._pending.pan,null,'3→2→1 remains navigation only');
+ d._up(ev(1,60,'pointerup'));assert.equal(d.navigationOnly,false);
+ d._down(ev(4));d._up(ev(4,20,'lostpointercapture'));
+ assert.equal(d.pointers.size,0);assert.equal(d._hold,null);
+ d._down(ev(5));d._processMoveSample(ev(5,29));assert.equal(d._hold,null,'9 CSS px abandons pending hold');
+ d._up(ev(5,29,'pointerup'));
+ assert.equal(logs.filter(e=>e[0]==='panstart').length,3);
+}
+console.log('live timing: PASS (clock, observer/replay, touch latch/cancel, CSS hold tolerance and hold-drag)');

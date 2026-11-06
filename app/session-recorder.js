@@ -107,6 +107,32 @@ class SessionRecorder {
     this.state = 'recording';
   }
 
+  // Rewind a tentative touch stroke without a public Undo in the recording.
+  checkpointTouch() {
+    if (this.state !== 'recording') return null;
+    return { length: this.records.length, ticks: this._tickCount,
+      strokeStart: this._strokeStart, pendingIdle: this._pendingIdle,
+      strokes: this.strokes, idleTicks: this.idleTicks,
+      fluidity: this._lastFluidity, bristles: this._lastBristleCount };
+  }
+
+  rollbackTouch(checkpoint) {
+    if (!checkpoint) {
+      if (this.state === 'waiting') this._observer.onEndStroke();
+      return;
+    }
+    this.records.length = checkpoint.length;
+    this._tickCount = checkpoint.ticks;
+    this._strokeStart = checkpoint.strokeStart;
+    this._pendingIdle = checkpoint.pendingIdle;
+    this.strokes = checkpoint.strokes;
+    this.idleTicks = checkpoint.idleTicks;
+    this._lastFluidity = checkpoint.fluidity;
+    this._lastBristleCount = checkpoint.bristles;
+    this._inStroke = false;
+    if (this.state === 'stopping') this._finish();
+  }
+
   /** An application command (Paint): undo, redo, clear, bake, ... */
   command(command) {
     if (this.state !== 'recording' && this.state !== 'stopping') return;

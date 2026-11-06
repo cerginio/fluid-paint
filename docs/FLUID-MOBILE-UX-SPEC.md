@@ -1,6 +1,6 @@
 # Fluid Play / Rescript — мобільні панелі обох репозиторіїв
 
-Статус: MU-1 follow-up та MU-2 прийнято й закрито власником через `handoff:next` 2026-11-06; source/build native і жива пара eval PASS. Прийнятий раніше anchor/disclosure/chevron не перевідкривається, старий return→extension FAIL не поточний gate. MU-2G/MU-3 ще не реалізовано; deploy не виконано. Код і closure-документи входять у closing commits. Фактичні результати та докази — у канонічному HANDOFF.
+Статус: MU-1 follow-up, MU-2 та MU-2G прийнято й закрито власником через `handoff:next` 2026-11-06. Прийнятий anchor/disclosure/chevron не перевідкривається; старий return→extension FAIL не поточний gate. MU-2G focused state/codec/GPU eval PASS; код входить у closing commit. MU-3 не розпочато. Fluid production та Tilecraft dev опубліковано за окремим дозволом, failed PWA activation gate явно прийнято як release risk, не як PASS. Результати, deploy IDs, resource trade-off і retained physical/replay debt — у канонічному HANDOFF.
 Тема: **існуюча `fluid`**, не нова тема і не перевідкриття завершених `fluid-2` A–C.
 Канонічний план: [HANDOFF теми fluid](../../../js-games/ua-dream/docs/spec/fluid-paint/HANDOFF.md), фази MU-1…MU-3.
 Команда власника `Handoff continue fluid` дозволила реалізацію MU-1. Це не приймання QA, дозвіл на commit/deploy або автоматичний перехід до наступної фази.
@@ -206,7 +206,7 @@ Collapsed стан має знати напрямок **до** першого в
 12. Відомий 26 px/cycle дефект не відтворюється через реальні grip-click з очікуванням observer settlement. Візуальні screenshots до/після, source revisions та command results збережені.
 13. Окремо physical Android Galaxy A56 і iPhone/Safari — human QA. Chromium емуляція не закриває це покриття; якщо пристрою немає, явно залишити debt, не оголошувати PASS.
 
-### Жести — MU-2G (ще не виконано)
+### Жести — MU-2G (реалізовано; focused eval PASS, прийнято власником)
 
 14. Другий touch після first-down без руху, після короткого мазка та після кількох simulation frames: скасований мазок відсутній у матеріалі/експорті, попередні strokes цілі. Порівняння GPU/material робити з контрольованим clock або paired baseline, щоб природна fluid evolution не маскувала/імітувала rollback.
 15. У 2→1 та 3→2→1 рух залишкового пальця не малює; після 0→1 новий мазок працює. Cancel/capture-loss та queued/async events не залишають ghost strokes або permanent lock.
