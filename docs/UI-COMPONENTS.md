@@ -1,5 +1,12 @@
 # Vendored UI components
 
+## Project-authored panel icons
+
+The inline grip (six circles) and return arrow in `index.html` are authored
+for this project (MIT); no external icon pack, font, or network asset is used.
+The disclosure chevron is CSS in `#panel-grip::after`, not a separate control.
+
+
 What was vendored, from where, at what version, and what was changed.
 
 Started in Phase 6 with the pointer dispatcher; `lib/iro.js` arrived in Phase 8.

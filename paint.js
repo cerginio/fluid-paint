@@ -691,6 +691,8 @@ class Paint {
             ? new ToolPanel({
                 root: panelRoot,
                 grip: document.getElementById('panel-grip'),
+                returnButton: document.getElementById('panel-return'),
+                uiApi: window.__fluidUiPresetApi,
                 hueStripe: document.getElementById('bar-hue-stripe'),
                 extension: document.getElementById('panel-extension'),
                 extensionGrip: document.getElementById('panel-extension-grip'),

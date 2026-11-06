@@ -160,10 +160,12 @@ class ColorControl {
     const rect = this.element.getBoundingClientRect();
     // Before first layout the slot can measure 0, and a 0-width wheel is
     // invisible rather than an error -- so fall back rather than trust it.
-    return rect.width > 0 ? Math.round(rect.width) : DEFAULT_PICKER_WIDTH;
+    if (rect.width > 0) this._lastWidth = Math.round(rect.width);
+    return this._lastWidth || DEFAULT_PICKER_WIDTH;
   }
 
   _resize() {
+    if (this.element.getBoundingClientRect().width <= 0) return;
     const width = this._measureWidth();
     if (this.element.parentElement) {
       this.element.parentElement.style.setProperty('--picker-wheel-size', width + 'px');

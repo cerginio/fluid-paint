@@ -32,6 +32,16 @@ class ToolPanel {
     this.extensionToggle = options.extensionToggle || null;
     this.extensionClose = options.extensionClose || null;
     this.onExtensionClose = options.onExtensionClose || (() => {});
+    this.returnButton = options.returnButton || null;
+    this.uiApi = options.uiApi || null;
+    this._lastUiConfig = null;
+    this._desiredAnchor = null;
+    this._bottomAnchored = window.parent !== window ||
+      (!!this.uiApi && this.uiApi.getConfig().mode !== 'full');
+    this._layoutFrame = null;
+    this._returnFrame = null;
+    this._listeners = [];
+    this._destroyed = false;
     this.extensionTabs = [];
     this.extensionPages = [];
 
@@ -48,25 +58,79 @@ class ToolPanel {
     this._installDrag();
     this._installHueStripe();
     this._installExtension();
-    this._extensionResizeObserver = this.extension && typeof ResizeObserver === 'function'
-      ? new ResizeObserver(() => requestAnimationFrame(() => this._placeExtension())) : null;
-    if (this._extensionResizeObserver) this._extensionResizeObserver.observe(this.extension);
+    this._layoutObserver = typeof ResizeObserver === 'function'
+      ? new ResizeObserver(() => this._scheduleLayout()) : null;
+    for (const element of [this.root, this.bar, this.extension]) {
+      if (element) this._layoutObserver?.observe(element);
+    }
     this._onFluidUiLayoutChanged = () => this.refreshFluidUi();
     document.addEventListener('fluid-ui-layout-changed', this._onFluidUiLayoutChanged);
-
-    // Start compact on every device. The bar keeps the high-frequency paint
-    // controls available, while the extension can still be opened independently
-    // for the rest of the workflow.
-    this.setCollapsed(true);
-
-    // Keep the panel on screen when the window changes. A panel dragged to the
-    // right edge in landscape is entirely off screen in portrait, and with no
-    // grip reachable there is no way back -- the user would have to reload.
-    this._onWindowResize = () => {
-      this.clampIntoView();
-      requestAnimationFrame(() => this._placeExtension());
-    };
+    this._onWindowResize = () => this._scheduleLayout();
     window.addEventListener('resize', this._onWindowResize);
+    this._visualViewport = window.visualViewport;
+    this._visualViewport?.addEventListener('resize', this._onWindowResize);
+    this._visualViewport?.addEventListener('scroll', this._onWindowResize);
+    if (this.uiApi) {
+      const onUiState = (state) => {
+        if (state.resolvedFeatures.length) this._lastUiConfig = state.config;
+        this._scheduleLayout();
+      };
+      onUiState(this.uiApi.getState());
+      this._unsubscribeUi = this.uiApi.subscribe(onUiState);
+    }
+    if (this.returnButton) {
+      this._onReturn = async () => {
+        this.returnButton.disabled = true;
+        try {
+          this._bottomAnchored = true;
+          this._desiredAnchor = null;
+          if (this.root.hidden && this._lastUiConfig) await this.uiApi.configure(this._lastUiConfig);
+          this._layout();
+          this.grip.focus({ preventScroll: true });
+        } catch (error) {
+          console.error('Could not restore tools:', error);
+        } finally {
+          this.returnButton.disabled = false;
+        }
+      };
+      this._onReturnClick = (event) => {
+        if (event.detail === 0) this._onReturn();
+      };
+      this.returnButton.addEventListener('click', this._onReturnClick);
+      let returnPress = null;
+      const returnDown = (event) => {
+        if (event.button !== 0 || event.isPrimary === false || returnPress) return;
+        event.preventDefault();
+        returnPress = { id: event.pointerId, x: event.clientX, y: event.clientY };
+        try { this.returnButton.setPointerCapture(event.pointerId); } catch (_) { /* synthetic pointer */ }
+      };
+      const returnEnd = (event) => {
+        if (returnPress?.id !== event.pointerId) return;
+        const press = returnPress;
+        returnPress = null;
+        try { this.returnButton.releasePointerCapture(event.pointerId); } catch (_) { /* capture lost */ }
+        if (event.type === 'pointerup' && Math.hypot(event.clientX - press.x, event.clientY - press.y) <= 8) {
+          // Keep the target mounted until the compatibility click is routed.
+          this._returnFrame = requestAnimationFrame(() => {
+            this._returnFrame = null;
+            if (!this._destroyed) this._onReturn();
+          });
+        }
+      };
+      for (const [type, handler] of [['pointerdown', returnDown], ['pointerup', returnEnd],
+        ['pointercancel', returnEnd], ['lostpointercapture', returnEnd]]) {
+        this.returnButton.addEventListener(type, handler);
+        this._listeners.push(() => this.returnButton.removeEventListener(type, handler));
+      }
+      this._onReturnKey = (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (!event.repeat) this.returnButton.click();
+      };
+      this.returnButton.addEventListener('keydown', this._onReturnKey);
+    }
+    this.setCollapsed(true);
   }
 
   // --- collapse -------------------------------------------------------------
@@ -76,12 +140,12 @@ class ToolPanel {
   }
 
   setCollapsed(collapsed) {
-    const barTop = this._barTop();
     this.root.setAttribute('data-collapsed', collapsed ? 'true' : 'false');
-    // The body is hidden by CSS; the panel's height changes, so a panel pinned
-    // near the bottom edge could end up mostly off screen when it expands.
-    this.moveTo(this.root.getBoundingClientRect().left, barTop);
-    this.onLayoutChange();
+    this.grip.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    const label = (collapsed ? 'Expand' : 'Collapse') + ' tools; drag to move';
+    this.grip.setAttribute('aria-label', label);
+    this.grip.title = label;
+    this._layout();
   }
 
   toggleCollapsed() {
@@ -102,6 +166,19 @@ class ToolPanel {
 
   _installDrag() {
     this._installDragTarget(this.grip, () => this.toggleCollapsed());
+    this._onGripClick = (event) => {
+      if (event.detail > 0) return;
+      this.toggleCollapsed();
+    };
+    this.grip.addEventListener('click', this._onGripClick);
+    this._onGripKey = (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!event.repeat) this.toggleCollapsed();
+    };
+    this.grip.addEventListener('keydown', this._onGripKey);
+    this._listeners.push(() => this.grip.removeEventListener('keydown', this._onGripKey));
     this._installDragTarget(this.extensionGrip, () => this.toggleExtensionCollapsed());
     if (this.extensionGrip) {
       this.extensionGrip.addEventListener('keydown', (event) => {
@@ -115,11 +192,18 @@ class ToolPanel {
   _installDragTarget(grip, onTap) {
     if (!grip) return;
 
-    grip.addEventListener('pointerdown', (event) => {
+    const listen = (type, handler) => {
+      grip.addEventListener(type, handler);
+      this._listeners.push(() => grip.removeEventListener(type, handler));
+    };
+    listen('pointerdown', (event) => {
       // Only the primary button/contact drags; a second finger landing on the
       // grip mid-drag must not retarget the panel.
-      if (this._dragPointerId !== null) return;
+      if (this._dragPointerId !== null || event.button !== 0 || event.isPrimary === false) return;
       event.preventDefault();
+      if (grip === this.grip) {
+        grip.focus({ preventScroll: true });
+      }
 
       const rect = this.root.getBoundingClientRect();
       const barRect = this.bar.getBoundingClientRect();
@@ -136,7 +220,7 @@ class ToolPanel {
       try { grip.setPointerCapture(event.pointerId); } catch (e) { /* synthetic ids throw */ }
     });
 
-    grip.addEventListener('pointermove', (event) => {
+    listen('pointermove', (event) => {
       if (event.pointerId !== this._dragPointerId || this._dragGrip !== grip) return;
       event.preventDefault();
 
@@ -166,58 +250,98 @@ class ToolPanel {
       const tap = this._dragTap;
       this._dragGrip = null;
       this._dragTap = null;
-      if (!this._dragMoved && tap) tap();
+      const canceled = event.type !== 'pointerup';
+      if (!this._dragMoved && !canceled && tap) tap();
     };
 
-    grip.addEventListener('pointerup', endDrag);
-    grip.addEventListener('pointercancel', endDrag);
+    listen('pointerup', endDrag);
+    listen('pointercancel', endDrag);
+    listen('lostpointercapture', endDrag);
   }
 
-  /** Move the panel by its header coordinate, keeping that header reachable. */
+  /** Move the desired bar anchor, never the transient root/body bounds. */
   moveTo(left, barTop) {
-    const barHeight = this.bar.getBoundingClientRect().height || 40;
-    const viewportHeight = this._viewportHeight();
-    const bodyAbove = !this.isCollapsed() && barTop + barHeight / 2 > viewportHeight / 2;
-    this.root.setAttribute('data-body-placement', bodyAbove ? 'above' : 'below');
+    this._bottomAnchored = false;
+    this._desiredAnchor = { left, top: barTop };
+    this._layout();
+  }
 
-    const clamped = this._clampPosition(left, barTop);
-    const rootHeight = this.root.getBoundingClientRect().height;
-    const rootTop = bodyAbove ? clamped.top - (rootHeight - barHeight) : clamped.top;
-    this.root.style.left = clamped.left + 'px';
-    this.root.style.top = rootTop + 'px';
+  _scheduleLayout() {
+    if (this._destroyed || this._layoutFrame !== null) return;
+    this._layoutFrame = requestAnimationFrame(() => {
+      this._layoutFrame = null;
+      if (!this._destroyed) this._layout();
+    });
+  }
+
+  _viewportBounds() {
+    const viewport = this._visualViewport;
+    const style = getComputedStyle(this.root);
+    const inset = (side) => Math.max(12,
+      parseFloat(style.getPropertyValue('--panel-safe-' + side)) || 0);
+    const left = (viewport?.offsetLeft || 0) + inset('left');
+    const top = (viewport?.offsetTop || 0) + inset('top');
+    const right = (viewport?.offsetLeft || 0) + (viewport?.width || window.innerWidth) - inset('right');
+    const bottom = (viewport?.offsetTop || 0) + (viewport?.height || window.innerHeight) - inset('bottom');
+    return { left, top, right, bottom };
+  }
+
+  _layout() {
+    const bounds = this._viewportBounds();
+    if (this.returnButton) {
+      this.returnButton.style.right = 'auto';
+      this.returnButton.style.bottom = 'auto';
+      this.returnButton.style.left = Math.max(bounds.left, bounds.right - 44) + 'px';
+      this.returnButton.style.top = Math.max(bounds.top, bounds.bottom - 44) + 'px';
+    }
+    const visible = !this.root.hidden && this.root.getBoundingClientRect().width > 0;
+    if (!visible) {
+      if (this.returnButton) this.returnButton.hidden = !this._lastUiConfig;
+      return;
+    }
+    this.root.style.maxWidth = Math.max(0, bounds.right - bounds.left) + 'px';
+    const barHeight = this.bar.getBoundingClientRect().height;
+    if (!barHeight) return;
+    if (!this._desiredAnchor) {
+      this._desiredAnchor = {
+        left: bounds.left,
+        top: this._bottomAnchored ? bounds.bottom - barHeight - 1 : bounds.top + 1,
+      };
+    }
+    const desired = this._desiredAnchor;
+    const top = Math.max(bounds.top + 1, Math.min(bounds.bottom - barHeight - 1,
+      this._bottomAnchored ? bounds.bottom - barHeight - 1 : desired.top));
+    const above = top + barHeight / 2 > (bounds.top + bounds.bottom) / 2;
+    this.root.setAttribute('data-body-placement', above ? 'above' : 'below');
+    const availableHeight = above ? top + barHeight - bounds.top + 1 : bounds.bottom - top + 1;
+    this.root.style.maxHeight = Math.max(barHeight + 2, availableHeight) + 'px';
+
+    const body = this.root.querySelector('#panel-body');
+    if (body) {
+      body.style.overflowY = 'visible';
+      if (body.scrollHeight > body.clientHeight + 1) body.style.overflowY = 'auto';
+    }
+    const rect = this.root.getBoundingClientRect();
+    const grip = this.grip.getBoundingClientRect();
+    const gripOffset = grip.left - rect.left;
+    const compact = window.matchMedia('(pointer: coarse), (max-width: 640px)').matches;
+    const minLeft = compact ? bounds.left : bounds.left - gripOffset;
+    const maxLeft = compact ? bounds.right - rect.width : bounds.right - gripOffset - grip.width;
+    const left = Math.max(minLeft, Math.min(maxLeft, desired.left));
+    const barOffset = this.bar.getBoundingClientRect().top - rect.top;
+    this.root.style.left = left + 'px';
+    this.root.style.top = (top - barOffset) + 'px';
+    if (this.returnButton) {
+      const atBottom = Math.abs(top + barHeight + 1 - bounds.bottom) <= 1 &&
+        left >= bounds.left && left + rect.width <= bounds.right + 1;
+      this.returnButton.hidden = atBottom;
+    }
     this._placeExtension();
     this.onLayoutChange();
   }
 
-  /**
-   * Keep at least a grip's worth of the panel on screen.
-   *
-   * Not the whole panel: on a phone the panel is nearly the full width, so
-   * demanding it fit entirely would stop the user pushing it aside to see the
-   * painting underneath. What must never happen is the panel becoming
-   * unreachable, and that means keeping the BAR visible, since the grip lives
-   * on it.
-   */
-  _clampPosition(left, barTop) {
-    const rect = this.root.getBoundingClientRect();
-    const barHeight = this.bar.getBoundingClientRect().height || 40;
-    const MIN_VISIBLE = 56;
-    const maxLeft = window.innerWidth - MIN_VISIBLE;
-    const maxTop = this._viewportHeight() - barHeight;
-
-    return {
-      left: Math.max(MIN_VISIBLE - rect.width, Math.min(maxLeft, left)),
-      top: Math.max(0, Math.min(maxTop, barTop)),
-    };
-  }
-
   clampIntoView() {
-    const rect = this.root.getBoundingClientRect();
-    this.moveTo(rect.left, this._barTop());
-  }
-
-  _viewportHeight() {
-    return window.visualViewport ? window.visualViewport.height : window.innerHeight;
+    this._layout();
   }
 
   _barTop() {
@@ -293,6 +417,7 @@ class ToolPanel {
   }
 
   refreshFluidUi() {
+    this._scheduleLayout();
     if (!this.extension) return;
     const available = this.extensionTabs.filter((tab) => !tab.hidden);
     const selected = available.find((tab) => tab.getAttribute('aria-selected') === 'true') || available[0];
@@ -473,7 +598,18 @@ class ToolPanel {
   }
 
   destroy() {
-    this._extensionResizeObserver?.disconnect();
+    this._destroyed = true;
+    this._layoutObserver?.disconnect();
+    if (this._layoutFrame !== null) cancelAnimationFrame(this._layoutFrame);
+    if (this._returnFrame !== null) cancelAnimationFrame(this._returnFrame);
+    this._unsubscribeUi?.();
+    for (const remove of this._listeners) remove();
+    this.grip.removeEventListener('click', this._onGripClick);
+    this.returnButton?.removeEventListener('click', this._onReturnClick);
+    this.returnButton?.removeEventListener('keydown', this._onReturnKey);
+    if (this.returnButton) this.returnButton.hidden = true;
+    this._visualViewport?.removeEventListener('resize', this._onWindowResize);
+    this._visualViewport?.removeEventListener('scroll', this._onWindowResize);
     window.removeEventListener('resize', this._onWindowResize);
     document.removeEventListener('fluid-ui-layout-changed', this._onFluidUiLayoutChanged);
   }

@@ -25,6 +25,11 @@
     -->
     <script type="text/template" id="main">
     <div id="canvas-cell"></div>
+    <button id="panel-return" type="button" hidden aria-label="Return tools to bottom" title="Return tools to bottom">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 5 4 10l5 5M4 10h10a5 5 0 0 1 0 10h-3"/>
+        </svg>
+    </button>
 
     <!--
       The floating tool panel. It sits OVER the canvas and is dragged by its
@@ -42,9 +47,14 @@
     <div id="ui" data-collapsed="true" hidden>
         <div id="panel-bar">
             <div id="bar-size-slider" class="slider" data-fluid-ui-feature="brush-size"></div>
-            <div id="panel-grip" title="Drag to move, tap to collapse">
-                <span></span><span></span><span></span>
-            </div>
+            <button id="panel-grip" type="button" aria-expanded="false" aria-controls="panel-body"
+                    aria-label="Expand tools; drag to move" title="Expand tools; drag to move">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <g fill="currentColor"><circle cx="8" cy="6" r="1.5"/><circle cx="16" cy="6" r="1.5"/>
+                    <circle cx="8" cy="12" r="1.5"/><circle cx="16" cy="12" r="1.5"/>
+                    <circle cx="8" cy="18" r="1.5"/><circle cx="16" cy="18" r="1.5"/></g>
+                </svg>
+            </button>
             <div id="bar-hue-stripe" data-fluid-ui-feature="color-picker"><div class="handle"></div></div>
             <button id="panel-extension-toggle" type="button"
                     aria-expanded="false" aria-controls="panel-extension"
