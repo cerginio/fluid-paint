@@ -38,6 +38,7 @@ const STROKE_VELOCITY_SCALE = 0.14;
 const STROKE_SETTLE_STEPS = 10;       // matches the harness's ten-RAF wait
 const STROKE_SPACING_FRACTION = 0.15; // 7.5 engine px at brush size 50
 const STROKE_MIN_SPACING = 1;         // never below one engine pixel
+const ERASER_FEATHER_FRACTION = 0.05; // eraser edge width, of its radius
 
 /*
  * The engine's own shader files, relative to fluid-engine/.
@@ -63,6 +64,7 @@ const ENGINE_SHADER_FILES = Object.freeze([
   'shaders/jacobi.frag',
   'shaders/subtract.frag',
   'shaders/resize.frag',
+  'shaders/erase.frag',
 
   'shaders/project.frag',
   'shaders/distanceconstraint.frag',
@@ -413,8 +415,15 @@ class FluidEngine {
   }
 
   /* Guard for the low-level primitives and for anything that would change the
-   * geometry a stroke already snapshotted. */
+   * geometry a stroke already snapshotted. An erase gesture holds a baseline
+   * of the paint at the current size, so it is guarded the same way. */
   _assertNoStroke(what) {
+    if (this.eraseActive) {
+      throw this._strokeError(
+        `FluidEngine: ${what} is not allowed while an erase gesture is active; ` +
+        'call endErase() first.'
+      );
+    }
     if (this.strokeActive) {
       throw this._strokeError(
         `FluidEngine: ${what} is not allowed while a named stroke is active; ` +
@@ -447,6 +456,9 @@ class FluidEngine {
   beginStroke({ x, y, pressure = 1, brushSize, paintingRectangle, color, resolutionScale = 1, spacing, timing = 'replay', brushShape = null, randomizeBristles = false, variation }) {
     if (this.strokeActive) {
       throw this._strokeError('FluidEngine: a stroke is already active; call endStroke() first.');
+    }
+    if (this.eraseActive) {
+      throw this._strokeError('FluidEngine: an erase gesture is active; call endErase() first.');
     }
 
     if (timing !== 'live' && timing !== 'replay') throw this._strokeError('Unknown stroke timing.');
@@ -722,6 +734,114 @@ class FluidEngine {
     return { steps, simulationUpdated };
   }
 
+  // --- Eraser -------------------------------------------------------------
+  //
+  // Removes paint and reveals the canvas, or the PNG background, underneath.
+  // It is not a brush: colour, opacity, bristles, fluidity and pressure do not
+  // apply, and it deposits no velocity.
+  //
+  // Beginning a gesture stops all fluid motion on the whole painting. That is
+  // deliberate: a hole cut into wet paint would otherwise be refilled by the
+  // flow around it within a second. Brush strokes start the fluid again.
+  //
+  // Each eraseTo() is applied immediately; there is no clock and nothing for
+  // advance() to do. One gesture is one baseline, so the edge is the same
+  // however the pointer was sampled, and holding still removes nothing more.
+
+  /** True while an erase gesture is running. */
+  get eraseActive() {
+    return this._erase !== null && this._erase !== undefined;
+  }
+
+  /** Eraser radius in world units for a brush size: the brush's own radius. */
+  static eraserRadius(brushSize) {
+    return brushSize;
+  }
+
+  /**
+   * Start an erase gesture with one round dab at (x, y).
+   * @param {object} options
+   * @param {number} options.brushSize  same units and meaning as beginStroke()
+   * @param {Rectangle} options.paintingRectangle  world-space painting bounds
+   * @param {boolean} [options.revealBackground]  edge rule for a PNG
+   *   background; defaults to whether one is installed. Fixed per gesture.
+   *   Only session replay should pass it.
+   */
+  beginErase({ x, y, brushSize, paintingRectangle, revealBackground }) {
+    if (this.eraseActive) {
+      throw this._strokeError('FluidEngine: an erase gesture is already active; call endErase() first.');
+    }
+    if (this.strokeActive) {
+      throw this._strokeError('FluidEngine: a stroke is active; call endStroke() first.');
+    }
+    this._validateNumber(x, 'x');
+    this._validateNumber(y, 'y');
+    this._validateNumber(brushSize, 'brushSize', { positive: true });
+    if (!paintingRectangle) throw this._strokeError('FluidEngine: paintingRectangle is required.');
+    this._validateNumber(paintingRectangle.width, 'paintingRectangle.width', { positive: true });
+    this._validateNumber(paintingRectangle.height, 'paintingRectangle.height', { positive: true });
+    this._validateNumber(paintingRectangle.left, 'paintingRectangle.left');
+    this._validateNumber(paintingRectangle.bottom, 'paintingRectangle.bottom');
+
+    const rectangle = {
+      left: paintingRectangle.left, bottom: paintingRectangle.bottom,
+      width: paintingRectangle.width, height: paintingRectangle.height,
+    };
+    const radius = FluidEngine.eraserRadius(brushSize);
+    // A narrow smooth edge: about 5% of the radius, but never under one or
+    // over three simulation texels, so it reads the same at every quality.
+    const texel = rectangle.width / this.simulator.resolutionWidth;
+    const feather = Math.min(radius, Math.max(texel, Math.min(3 * texel, ERASER_FEATHER_FRACTION * radius)));
+
+    if (revealBackground === undefined) revealBackground = !!this.renderer.hasBackground;
+    if (typeof revealBackground !== 'boolean') {
+      throw this._strokeError('FluidEngine: revealBackground must be boolean.');
+    }
+
+    this.simulator.beginErase();
+    this._erase = { brushSize, rectangle, radius, feather, revealBackground, last: { x, y } };
+    try {
+      this.simulator.eraseSegment({ x, y }, { x, y }, radius, feather, rectangle, revealBackground);
+    } catch (error) {
+      this._erase = null;
+      this.simulator.endErase();
+      throw error;
+    }
+    this._notify('onBeginErase', {
+      x, y, brushSize, revealBackground, paintingRectangle: { ...rectangle },
+    });
+    return { simulationUpdated: true };
+  }
+
+  /** Sweep the eraser from its last point to (x, y). */
+  eraseTo({ x, y }) {
+    if (!this.eraseActive) {
+      throw this._strokeError('FluidEngine: eraseTo() called with no active erase gesture.');
+    }
+    this._validateNumber(x, 'x');
+    this._validateNumber(y, 'y');
+    const erase = this._erase;
+    // Holding still changes nothing (the dab is already there), so skip the
+    // two passes the render loop's per-frame sync would otherwise cost.
+    if (x === erase.last.x && y === erase.last.y) return { simulationUpdated: false };
+    this.simulator.eraseSegment(erase.last, { x, y }, erase.radius, erase.feather,
+      erase.rectangle, erase.revealBackground);
+    erase.last = { x, y };
+    this._notify('onEraseTo', x, y);
+    return { simulationUpdated: true };
+  }
+
+  /** Finish the gesture and release its baseline. */
+  endErase() {
+    if (!this.eraseActive) {
+      throw this._strokeError('FluidEngine: endErase() called with no active erase gesture.');
+    }
+    this._erase = null;
+    this.simulator.endErase();
+    this._notify('onEndErase');
+    return { simulationUpdated: false };
+  }
+
   /** Brush height for a pressure, with the floor that keeps a light touch painting. */
   _strokeHeight(pressure) {
     return STROKE_HEIGHT_SCALE * this._stroke.brushSize * Math.max(pressure, STROKE_MIN_PRESSURE);
@@ -958,6 +1078,8 @@ class FluidEngine {
       if (cancel) {
         // No final contact or onEndStroke: the recorder rolls back too.
         this._stroke = null;
+        this._erase = null;
+        s.endErase();
         this._liveTarget = this._previousLiveTarget = undefined;
         for (const [name, texture] of Object.entries(transaction.textures)) {
           s.copyTexture(transaction.width, transaction.height, texture, s[name]);

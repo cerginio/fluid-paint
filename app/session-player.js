@@ -127,6 +127,7 @@ class SessionPlayer {
     const engine = this.engine;
     const header = this.header;
     if (engine.strokeActive) engine.endStroke();
+    if (engine.eraseActive) engine.endErase();
     const scale = header.effectiveResolutionScale || header.resolutionScale;
     const maxTexture = engine.capabilities.maxTextureSize;
     if (Math.ceil(header.painting.width * scale) > maxTexture || Math.ceil(header.painting.height * scale) > maxTexture) {
@@ -359,6 +360,14 @@ class SessionPlayer {
         engine.setBrush({ bristleCount: command.count });
         break;
       case 'path': engine.paintPathSegment(command.segment); break;
+      case 'erase': {
+        // Points are a flat [x0, y0, x1, y1, ...] list after the first dab.
+        engine.beginErase(command.params);
+        const points = command.points;
+        for (let i = 0; i + 1 < points.length; i += 2) engine.eraseTo({ x: points[i], y: points[i + 1] });
+        engine.endErase();
+        break;
+      }
       case 'story-baseline': {
         const rectangle = painter.paintingRectangle;
         if (!this._storyBaseline) {

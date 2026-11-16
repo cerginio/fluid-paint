@@ -122,6 +122,14 @@ class Simulator {
       shaderSources['shaders/resize.frag']
     );
 
+    this.eraseProgram = wgl.createProgram(
+      shaderSources['shaders/fullscreen.vert'],
+      shaderSources['shaders/erase.frag']
+    );
+
+    // Paint at the start of an erase gesture; null when no gesture is active.
+    this.eraseBaseline = null;
+
     // buffers
     this.quadVertexBuffer = wgl.createBuffer();
     wgl.bufferData(
@@ -629,6 +637,118 @@ class Simulator {
       .uniform4f('u_color', color[0], color[1], color[2], color[3]);
     wgl.drawArrays(drawState, wgl.TRIANGLE_STRIP, 0, 4);
     this.splatAreas.splice(0, 0, new SplatArea(area, this.frameNumber));
+  }
+
+  // --- Material eraser ---------------------------------------------------
+  //
+  // Three things made earlier white-cover attempts look wrong, and each has a
+  // rule here:
+  //
+  //  * Refill. advect() keeps moving paint wherever splatAreas are live, so a
+  //    hole cut into wet paint slides shut again. Beginning a gesture stops
+  //    ALL fluid motion: velocity, pressure, divergence and the active areas.
+  //    Nothing is left that can carry paint back in.
+  //  * Stale texels. advect() writes paintTextureTemp only inside the active
+  //    area, so outside it the two paint buffers can differ; a partial write
+  //    followed by a swap would expose that old copy. The gesture starts by
+  //    making both buffers identical and every segment updates both.
+  //  * Speed-dependent edges. See erase.frag: removal is measured against an
+  //    immutable baseline, so overlapping or repeated samples are idempotent.
+
+  /** Snapshot the paint and freeze the fluid. One call per gesture. */
+  beginErase() {
+    const wgl = this.wgl;
+    if (this.eraseBaseline) this.endErase();
+
+    this.eraseBaseline = wgl.buildTexture(
+      wgl.RGBA, this.paintTextureType,
+      this.resolutionWidth, this.resolutionHeight, null,
+      wgl.CLAMP_TO_EDGE, wgl.CLAMP_TO_EDGE, wgl.NEAREST, wgl.NEAREST
+    );
+    this.copyTexture(this.resolutionWidth, this.resolutionHeight, this.paintTexture, this.eraseBaseline);
+    this.copyTexture(this.resolutionWidth, this.resolutionHeight, this.paintTexture, this.paintTextureTemp);
+
+    this.clearTextures([
+      this.velocityTexture,
+      this.velocityTextureTemp,
+      this.divergenceTexture,
+      this.pressureTexture,
+      this.pressureTextureTemp,
+    ]);
+    this.splatAreas.length = 0;
+  }
+
+  /**
+   * Remove paint under a swept circle from `from` to `to` (world units, the
+   * same space as `brushRectangle`). `from === to` is a round dab.
+   */
+  eraseSegment(from, to, radius, feather, brushRectangle, revealBackground = false) {
+    if (!this.eraseBaseline) throw new Error('Simulator.eraseSegment() needs beginErase().');
+
+    // Texels whose centre can be touched, plus one for safety.
+    const area = new Rectangle(
+      Math.min(from.x, to.x) - radius,
+      Math.min(from.y, to.y) - radius,
+      Math.abs(to.x - from.x) + radius * 2,
+      Math.abs(to.y - from.y) + radius * 2
+    );
+    area.translate(-brushRectangle.left, -brushRectangle.bottom);
+    area.scale(this.resolutionWidth / brushRectangle.width,
+      this.resolutionHeight / brushRectangle.height);
+    area.left = Math.floor(area.left) - 1;
+    area.bottom = Math.floor(area.bottom) - 1;
+    area.width = Math.ceil(area.width) + 3;
+    area.height = Math.ceil(area.height) + 3;
+    area.intersectRectangle(new Rectangle(0, 0, this.resolutionWidth, this.resolutionHeight));
+    if (area.width <= 0 || area.height <= 0) return false;
+
+    const wgl = this.wgl;
+
+    // paint -> temp, inside the scissor only
+    wgl.framebufferTexture2D(this.simulationFramebuffer, wgl.FRAMEBUFFER,
+      wgl.COLOR_ATTACHMENT0, wgl.TEXTURE_2D, this.paintTextureTemp, 0);
+    const eraseDrawState = wgl.createDrawState()
+      .bindFramebuffer(this.simulationFramebuffer)
+      .viewport(0, 0, this.resolutionWidth, this.resolutionHeight)
+      .enable(wgl.SCISSOR_TEST)
+      .scissor(area.left, area.bottom, area.width, area.height)
+      .useProgram(this.eraseProgram)
+      .uniformTexture('u_paintTexture', 0, wgl.TEXTURE_2D, this.paintTexture)
+      .uniformTexture('u_baselineTexture', 1, wgl.TEXTURE_2D, this.eraseBaseline)
+      .uniform2f('u_resolution', this.resolutionWidth, this.resolutionHeight)
+      .uniform2f('u_paintingDimensions', brushRectangle.width, brushRectangle.height)
+      .uniform2f('u_paintingPosition', brushRectangle.left, brushRectangle.bottom)
+      .uniform2f('u_from', from.x, from.y)
+      .uniform2f('u_to', to.x, to.y)
+      .uniform1f('u_radius', radius)
+      .uniform1f('u_feather', feather)
+      .uniform1f('u_revealBackground', revealBackground ? 1 : 0)
+      .vertexAttribPointer(this.quadVertexBuffer,
+        this.eraseProgram.getAttribLocation('a_position'), 2, wgl.FLOAT, false, 0, 0);
+    wgl.drawArrays(eraseDrawState, wgl.TRIANGLE_STRIP, 0, 4);
+
+    // temp -> paint over the same rectangle: the two buffers stay identical,
+    // so whichever one a later advect() reads, it reads the erased paint.
+    wgl.framebufferTexture2D(this.simulationFramebuffer, wgl.FRAMEBUFFER,
+      wgl.COLOR_ATTACHMENT0, wgl.TEXTURE_2D, this.paintTexture, 0);
+    const copyDrawState = wgl.createDrawState()
+      .bindFramebuffer(this.simulationFramebuffer)
+      .viewport(0, 0, this.resolutionWidth, this.resolutionHeight)
+      .enable(wgl.SCISSOR_TEST)
+      .scissor(area.left, area.bottom, area.width, area.height)
+      .useProgram(this.copyProgram)
+      .uniformTexture('u_input', 0, wgl.TEXTURE_2D, this.paintTextureTemp)
+      .vertexAttribPointer(this.quadVertexBuffer,
+        this.copyProgram.getAttribLocation('a_position'), 2, wgl.FLOAT, false, 0, 0);
+    wgl.drawArrays(copyDrawState, wgl.TRIANGLE_STRIP, 0, 4);
+    return true;
+  }
+
+  /** Release the gesture's baseline. Safe to call with no gesture active. */
+  endErase() {
+    if (!this.eraseBaseline) return;
+    this.wgl.deleteTexture(this.eraseBaseline);
+    this.eraseBaseline = null;
   }
 
   /**

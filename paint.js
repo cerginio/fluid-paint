@@ -198,6 +198,14 @@ class Paint {
         this.brushX = 0;
         this.brushY = 0;
         this.brushScale = INITIAL_BRUSH_SCALE;
+        /* Which tool the NEXT manual press uses: 'brush' or 'eraser'. A press
+         * already in progress keeps its own operation -- end and cancel ask
+         * the engine what is active rather than reading this. The eraser
+         * shares brushScale: one size control, whichever tool is selected. */
+        this.activeTool = 'brush';
+        // 'mouse' | 'pen' | 'touch': the eraser circle follows a hovering
+        // mouse or pen, but a finger has no hover, so it shows only on contact.
+        this.lastPointerType = 'mouse';
         /* Bristle footprint for manual painting. null is the round default --
          * the engine treats a missing brushShape and an explicit null the same
          * way, so a host that never touches this paints exactly as before. */
@@ -310,6 +318,22 @@ class Paint {
                 element.setAttribute('aria-label', BRISTLE_SHAPES[index].name);
             });
         }
+
+        // One button in the always-visible bar flips Brush <-> Eraser.
+        this.toolToggle = document.getElementById('tool-toggle');
+        if (this.toolToggle) {
+            this.toolToggle.addEventListener('click', (event) => {
+                event.preventDefault();
+                this.setTool(this.activeTool === 'eraser' ? 'brush' : 'eraser');
+            });
+        }
+
+        // The eraser's footprint. A DOM circle rather than GL: it is chrome,
+        // must stay crisp above the canvas, and never needs a painting redraw.
+        this.eraserCursor = document.createElement('div');
+        this.eraserCursor.className = 'eraser-cursor';
+        this.eraserCursor.hidden = true;
+        document.body.appendChild(this.eraserCursor);
 
         /* Brush Angle (State tab): a shape-aware t in [0,1], not a raw radian
          * value -- see brushAngleToRotation() in paint-setup.js for why. */
@@ -634,6 +658,17 @@ class Paint {
                     this.redo();
                     break;
 
+                case 'KeyB':
+                case 'KeyE': {
+                    // Not while typing into a field (hex readout, file names).
+                    const target = e.target;
+                    if (target && (target.isContentEditable ||
+                        ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) break;
+                    if (e.ctrlKey || e.metaKey || e.altKey) break;
+                    this.setTool(e.code === 'KeyE' ? 'eraser' : 'brush');
+                    break;
+                }
+
                 default:
                     break;
             }
@@ -645,6 +680,11 @@ class Paint {
                 e.preventDefault();
             }
         });
+
+        // The eraser circle must not linger over the panel or outside the page.
+        this.pointerOverCanvas = false;
+        canvas.addEventListener('pointerenter', () => { this.pointerOverCanvas = true; });
+        canvas.addEventListener('pointerleave', () => { this.pointerOverCanvas = false; });
 
         canvas.addEventListener('contextmenu', (e) => {
             e.preventDefault();
@@ -907,6 +947,31 @@ class Paint {
     }
 
 
+    /**
+     * Place the eraser circle over the pointer, at the real footprint: the
+     * engine's radius in world units, through the view zoom, into CSS pixels.
+     * It follows mouseX/mouseY, the same point the stroke uses.
+     */
+    _drawEraserCursor(visible) {
+        const cursor = this.eraserCursor;
+        if (!visible) {
+            if (!cursor.hidden) cursor.hidden = true;
+            return;
+        }
+        // An active gesture keeps the size it began with; show that one.
+        const size = this.engine.eraseActive ? this.engine._erase.brushSize : this.brushScale;
+        const diameterCss = 2 * FluidEngine.eraserRadius(size) * this.viewport.viewScale /
+            this.viewport.pixelRatio;
+        const screen = this.viewport.worldToScreen(this.mouseX, this.mouseY);
+        const css = this.viewport.screenToCss(screen.x, screen.y);
+        const rect = this.canvas.getBoundingClientRect();
+        const style = cursor.style;
+        style.left = `${rect.left + css.x}px`;
+        style.top = `${rect.top + css.y}px`;
+        style.width = style.height = `${diameterCss}px`;
+        cursor.hidden = false;
+    }
+
     update() {
         const wgl = this.wgl;
         const storyOwnsBrush = this._storyOwnsBrush();
@@ -987,12 +1052,18 @@ class Paint {
         // The wheel is a real element now, so the browser hit-tests it and the
         // pointer never reaches the canvas at all. Same trade Phase 7 made when
         // it deleted the panel's geometric hit test.
-        if (
-            storyOwnsBrush ||
+        const toolVisible =
             this.interactionState === InteractionMode.PAINTING ||
             (this.interactionState === InteractionMode.NONE &&
-                this.desiredInteractionMode(this.mouseX, this.mouseY) === InteractionMode.PAINTING)
-        ) {
+                this.desiredInteractionMode(this.mouseX, this.mouseY) === InteractionMode.PAINTING);
+        // The eraser shows its footprint instead of bristles. A story owns
+        // the brush while it plays, so it always gets the bristles.
+        const erasing = !storyOwnsBrush && (this.engine.eraseActive ||
+            (this.activeTool === 'eraser' && !this.engine.strokeActive));
+        this._drawEraserCursor(erasing && toolVisible &&
+            (this.interactionState === InteractionMode.PAINTING ||
+                (this.lastPointerType !== 'touch' && this.pointerOverCanvas)));
+        if (storyOwnsBrush || (toolVisible && !erasing)) {
             // The bristle preview is chrome, but it is drawn from the engine's
             // own geometry, with this app's program and projection. That is the
             // one place chrome legitimately needs engine GL objects, so they
@@ -1055,7 +1126,7 @@ class Paint {
         } else if (this.interactionState === InteractionMode.NONE) {
             const desiredMode = this.desiredInteractionMode(this.mouseX, this.mouseY);
             if (desiredMode === InteractionMode.PAINTING) {
-                desiredCursor = 'crosshair';
+                desiredCursor = this.eraserCursor.hidden ? 'crosshair' : 'none';
             } else if (desiredMode === InteractionMode.RESIZING) {
                 desiredCursor = 'default';
             } else if (desiredMode === InteractionMode.PANNING) {
@@ -1065,7 +1136,7 @@ class Paint {
             }
         } else {
             if (this.interactionState === InteractionMode.PAINTING) {
-                desiredCursor = 'crosshair';
+                desiredCursor = this.eraserCursor.hidden ? 'crosshair' : 'none';
             } else if (this.interactionState === InteractionMode.RESIZING) {
                 desiredCursor = cursorForResizingSide(this.resizingSide);
             } else if (this.interactionState === InteractionMode.PANNING) {
@@ -1142,7 +1213,7 @@ class Paint {
      * skipped.
      */
     _applyBrushShapeLive() {
-        if (this.engine.strokeActive || !this.brushInitialized) return;
+        if (this._manualToolActive() || !this.brushInitialized) return;
         this.engine.initializeBrush(
             this.brushX,
             this.brushY,
@@ -1187,7 +1258,7 @@ class Paint {
         const c = this.storyPlaybackController;
         return {
             dirty: 'unknown',
-            active: !!(this._updateOperations || this.manualStrokeActive || this.engine.strokeActive ||
+            active: !!(this._updateOperations || this.manualStrokeActive || this._manualToolActive() ||
                 (this.sessionTools && this.sessionTools.hasUnsavedWork()) ||
                 this._manualInputPending || this.interactionState !== InteractionMode.NONE ||
                 !c || c.backgroundLoading || c._runPromise || ['loading', 'playing', 'paused'].includes(c.state)),
@@ -1612,10 +1683,66 @@ class Paint {
         return PaintColorAdapter.strokeColor(rgb, mix(minAlpha, maxAlpha, this.brushColorHSVA[3]));
     }
 
+    /**
+     * Select the tool for the next press. A press in progress is not changed:
+     * it keeps the operation it began with, so switching mid-drag (keyboard)
+     * cannot turn half a brush stroke into an erase.
+     */
+    setTool(tool) {
+        if (tool !== 'brush' && tool !== 'eraser') throw new Error(`Unknown tool ${tool}.`);
+        this.activeTool = tool;
+        if (this.toolToggle) {
+            const erasing = tool === 'eraser';
+            this.toolToggle.dataset.tool = tool;
+            this.toolToggle.setAttribute('aria-pressed', String(erasing));
+            this.toolToggle.title = erasing ? 'Eraser on -- tap for Brush (B)' : 'Brush -- tap for Eraser (E)';
+        }
+        this.needsRedraw = true;
+    }
+
+    /** True while a manual brush stroke OR erase gesture owns the engine. */
+    _manualToolActive() {
+        return this.engine.strokeActive || this.engine.eraseActive;
+    }
+
+    /** Move whichever manual operation is active. */
+    _manualToolTo(x, y, pressure) {
+        if (this.engine.eraseActive) {
+            // Erasing is applied immediately, not on the simulation clock.
+            if (this.engine.eraseTo({ x, y }).simulationUpdated) this.needsRedraw = true;
+        } else if (this.engine.strokeActive) {
+            this.engine.strokeTo({ x, y, pressure });
+        }
+    }
+
+    /** End whichever manual operation is active; a no-op when none is. */
+    _endManualTool() {
+        if (this.engine.eraseActive) this.engine.endErase();
+        else if (this.engine.strokeActive) this.engine.endStroke();
+    }
+
     /** Start the named stroke for a press that is actually painting. */
     _beginPaintStroke(pressure, pointerType) {
-        if (this.engine.strokeActive) {
+        if (this._manualToolActive()) {
             throw new Error('Cannot begin a manual stroke while another stroke owns the engine.');
+        }
+        if (this.activeTool === 'eraser') {
+            // The bristle preview still follows the pointer through advance(),
+            // so give it a real starting place rather than wherever it was.
+            if (!this.brushInitialized) {
+                this.engine.initializeBrush(this.brushX, this.brushY,
+                    this._brushHeight(1, pointerType), this.brushScale, this.brushShape);
+            }
+            this.engine.beginErase({
+                x: this.brushX,
+                y: this.brushY,
+                brushSize: this.brushScale,
+                paintingRectangle: this.paintingRectangle,
+            });
+            this.manualStrokeActive = true;
+            this.brushInitialized = true;
+            this.needsRedraw = true;
+            return;
         }
         this.engine.beginStroke({
             timing: 'live',
@@ -1657,6 +1784,7 @@ class Paint {
         }
 
         if (!this.manualPaintingEnabled) return;
+        if (event.pointerType) this.lastPointerType = event.pointerType;
 
         const storyNeedsYield = this.storyPlaybackController && [
             'playing', 'paused', 'stop-decision', 'completed',
@@ -1764,8 +1892,8 @@ class Paint {
         this.brushX = position.x;
         this.brushY = position.y;
         this.brushPressure = this._pressureScale(pt.pressure, pt.pointerType);
-        if (this.manualStrokeActive && this.engine.strokeActive) {
-            this.engine.strokeTo({ x: this.brushX, y: this.brushY, pressure: this.brushPressure });
+        if (this.manualStrokeActive) {
+            this._manualToolTo(this.brushX, this.brushY, this.brushPressure);
         }
     }
 
@@ -1788,12 +1916,8 @@ class Paint {
 
         if (this.interactionState === InteractionMode.PAINTING) {
             // Live input updates a mailbox; physics runs only in advance().
-            if (this.manualStrokeActive && this.engine.strokeActive) {
-                this.engine.strokeTo({
-                    x: this.brushX,
-                    y: this.brushY,
-                    pressure: this.brushPressure,
-                });
+            if (this.manualStrokeActive && this._manualToolActive()) {
+                this._manualToolTo(this.brushX, this.brushY, this.brushPressure);
                 this.needsRedraw = true;
             }
         } else if (!this.brushInitialized) {
@@ -1861,7 +1985,7 @@ class Paint {
             this._touchRecorder = this._touchCheckpoint = null;
             this.manualStrokeActive = false;
         } else if (this.manualStrokeActive) {
-            this.engine.endStroke();
+            this._endManualTool();
             this.manualStrokeActive = false;
         }
         this.interactionState = InteractionMode.NONE;
@@ -1931,6 +2055,7 @@ class Paint {
 
     onGestureHover = (event) => {
         const position = this._toWorld(event.x, event.y);
+        if (event.pointerType) this.lastPointerType = event.pointerType;
 
         this.brushX = position.x;
         this.brushY = position.y;
@@ -1958,7 +2083,7 @@ class Paint {
         // which the dispatcher reports as panend.
         if (this.manualStrokeActive) {
             try {
-                if (this.engine.strokeActive) {
+                if (this._manualToolActive()) {
                     if (this._touchTransaction) {
                         // Commit PRE-stroke paint only now; cancellation leaves
                         // the history ring and redo chain untouched.
@@ -1971,9 +2096,9 @@ class Paint {
                     if (Number.isFinite(event.centerX) && Number.isFinite(event.centerY)) {
                         const p = this._toWorld(event.centerX, event.centerY);
                         this.brushX = p.x; this.brushY = p.y;
-                        this.engine.strokeTo({ x: p.x, y: p.y, pressure: this.brushPressure });
+                        this._manualToolTo(p.x, p.y, this.brushPressure);
                     }
-                    this.engine.endStroke();
+                    this._endManualTool();
                     this.needsRedraw = true;
                 }
             } finally {
@@ -2160,7 +2285,7 @@ class Paint {
                 if (this.storyPlaybackController) {
                     await this.storyPlaybackController.yieldToManualInput();
                 }
-                if (this.engine.strokeActive) this.engine.endStroke();
+                this._endManualTool();
 
                 const { pixels, width, height } = this._bakeVisiblePainting();
                 this._recordSessionCommand({ op: 'bake' });

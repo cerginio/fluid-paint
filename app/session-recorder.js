@@ -32,6 +32,7 @@ class SessionRecorder {
   }
 
   _reset() {
+    this._eraseCommand = null;
     this.records = [];
     this._blocks = [];
     this._tickCount = 0;     // stroke ticks written so far
@@ -81,7 +82,7 @@ class SessionRecorder {
     this.bristleSeed = bristleSeed;
     this._prepare = prepare || (() => ({}));
     this.engine.setSessionObserver(this._observer);
-    if (this.engine.strokeActive) {
+    if (this.engine.strokeActive || this.engine.eraseActive) {
       this.state = 'waiting';
     } else {
       this._activate();
@@ -122,6 +123,7 @@ class SessionRecorder {
       return;
     }
     this.records.length = checkpoint.length;
+    this._eraseCommand = null;
     this._tickCount = checkpoint.ticks;
     this._strokeStart = checkpoint.strokeStart;
     this._pendingIdle = checkpoint.pendingIdle;
@@ -291,6 +293,30 @@ class SessionRecorder {
         this.records.push({ type: 'end' });
         this._inStroke = false;
         if (this.state === 'stopping') this._finish();
+      },
+
+      /* An erase gesture is one command, pushed when it BEGINS: beginErase()
+       * stops the fluid, so the idle ticks after it must replay after it too.
+       * The points are appended to that same record as the gesture moves --
+       * nothing runs between them that a replay could order differently. */
+      onBeginErase: (params) => {
+        if (this.state !== 'recording') return;
+        this._eraseCommand = { op: 'erase', params: JSON.parse(JSON.stringify(params)), points: [] };
+        this.command(this._eraseCommand);
+      },
+
+      onEraseTo: (x, y) => {
+        if (!this._eraseCommand || (this.state !== 'recording' && this.state !== 'stopping')) return;
+        this._eraseCommand.points.push(x, y);
+      },
+
+      onEndErase: () => {
+        this._eraseCommand = null;
+        if (this.state === 'waiting') {
+          queueMicrotask(() => {
+            if (this.state === 'waiting' && !this.engine.strokeActive && !this.engine.eraseActive) this._activate();
+          });
+        }
       },
 
       onPathSegment: (segment) => {
