@@ -91,8 +91,8 @@ const server = http.createServer((request, response) => {
         panelBottom: panelRect.bottom,
       };
     });
-    assert.ok(Math.abs(desktopPaintPanelFit.width - 450.8) < 0.1,
-      'both desktop paint-panel columns use the requested additional 1.2x width');
+    assert.ok(Math.abs(desktopPaintPanelFit.width - 496.4) < 0.1,
+      'the 1000px viewport uses the tablet panel width including the tool toggle');
     assert.ok(desktopPaintPanelFit.height <= 720 * 0.72 + 1,
       'wider paint panel with Iro fits within 72% of the desktop viewport');
     assert.notEqual(desktopPaintPanelFit.overflowY, 'auto',

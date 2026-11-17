@@ -235,6 +235,14 @@ html, body {
   touch-action: none;
 }
 
+.tile-grid-overlay {
+  pointer-events: none;
+}
+
+.tile-grid-overlay[hidden] {
+  display: none;
+}
+
 /* The focus cue deliberately sits outside #canvas-cell so it can follow a zoom
    pointer without being clipped at the canvas or painting edge. */
 .focus-overlay {

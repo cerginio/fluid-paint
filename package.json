@@ -24,6 +24,8 @@
     "clean": "gulp clean",
     "lint:shaders": "node debug/lint-shaders.js",
     "test:color": "node debug/color-parity-test.js",
+    "test:tile-grid": "node --test debug/tile-grid-test.js",
+    "test:tile-grid:export": "npm run build && node debug/tile-grid-export-test.js",
     "test:pwa-assets": "node --test debug/pwa-assets-test.js",
     "test:pwa-assets:browser": "node debug/pwa-assets-browser-test.js",
     "test:pwa-release": "node --test debug/pwa-release-test.js",

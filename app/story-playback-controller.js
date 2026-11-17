@@ -101,6 +101,7 @@ class StoryPlaybackController {
     const isPng = file && (file.type === 'image/png' || /\.png$/i.test(file.name || ''));
     if (isPng) return this.loadBackgroundFile(file);
     if (/\.flus$/i.test(file?.name || '')) return this.loadSessionFile(file);
+    this._fileOperations = (this._fileOperations || 0) + 1;
     try {
       const loaded = await StoryFileLoader.load(file);
       await this.loadModel(loaded.model, loaded.summary);
@@ -109,6 +110,8 @@ class StoryPlaybackController {
       if (this.model) this._emit();
       else this._setState('file-error');
       throw error;
+    } finally {
+      this._fileOperations--;
     }
   }
 

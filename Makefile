@@ -56,6 +56,7 @@ lint:
 	$(NPM) run lint:shaders
 
 test-fast:
+	$(NPM) run test:tile-grid
 	$(NPM) run lint:shaders
 	$(NPM) run test:color
 	$(NPM) run test:color-adapter
@@ -72,6 +73,7 @@ test-fast:
 	$(NPM) run test:pwa-activation
 
 test-browser:
+	$(NPM) run test:tile-grid:export
 	$(NPM) run test:shader-bundle:gpu
 	$(NPM) run test:color-adapter:gpu
 	$(NPM) run test:paint-palette:gpu

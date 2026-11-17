@@ -24,6 +24,15 @@ make verify
 If GNU Make is unavailable, use `npm ci`, `npx playwright install chromium`,
 `npm run dev`, and the npm test commands documented in the lifecycle guide.
 
+## Tile grids
+
+Press `G` to cycle square grid, hexagonal grid, and off. `+` / `-` (including
+NumPad) resize cells in 2 painting-pixel steps. The inner dashed contour marks
+the exported tile boundary. With a grid enabled, PNG export keeps only these
+interiors and makes the gaps transparent; partial edge cells are clipped to the
+painting. With the grid off, PNG export includes the whole painting. Guides and
+export masks never modify the original paint.
+
 ## Documentation
 
 - [Development, testing, build, CI, and deployment lifecycle](docs/SDLC.md)

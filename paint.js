@@ -15,6 +15,7 @@ class Paint {
         this.canvas = canvas;
         this.wgl = wgl;
         this.container = (options && options.container) || null;
+        this.tileGrid = new TileGrid(canvas);
 
         // Debug instrumentation flags, read once from ?debug= (see
         // debug/debug-flags.js). Read here and branched on at construction so a
@@ -658,6 +659,25 @@ class Paint {
                     this.redo();
                     break;
 
+                case 'KeyG':
+                case 'Equal':
+                case 'Minus':
+                case 'NumpadAdd':
+                case 'NumpadSubtract': {
+                    const target = e.target;
+                    if (target && (target.isContentEditable ||
+                        ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) break;
+                    if (e.ctrlKey || e.metaKey || e.altKey) break;
+                    if (e.code === 'KeyG') this.tileGrid.cycle();
+                    else {
+                        if (this.tileGrid.mode === 'off') break;
+                        const delta = e.code === 'Minus' || e.code === 'NumpadSubtract' ? -2 : 2;
+                        this.tileGrid.resize(delta, this.paintingRectangle.height);
+                    }
+                    e.preventDefault();
+                    break;
+                }
+
                 case 'KeyB':
                 case 'KeyE': {
                     // Not while typing into a field (hex readout, file names).
@@ -1028,6 +1048,8 @@ class Paint {
         // presented every frame -- the chrome below is drawn over it and is
         // not part of the painting texture.
         this.engine.present(this.canvasTexture, this.canvas.width, this.canvas.height);
+        this.tileGrid.draw(this.canvas, activeDisplayPaintingRectangle,
+            this.viewport.pixelRatio, this.viewport.viewScale);
 
         // --- everything below here is UI chrome, and belongs to the app ---
 
@@ -1261,7 +1283,7 @@ class Paint {
             active: !!(this._updateOperations || this.manualStrokeActive || this._manualToolActive() ||
                 (this.sessionTools && this.sessionTools.hasUnsavedWork()) ||
                 this._manualInputPending || this.interactionState !== InteractionMode.NONE ||
-                !c || c.backgroundLoading || c._runPromise || ['loading', 'playing', 'paused'].includes(c.state)),
+                !c || c.backgroundLoading || c._fileOperations || c._runPromise || ['loading', 'playing', 'paused'].includes(c.state)),
             operations: this._updateOperations || 0,
             playback: c?.state || 'unknown',
         };
@@ -1291,7 +1313,8 @@ class Paint {
                 resolutionScale: this.resolutionScale,
                 colorModel: FluidEngine.COLOR_MODEL.RGB,
             });
-            const saveCanvas = this._pixelsToCanvas(savePixels, saveWidth, saveHeight);
+            const saveCanvas = this._pixelsToCanvas(savePixels, saveWidth, saveHeight, true);
+            this.tileGrid.maskExport(saveCanvas, saveWidth, saveHeight);
             return await new Promise((resolve, reject) => saveCanvas.toBlob((blob) => {
                 if (blob) resolve(blob);
                 else reject(new Error('Fluid Paint could not encode the PNG export.'));
@@ -1340,11 +1363,11 @@ class Paint {
         setTimeout(() => URL.revokeObjectURL(url), 0);
     }
 
-    _pixelsToCanvas(pixels, width, height) {
+    _pixelsToCanvas(pixels, width, height, alpha = false) {
         const bitmapCanvas = document.createElement('canvas');
         bitmapCanvas.width = width;
         bitmapCanvas.height = height;
-        const context = bitmapCanvas.getContext('2d', { alpha: false });
+        const context = bitmapCanvas.getContext('2d', { alpha });
         if (!context) throw new Error('A 2D canvas is required to create the bitmap.');
         const imageData = context.createImageData(width, height);
         imageData.data.set(pixels);

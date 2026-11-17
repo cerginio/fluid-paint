@@ -165,7 +165,12 @@ async function main() {
       fs.appendFileSync(shader, `\n// ${marker}\n`);
       await until(() => fs.readFileSync(path.join(root, 'dist/bundle.js'), 'utf8').includes(marker), 'shader rebuild');
       result.shaderWatch = { marker, bundleContainsMarker: true };
-    } finally { fs.writeFileSync(shader, original); }
+    } finally {
+      // Chokidar coalesces rapid atomic changes. Let the completed marker write
+      // settle before restoring, so the restore emits its own change event.
+      await sleep(1000);
+      fs.writeFileSync(shader, original);
+    }
     await until(() => fs.readFileSync(devBundlePath).equals(originalDevBundle), 'complete shader restore rebuild');
     // Wait for the stream write/task and chokidar's atomic-write window to
     // settle before the independent manifest edit (absence during truncation

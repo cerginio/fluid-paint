@@ -38,6 +38,7 @@ const paths = {
     'debug/painting-rect-overlay.js',
     'debug/brush-center-marker.js',
     'app/focus-overlay.js',
+    'app/tile-grid.js',
     'debug/gpu-profiles.js',
     'debug/texture-selftest.js',
     'debug/device-diag.js',
