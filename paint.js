@@ -694,7 +694,7 @@ class Paint {
         this.saveButton = document.getElementById('save-button');
         if (this.saveButton) {
             this.saveButton.addEventListener('click', () => {
-                this.save('painting.png');
+                this.save();
             });
         }
 
@@ -1300,7 +1300,16 @@ class Paint {
         } finally { this._updateOperations--; }
     }
 
-    async save(name = 'painting.png') {
+    _nextPngFilename(date = new Date()) {
+        const pad = (value) => String(value).padStart(2, '0');
+        const timestamp = `${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}`;
+        this._pngSaveCount = this._pngSaveTimestamp === timestamp ? this._pngSaveCount + 1 : 0;
+        this._pngSaveTimestamp = timestamp;
+        const suffix = this._pngSaveCount ? `-${this._pngSaveCount}` : '';
+        return `painting-${timestamp}${suffix}.png`;
+    }
+
+    async save(name) {
         if (this.updateApplying) throw new Error('Update applying');
         this._updateOperations = (this._updateOperations || 0) + 1;
         try {
@@ -1312,7 +1321,7 @@ class Paint {
             if ([137,80,78,71,13,10,26,10].some((byte, i) => signature[i] !== byte)) {
                 throw new Error('Invalid PNG signature');
             }
-            this.downloadBlob(blob, name);
+            this.downloadBlob(blob, name === undefined ? this._nextPngFilename() : name);
             return blob;
 
         } finally { this._updateOperations--; }

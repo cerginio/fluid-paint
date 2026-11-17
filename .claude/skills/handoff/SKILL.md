@@ -120,7 +120,10 @@ repository rule "do not commit unless asked" is satisfied by it.
 In order:
 
 1. Update `HANDOFF.md`: remove notes like "the owner has not run QA",
-   update the phase log in `QA.md`, strike through the closed items.
+   update the phase log in `QA.md` (the acceptance record — date, counts,
+   probe time — goes there), edit the map rows of the subsystems the phase
+   changed and the baseline line, strike through the closed items. See
+   [Writing the handoff](#writing-the-handoff-step-7).
 2. Commit. No `Co-Authored-By`. If the changes form several meaningful
    groups, split them into commits rather than piling them into one.
 3. Say what is done and end the reply with the `/clear` block — see
@@ -155,12 +158,19 @@ the **start of the item**, `^~~<number>.`, not by a whole
 marker are almost always split by a line break, so the whole pattern gives 0
 on a real file.
 
+The reminder also arises on size, because the what-works table is never
+struck through and the count above does not see it: the live `HANDOFF.md`
+is over **40 KB**, or its what-works section is over **30 %** of the file.
+Measure in bytes, not lines — a wide table of 64 rows can be 49 KB.
+
 If there are **more than 3**, or the file itself had to be read in parts
-because of its size, add one sentence at the end of the reply, in the report
-language: "the `HANDOFF.md` of topic `<topic>` already has N closed phases;
-`handoff-archive <topic>` can archive them" — and continue the step (start or
-next) as usual, without waiting for a reaction to that sentence. Below the
-threshold say nothing; do not report "no archiving needed".
+because of its size, or a size threshold is crossed, add one sentence at the
+end of the reply, in the report language: "the `HANDOFF.md` of topic
+`<topic>` already has N closed phases / is N KB, of which the map is M KB;
+`handoff-archive <topic>` can archive or compress it" (name the reason that
+applies) — and continue the step (start or next) as usual, without waiting
+for a reaction to that sentence. Below the threshold say nothing; do not
+report "no archiving needed".
 
 ## At the start of a phase (steps 2-3)
 
@@ -422,25 +432,103 @@ State as of <date>. <branch / what is committed and what is not>.
 
 > **Next:** <the next file or phase>
 
-## What works
-<table file | state>
-
-## Measured facts
-<numbers, not impressions; keep refuted hypotheses explicitly>
-
 ## OPEN — start here
 <numbered items; strike closed ones through, do not delete them>
+
+## What works
+Baseline (<phase>, <date>): guard …, focused …, probe …
+<table subsystem | where (files, symbols) | contract | check>
+
+## Measured facts
+<one statement per line: [trigger] what is true → what to do>
 ```
+
+The open items come first so that a file read in parts shows the next step
+in its first part. Existing files are not reordered for this alone — only
+new ones and those that go through `handoff-archive`.
+
+Every section has one job. The open items say what to do; the map says where
+the code is and what holds it; the facts say where the next agent will go
+wrong without knowing. The history of acceptance and decisions is not a job
+of the live file — it is in the `QA.md` phase log, the archive, the spec and
+git. **The live file keeps only what changes what the next phase does.**
 
 Rules:
 
 - **Numbers, not adjectives.** "7 fps on 47k tiles", not "slow".
-- **Keep refuted hypotheses.** Otherwise the next agent will check them again.
 - **Strike closed items through** (`~~1. ...~~ — CLOSED`, or the topic
   language's form from [Anchors](#anchors)), do not erase them: visible
   history.
 - Do not retell what is already in the spec — refer to it (`SPEC.md §7`).
 - Language — by the [document language rule](#document-language).
+
+### The what-works map
+
+One row per **subsystem**, not per phase:
+
+```markdown
+| Subsystem | Where (files, symbols) | Contract | Check |
+| --- | --- | --- | --- |
+| Catalog: reading | `src/catalog/routes.ts` (`catalogRoutes`), `device-proof.ts` (`ROUTE_POLICIES`, policy `public`) | CAT SPEC §8.2 | `test/catalog-api.test.ts` |
+```
+
+- **A phase that changed a subsystem edits its row.** A new row appears only
+  for a new subsystem. Appending a row per phase turns the map into a log
+  that every next phase pays to read in full.
+- **No phase ID, date, "accepted by the owner", test counts, probe time or
+  regression runs in a row.** That is the acceptance record; it goes into
+  the `QA.md` phase log, which this step updates anyway.
+- **"Where" lists entry points** — the paths and symbols an agent starts
+  from without walking the tree — not every file the work touched. A
+  non-obvious rule of the code that names do not show ("the mixer goes
+  through `simple_palette_color_select`") is one sentence in the row, or a
+  reference in the contract column to the spec or an invariant.
+- **Keep a row compact** — about 400 characters. A longer one means the
+  subsystem should be split or the detail moved into the spec.
+- **The baseline is one line above the table**, replaced every phase. A
+  count from an old phase is not a current result (see
+  [Eval](#eval-step-4)), so the live file keeps no baseline history.
+
+### Measured facts
+
+One statement per line, with a trigger — the moment it applies (a file, a
+symbol, a tool, an action):
+
+```markdown
+- [<trigger>] <what is true> → <what to do>. (<phase>)
+```
+
+Three kinds:
+
+| kind | example | required |
+|---|---|---|
+| trap | `[Vite dev, long session] module "does not provide an export" → touch the file` | the action after `→` |
+| refuted | `[step-up probe] a virtual authenticator does not take focus, Windows Hello does → only a manual pass sees the race; auth/api.test.js holds the regression` | what was refuted and what proved it |
+| measurement | `[document key] 4 696 tiles — 8.3 ms, 46 861 — 98.1 ms` | the number with its conditions |
+
+- **Keep refuted hypotheses** — otherwise the next agent will check them
+  again — but as a statement with what refuted it, not as a story.
+- **One statement, one line.** A paragraph of several independent facts is
+  not written.
+- **No `→` and no number — not written.** "Not reproduced", "not
+  classified" belong in the phase log, not here.
+- **A rejected design stays only as a trap.** "Rejected X" goes into the
+  facts only if it can be written as `[when doing X] X breaks because Y → do
+  Z` (an in-process exchange loses the approval on restart; PoP in
+  `preHandler` sees an already parsed body → tee stream in `preParsing`).
+  "Chose Y over X" without a failure mechanism is the history of a decision:
+  what was chosen is visible in the code, and an agent implementing the spec
+  is unlikely to propose the rejected option. It goes into the spec or the
+  phase decisions by the topic registry, not into the live `HANDOFF.md`.
+- **Group by trigger, not by phase**: `### Stand and tools` and
+  `### <subsystem>` with the same names as in the map. An agent touching a
+  subsystem reads its group.
+- **Before adding, look for the same statement under the same conditions.**
+  A match means updating that entry. The same trigger alone is not a
+  duplicate: one tool can have several independent traps.
+- **A lesson about a shared tool** goes into the shared notes when the
+  repository's `AGENTS.md` names them, with a link left under
+  `### Stand and tools`. With no such notes it stays in the group.
 
 Commit only after the person's go-ahead (`handoff:next`), without
 `Co-Authored-By`.
