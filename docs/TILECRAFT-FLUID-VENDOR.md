@@ -2,7 +2,7 @@
 
 This repository vendors one indivisible Tilecraft protocol set:
 
-| Fluid Paint path | Tilecraft source at commit 9fcbc5f |
+| Fluid Paint path | Tilecraft source at commit 294c7509 |
 | --- | --- |
 | vendor/tilecraft/message-api.js | tilecraft/lib/message-api.js |
 | vendor/tilecraft/fluid-model.js | tilecraft/lib/fluid-model.js |

@@ -97,7 +97,12 @@
 
         async openMode(options) {
             if (!this.api) throw fluidError("NOT_CONNECTED", "Fluid bridge is not connected");
-            const result = await this.api.call("fluid-player", "api.fluid.openMode", options, { timeoutMs: 12000 });
+            const api = this.api;
+            const result = await api.call("fluid-player", "api.fluid.openMode", options, { timeoutMs: 12000 });
+            if (this.api !== api) throw fluidError("OPEN_CANCELLED", "Fluid session closed during opening");
+            if (this.currentTransferId && this.currentTransferId !== result.transferId) {
+                throw fluidError("STALE_TRANSFER", "Fluid opening response does not belong to the requested scene");
+            }
             this.currentTransferId = result.transferId;
             return result;
         }
@@ -324,12 +329,17 @@
             backgroundMode = "reference",
             streamOrder,
             modelViewport,
+            waitForReady = false,
+            onTransferCreated = () => {},
+            onSceneLoaded = null,
         } = {}) {
             const transferId = crypto.randomUUID();
             this.currentTransferId = transferId;
             for (const [id, slot] of this.pending) {
                 if (id === transferId) continue;
                 slot.background?.close?.();
+                clearTimeout(slot.readyTimeout);
+                slot.rejectReady?.(fluidError("STALE_TRANSFER", "Fluid scene was superseded"));
                 this.pending.delete(id);
             }
             this.pending.set(transferId, {
@@ -339,8 +349,19 @@
                 activated: false,
                 failed: false,
                 modelViewport: modelViewport ? { ...modelViewport } : null,
+                onSceneLoaded,
             });
+            const slot = this.pending.get(transferId);
+            const ready = waitForReady ? new Promise((resolve, reject) => {
+                slot.resolveReady = resolve;
+                slot.rejectReady = reject;
+                slot.readyTimeout = setTimeout(() => {
+                    void this._fail(transferId, fluidError("SCENE_TIMEOUT", "Fluid scene opening timed out"));
+                }, 10000);
+            }) : null;
+            ready?.catch(() => {});
             try {
+                onTransferCreated(transferId);
                 await this.api.call("editor", "api.fluid.requestScene", {
                     transferId,
                     frameId,
@@ -349,8 +370,9 @@
                     streamOrder,
                     modelViewport,
                 }, { timeoutMs: 8000 });
+                if (ready) await ready;
             } catch (error) {
-                await this._fail(transferId, error);
+                if (this.pending.has(transferId)) await this._fail(transferId, error);
                 throw error;
             }
             return transferId;
@@ -402,13 +424,17 @@
                 if (slot.model) await this.controller.loadModel(slot.model);
                 if (slot.background) await this.controller.setBackgroundImage(slot.background);
             }
-            if (transferId !== this.currentTransferId) {
+            if (transferId !== this.currentTransferId || slot.failed) {
                 slot.background?.close?.();
                 this.pending.delete(transferId);
                 return;
             }
+            await slot.onSceneLoaded?.(transferId);
+            if (transferId !== this.currentTransferId || slot.failed) return;
             await this.api.call("editor", "api.fluid.sceneReady", { transferId });
             this.onSceneReady({ transferId });
+            clearTimeout(slot.readyTimeout);
+            slot.resolveReady?.();
             this.pending.delete(transferId);
         }
 
@@ -418,6 +444,8 @@
             if (slot?.failed) return;
             if (slot) {
                 slot.failed = true;
+                clearTimeout(slot.readyTimeout);
+                slot.rejectReady?.(error);
                 slot.background?.close?.();
                 this.pending.delete(transferId);
             }
@@ -435,7 +463,11 @@
         dispose() {
             this.offAssembled?.();
             this.unexposeTransferFailed?.();
-            for (const slot of this.pending.values()) slot.background?.close?.();
+            for (const slot of this.pending.values()) {
+                slot.background?.close?.();
+                clearTimeout(slot.readyTimeout);
+                slot.rejectReady?.(fluidError("OPEN_CANCELLED", "Fluid session closed during opening"));
+            }
             this.pending.clear();
             this.currentTransferId = null;
         }
@@ -513,14 +545,23 @@
         }
         if (controlApi) {
             unexpose.push(api.expose("api.fluid.openMode", async (payload = {}) => {
+                const hasVersion = Object.prototype.hasOwnProperty.call(payload, "defaultsVersion");
+                const hasValues = Object.prototype.hasOwnProperty.call(payload, "defaults");
+                const hasDefaults = hasVersion || hasValues;
+                if (hasDefaults && typeof controlApi.completeOpening !== "function") {
+                    throw fluidError("UNSUPPORTED_DEFAULTS_VERSION", "Rescript defaults require an updated Fluid Paint build");
+                }
                 const definition = controlApi.configureMode(payload.mode, {
                     palette: payload.palette,
                     reducedMotion: payload.reducedMotion,
                     allowDrawing: payload.allowDrawing,
                     autoplay: payload.autoplay,
                     playbackSpeed: payload.playbackSpeed,
+                    ...(hasVersion ? { defaultsVersion: payload.defaultsVersion } : {}),
+                    ...(hasValues ? { defaults: payload.defaults } : {}),
                 });
                 if (uiApi) await uiApi.configure(definition.ui);
+                let defaultsReceipt;
                 const transferId = await client.requestScene({
                     frameId: payload.frameId,
                     wants: [...definition.wants],
@@ -528,10 +569,16 @@
                     modelViewport: typeof controller.getModelViewport === "function"
                         ? controller.getModelViewport(24)
                         : undefined,
+                    waitForReady: hasDefaults,
+                    onTransferCreated: (id) => controlApi.activateTransfer(id),
+                    onSceneLoaded: hasDefaults ? async (id) => {
+                        defaultsReceipt = await controlApi.completeOpening(id);
+                    } : null,
                 });
-                controlApi.activateTransfer(transferId);
                 return { accepted: true, transferId, mode: payload.mode, uiState: uiApi?.getState() || null,
-                    uiLayoutVersion: layoutApi ? 1 : null };
+                    uiLayoutVersion: layoutApi ? 1 : null,
+                    ...(hasDefaults ? { defaultsVersion: defaultsReceipt?.defaultsVersion,
+                        appliedDefaults: defaultsReceipt?.appliedDefaults } : {}) };
             }));
             unexpose.push(api.expose("api.fluid.control", (payload) => controlApi.execute(payload)));
             unexpose.push(api.expose("api.fluid.getModeState", (payload = {}) => {

@@ -2,6 +2,111 @@
 
 const assert = require('node:assert/strict');
 const { FluidControlApi, hexToPaintHsva } = require('../app/fluid-control-api.js');
+const fs = require('node:fs');
+const path = require('node:path');
+const Paint = new Function('FluidControlApi', 'Utilities', 'MIN_BRUSH_SCALE', 'MAX_BRUSH_SCALE',
+  'MAX_EXTERNAL_BRUSH_SCALE', 'MIN_BRISTLE_COUNT', 'MAX_BRISTLE_COUNT',
+  fs.readFileSync(path.join(__dirname, '../paint.js'), 'utf8') + '\nreturn Paint;')(
+  FluidControlApi, { clamp: (value, min, max) => Math.max(min, Math.min(max, value)) }, 5, 75, 112.5, 10, 160);
+
+async function checkDefaults(controller) {
+  const painter = Object.create(Paint.prototype);
+  painter.engine = {
+    fluidity: 0.7, bristleCount: 12,
+    setSimulation({ fluidity }) { this.fluidity = fluidity; },
+    setBrush({ bristleCount }) { this.bristleCount = bristleCount; },
+  };
+  painter.brushScale = 32;
+  painter.brushColorHSVA = [0, 1, 1, 1];
+  const slider = () => ({ div: { setAttribute() {} }, setValue(value) { this.value = value; } });
+  for (const name of ['fluiditySlider', 'bristleCountSlider', 'brushSizeSlider', 'barSizeSlider']) painter[name] = slider();
+  const api = new FluidControlApi(painter, controller);
+  const defaults = { fluidity: 0.9, bristleCount: 40, brushSize: 75 };
+  api.configureMode('fluid-rescript', { defaultsVersion: 1, defaults });
+  assert.equal(painter.manualPaintingEnabled, false);
+  assert.equal(painter.engine.bristleCount, 12, 'defaults wait for the loaded scene');
+  api.activateTransfer('defaults-1');
+  await assert.rejects(api.execute({ transferId: 'defaults-1', command: 'setPaintSize', value: 30 }), { code: 'MODE_OPENING' });
+  assert.throws(() => api.completeOpening('old'), { code: 'STALE_TRANSFER' });
+  assert.deepEqual(api.completeOpening('defaults-1'), { defaultsVersion: 1, appliedDefaults: defaults });
+  assert.equal(painter.manualPaintingEnabled, true);
+  assert.equal(painter.engine.fluidity, 0.9);
+  assert.equal(painter.engine.bristleCount, 40);
+  assert.equal(painter.brushScale, 75);
+  assert.equal(painter.fluiditySlider.value, 0.9);
+  assert.equal(painter.bristleCountSlider.value, Math.sqrt((40 - 10) / 150));
+  assert.equal(painter.brushSizeSlider.value, 75);
+  assert.equal(painter.barSizeSlider.value, 75);
+
+  const before = () => ({ state: api.getState(), manual: painter.manualPaintingEnabled,
+    pending: api.pendingDefaults, receipt: api.defaultsReceipt });
+  const invalid = [
+    { defaultsVersion: 1 }, { defaults }, { defaultsVersion: 2, defaults },
+    { defaultsVersion: '1', defaults }, { defaultsVersion: null, defaults },
+    ...[null, [], 'bad', { ...defaults, extra: 1 }, {}, Object.create({ ...defaults })]
+      .map(value => ({ defaultsVersion: 1, defaults: value })),
+  ];
+  for (const [field, values] of Object.entries({
+    fluidity: [0.099, 0.901, '0.9', null, NaN, Infinity],
+    bristleCount: [9, 161, 40.5, '40', null, NaN, Infinity],
+    brushSize: [4.99, 112.51, '75', null, NaN, Infinity],
+  })) {
+    for (const value of values) invalid.push({ defaultsVersion: 1, defaults: { ...defaults, [field]: value } });
+    const missing = { ...defaults }; delete missing[field];
+    invalid.push({ defaultsVersion: 1, defaults: missing });
+  }
+  for (const [index, options] of invalid.entries()) {
+    const snapshot = before();
+    assert.throws(() => api.configureMode('fluid-rescript', options));
+    assert.deepEqual(before(), snapshot, 'invalid RPC preserves previous session and painter');
+    if (index >= 5) assert.throws(() => painter.applyFluidDefaults(options.defaults));
+    assert.deepEqual(before(), snapshot, 'invalid painter input is checked before any mutation');
+  }
+  const snapshot = before();
+  assert.throws(() => api.configureMode('fluid-play', { defaultsVersion: 1, defaults }), { code: 'DEFAULTS_NOT_ALLOWED' });
+  assert.deepEqual(before(), snapshot);
+
+  let notifications = 0;
+  api.subscribe(() => { notifications++; });
+  painter.setPaintSize(80);
+  assert.equal(api.getState().paintSize, 80);
+  assert.equal(painter.brushSizeSlider.value, 80);
+  assert.equal(painter.barSizeSlider.value, 80);
+  assert.ok(notifications > 0);
+  painter.engine.setSimulation({ fluidity: 0.4 });
+  painter.engine.setBrush({ bristleCount: 60 });
+  painter._notifyPaintParameters();
+  assert.equal(api.getState().fluidity, 0.4);
+  assert.equal(api.getState().bristleCount, 60);
+  api.completeOpening('defaults-1');
+  assert.equal(painter.engine.fluidity, 0.4, 'opening receipt is idempotent; later changes survive');
+  assert.equal(painter.brushScale, 80);
+
+  for (const values of [{ fluidity: 0.1, bristleCount: 10, brushSize: 5 },
+    { fluidity: 0.9, bristleCount: 160, brushSize: 112.5 }]) {
+    api.configureMode('fluid-rescript', { defaultsVersion: 1, defaults: values });
+    api.activateTransfer('boundary');
+    assert.deepEqual(api.completeOpening('boundary').appliedDefaults, values);
+  }
+  api.configureMode('fluid-rescript', { defaultsVersion: 1, defaults });
+  api.activateTransfer('reentry');
+  assert.deepEqual(api.completeOpening('reentry').appliedDefaults, defaults);
+
+  const apply = painter.applyFluidDefaults;
+  api.configureMode('fluid-rescript', { defaultsVersion: 1, defaults });
+  api.activateTransfer('failure');
+  painter.applyFluidDefaults = () => { throw new Error('GPU apply failed'); };
+  assert.throws(() => api.completeOpening('failure'), /GPU apply failed/);
+  assert.equal(painter.manualPaintingEnabled, false);
+  assert.equal(api.defaultsReceipt, null);
+  painter.applyFluidDefaults = () => ({ ...defaults, brushSize: 74 });
+  assert.throws(() => api.completeOpening('failure'), { code: 'FLUID_DEFAULTS_NOT_APPLIED' });
+  assert.equal(painter.manualPaintingEnabled, false);
+  painter.applyFluidDefaults = apply;
+  api.dispose();
+  assert.equal(painter.paintParameterListeners.size, 0);
+  console.log(`Fluid defaults API: ${invalid.length} invalid payloads, boundaries/lifecycle/real Paint adapter/state PASS`);
+}
 
 function hsvToChannels([h, s, v]) {
   const c = v * s;
@@ -101,6 +206,7 @@ function hsvToChannels([h, s, v]) {
   });
   api.dispose();
   assert.equal(controllerListener, null);
+  await checkDefaults(controller);
   console.log('Fluid control API: PASS');
 })().catch((error) => {
   console.error(error);

@@ -250,6 +250,7 @@ class Paint {
             0.9,
             (fluidity) => {
                 this.engine.setSimulation({ fluidity });
+                this._notifyPaintParameters();
             },
             { label: 'Paint Fluidity', step: 0.01, formatValue: (fluidity) => fluidity.toFixed(2) }
         );
@@ -267,11 +268,10 @@ class Paint {
                     MIN_BRISTLE_COUNT + t * (MAX_BRISTLE_COUNT - MIN_BRISTLE_COUNT)
                 );
                 this.engine.setBrush({ bristleCount });
+                this._notifyPaintParameters();
             },
             {
-                formatValue: (t) => String(Math.floor(
-                    MIN_BRISTLE_COUNT + Math.pow(t, 2) * (MAX_BRISTLE_COUNT - MIN_BRISTLE_COUNT)
-                )),
+                formatValue: () => String(this.engine.bristleCount),
                 label: 'Bristle Count',
                 step: 0.01,
             }
@@ -288,6 +288,7 @@ class Paint {
                 // value, so whichever is not being dragged has to follow or
                 // they disagree the moment the panel is collapsed or expanded.
                 if (this.barSizeSlider) this.barSizeSlider.setValue(size);
+                this._notifyPaintParameters();
             },
             { label: 'Brush Size', step: 1, formatValue: (size) => `${Math.round(size)} px` }
         );
@@ -829,6 +830,7 @@ class Paint {
                 (size) => {
                     this.brushScale = size;
                     if (this.brushSizeSlider) this.brushSizeSlider.setValue(size);
+                    this._notifyPaintParameters();
                 },
                 { label: 'Brush Size', step: 1, formatValue: (size) => `${Math.round(size)} px` }
             )
@@ -2304,6 +2306,7 @@ class Paint {
         );
         this.brushSizeSlider.setValue(this.brushScale);
         if (this.barSizeSlider) this.barSizeSlider.setValue(this.brushScale);
+        this._notifyPaintParameters();
     }
 
     // --- Editing & history ---
@@ -2532,9 +2535,35 @@ class Paint {
     setPaintSize(value) {
         if (!Number.isFinite(value)) throw new TypeError('Paint size must be a finite number.');
         this.brushScale = Utilities.clamp(value, MIN_BRUSH_SCALE, MAX_EXTERNAL_BRUSH_SCALE);
-        this.brushSizeSlider?.setValue(this.brushScale);
-        this.barSizeSlider?.setValue(this.brushScale);
+        for (const slider of [this.brushSizeSlider, this.barSizeSlider]) {
+            if (!slider) continue;
+            slider.maxValue = Math.max(MAX_BRUSH_SCALE, this.brushScale);
+            slider.div.setAttribute('aria-valuemax', String(slider.maxValue));
+            slider.setValue(this.brushScale);
+        }
+        this._notifyPaintParameters();
         return this.brushScale;
+    }
+
+    applyFluidDefaults(defaults) {
+        const { fluidity, bristleCount, brushSize } = FluidControlApi.validateDefaults(defaults);
+        this.engine.setSimulation({ fluidity });
+        this.engine.setBrush({ bristleCount });
+        this.fluiditySlider?.setValue(this.engine.fluidity);
+        this.bristleCountSlider?.setValue(Math.sqrt(
+            (this.engine.bristleCount - MIN_BRISTLE_COUNT) / (MAX_BRISTLE_COUNT - MIN_BRISTLE_COUNT)));
+        this.setPaintSize(brushSize);
+        return { fluidity: this.engine.fluidity, bristleCount: this.engine.bristleCount, brushSize: this.brushScale };
+    }
+
+    subscribePaintParameters(listener) {
+        this.paintParameterListeners ??= new Set();
+        this.paintParameterListeners.add(listener);
+        return () => this.paintParameterListeners.delete(listener);
+    }
+
+    _notifyPaintParameters() {
+        this.paintParameterListeners?.forEach(listener => listener());
     }
 
     /** Take an undo snapshot: before a stroke, a resize, or a story run. */

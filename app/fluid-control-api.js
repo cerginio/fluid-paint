@@ -46,6 +46,19 @@
   }
 
   class FluidControlApi {
+    static validateDefaults(defaults) {
+      if (!defaults || typeof defaults !== 'object' ||
+          ![Object.prototype, null].includes(Object.getPrototypeOf(defaults)) ||
+          Reflect.ownKeys(defaults).length !== 3 ||
+          !['fluidity', 'bristleCount', 'brushSize'].every(key => Object.hasOwn(defaults, key)) ||
+          !Number.isFinite(defaults.fluidity) || defaults.fluidity < 0.1 || defaults.fluidity > 0.9 ||
+          !Number.isInteger(defaults.bristleCount) || defaults.bristleCount < 10 || defaults.bristleCount > 160 ||
+          !Number.isFinite(defaults.brushSize) || defaults.brushSize < 5 || defaults.brushSize > 112.5) {
+        throw controlError('INVALID_FLUID_DEFAULTS', 'Invalid Fluid brush defaults');
+      }
+      return { fluidity: defaults.fluidity, bristleCount: defaults.bristleCount, brushSize: defaults.brushSize };
+    }
+
     constructor(painter, controller) {
       this.painter = painter;
       this.controller = controller;
@@ -57,17 +70,30 @@
       this.autoplay = true;
       this.listeners = new Set();
       this.unsubscribeController = controller.subscribe(() => this._emit());
+      this.unsubscribePainter = painter.subscribePaintParameters?.(() => this._emit());
     }
 
-    configureMode(mode, {
-      palette = [],
-      reducedMotion = false,
-      allowDrawing = true,
-      autoplay = true,
-      playbackSpeed = 1,
-    } = {}) {
+    configureMode(mode, options = {}) {
+      const {
+        palette = [],
+        reducedMotion = false,
+        allowDrawing = true,
+        autoplay = true,
+        playbackSpeed = 1,
+        defaultsVersion,
+        defaults,
+      } = options;
       const definition = MODES[mode];
       if (!definition) throw controlError('UNKNOWN_FLUID_MODE', `Unknown Fluid mode: ${String(mode)}`);
+      const hasVersion = Object.hasOwn(options, 'defaultsVersion');
+      const hasDefaults = Object.hasOwn(options, 'defaults');
+      let preparedDefaults = null;
+      if (hasVersion || hasDefaults) {
+        if (mode !== 'fluid-rescript') throw controlError('DEFAULTS_NOT_ALLOWED', 'Defaults are only allowed in Fluid Rescript');
+        if (!hasVersion || !hasDefaults) throw controlError('INVALID_FLUID_DEFAULTS', 'Defaults and defaultsVersion are both required');
+        if (defaultsVersion !== 1) throw controlError('UNSUPPORTED_DEFAULTS_VERSION', 'Unsupported Fluid defaults version');
+        preparedDefaults = FluidControlApi.validateDefaults(defaults);
+      }
       if (!Array.isArray(palette)) throw controlError('INVALID_PALETTE', 'palette must be an array');
       if (palette.some((color) => typeof color !== 'string' ||
           (color !== 'white' && color !== 'black' && !/^#[0-9a-f]{6}$/i.test(color)))) {
@@ -75,9 +101,11 @@
       }
       this.mode = mode;
       this.transferId = null;
+      this.pendingDefaults = preparedDefaults;
+      this.defaultsReceipt = null;
       this.allowDrawing = mode === 'fluid-rescript' ? true : !!allowDrawing;
       this.autoplay = mode === 'fluid-play' ? autoplay !== false : false;
-      const manualEnabled = mode === 'fluid-rescript' || this.allowDrawing;
+      const manualEnabled = !preparedDefaults && (mode === 'fluid-rescript' || this.allowDrawing);
       if (typeof this.painter.setManualPaintingEnabled === 'function') {
         this.painter.setManualPaintingEnabled(manualEnabled);
       } else {
@@ -91,6 +119,24 @@
       this.palette = [...palette];
       this._emit();
       return definition;
+    }
+
+    completeOpening(transferId) {
+      if (!this.transferId || transferId !== this.transferId) {
+        throw controlError('STALE_TRANSFER', 'Defaults do not belong to the active Fluid scene');
+      }
+      if (this.defaultsReceipt) return this.defaultsReceipt;
+      if (!this.pendingDefaults) return null;
+      const actual = this.painter.applyFluidDefaults(this.pendingDefaults);
+      const appliedDefaults = FluidControlApi.validateDefaults(actual);
+      if (!Object.keys(this.pendingDefaults).every(key => appliedDefaults[key] === this.pendingDefaults[key])) {
+        throw controlError('FLUID_DEFAULTS_NOT_APPLIED', 'Fluid brush defaults were not applied exactly');
+      }
+      this.defaultsReceipt = { defaultsVersion: 1, appliedDefaults };
+      this.pendingDefaults = null;
+      this.painter.setManualPaintingEnabled(true);
+      this._emit();
+      return this.defaultsReceipt;
     }
 
     activateTransfer(transferId) {
@@ -117,6 +163,7 @@
         });
       }
       const definition = MODES[this.mode];
+      if (this.pendingDefaults) throw controlError('MODE_OPENING', 'Fluid defaults are not confirmed yet');
       if (!definition?.commands.includes(command) && command !== 'setReducedMotion') {
         throw controlError('CONTROL_NOT_ALLOWED', `Command ${String(command)} is not allowed in ${this.mode}`);
       }
@@ -177,6 +224,8 @@
         } : null,
         progress: { ...view.progress },
         paintSize: this.painter.brushScale,
+        fluidity: this.painter.engine?.fluidity,
+        bristleCount: this.painter.engine?.bristleCount,
         paintColor: this.painter.adhocPaintColor || [...this.painter.brushColorHSVA],
         palette: [...this.palette],
         reducedMotion: this.reducedMotion,
@@ -190,6 +239,7 @@
       else this.painter.manualPaintingEnabled = true;
       if (typeof document !== 'undefined') document.documentElement.removeAttribute('data-reduced-motion');
       this.unsubscribeController?.();
+      this.unsubscribePainter?.();
       this.listeners.clear();
     }
   }
